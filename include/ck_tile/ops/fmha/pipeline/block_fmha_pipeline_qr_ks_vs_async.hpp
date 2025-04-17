@@ -232,6 +232,7 @@ struct BlockFmhaPipelineQRKSVSAsync
         // TODO: we use async Copy for K, which is inline asm
         // a side effect is we have to use inline asm for q as well
         auto q = decltype(load_tile(q_dram_window)){};
+        // CK_TILE_PRINT<decltype(q)>();
         // TODO: start from rocm-6.2, compiler will have problem if manually set clear of q.
         // however, q would be cleared in the constructor of static distributed tensor
         // set_tile(q, number<0>{}); // use per-dword clear to avoid scratch
@@ -252,6 +253,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
         using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
+        // CK_TILE_PRINT<MLBlockTileType>();
 
         // init Oacc, M, L
         auto o_acc = OaccBlockTileType{};

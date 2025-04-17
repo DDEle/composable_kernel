@@ -14,7 +14,7 @@ else
     REST_ARGS=
 fi
 
-cmake                                                                                             \
+cmake  -GNinja                                                                                           \
 -D CMAKE_PREFIX_PATH=/opt/rocm/                                                                   \
 -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc                                                         \
 -D CMAKE_CXX_FLAGS="-std=c++17 -O3 -ftemplate-backtrace-limit=0  -fPIE  -Wno-gnu-line-marker"     \
