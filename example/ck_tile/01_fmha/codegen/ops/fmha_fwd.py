@@ -101,7 +101,7 @@ float fmha_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_fwd_args a)
     auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<k_>(a);
     constexpr dim3 blocks             = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    printf(__FILE__ "\\n");
+    printf("\\n" __FILE__ "\\n");
     return ck_tile::launch_kernel(s, ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs));
 }}
 """
@@ -414,18 +414,19 @@ class FmhaFwdKernel:
 def get_fmha_fwd_tile_dict_from_dtype(dtype : str) -> Optional[dict]:
     if dtype == 'fp16' or dtype == 'bf16':
         return {
-            '32'  : FmhaFwdTileSize(128, 64,  16, 32,  32,  32,   2, 1, 1,  2, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
-            '64'  : FmhaFwdTileSize(128, 64,  32, 64,  32,  64,   4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
-        ### '96'  : FmhaFwdTileSize(128, 128, 32, 128, 32,  96,   4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
-            '128' : FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
-            '192' : FmhaFwdTileSize(128, 128, 32, 128, 32,  192,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
-            '256' : FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+            (32, 32)  : FmhaFwdTileSize(128, 64,  16, 32,  32,  32,   2, 1, 1,  2, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+            (64, 64)  : FmhaFwdTileSize(128, 64,  32, 64,  32,  64,   4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+        ### (96, 96)  : FmhaFwdTileSize(128, 128, 32, 128, 32,  96,   4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+            (128,128) : FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+            (192,128) : FmhaFwdTileSize(128, 128, 32, 128, 32,  192,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+            (192,192) : FmhaFwdTileSize(128, 128, 32, 192, 32,  192,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+            (256,256) : FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
         }
     elif dtype == 'fp8' or dtype == 'bf8':
         return {
-            '64'  : FmhaFwdTileSize(128, 64,  32, 64,  32,  64,   2, 1, 1,  2, 1, 1,  32, 32, 32,  32, 32, 32,  -1),
-            '128' : FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1),
-            '256' : FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1),
+            (64,64 )  : FmhaFwdTileSize(128, 64,  32, 64,  32,  64,   2, 1, 1,  2, 1, 1,  32, 32, 32,  32, 32, 32,  -1),
+            (128,128) : FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1),
+            (256,256) : FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1),
         }
     else:
         return None
@@ -433,7 +434,7 @@ def get_fmha_fwd_tile_dict_from_dtype(dtype : str) -> Optional[dict]:
 def get_fwd_blobs(kernel_filter : Optional[str], receipt, mask_impl) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
     # TODO: we don't support tuning yet, so pick up one value for vlayout/pipeline/pad
     #       support this in future
-    def get_pipelines(dtype, hdim) -> List[FmhaFwdPipeline]:
+    def get_pipelines(dtype, hdim, hdim_v) -> List[FmhaFwdPipeline]:
         # this function will populate a list possible pipelines
         # TODO: the order of List matters! the later in this list will be also be checked later
         # TODO: currently for qr pipeline, let 't' padding to appear later!!
@@ -442,7 +443,7 @@ def get_fwd_blobs(kernel_filter : Optional[str], receipt, mask_impl) -> Tuple[Fm
         pipelines = []
         if dtype in ['fp16', 'bf16']:
             for mask, bias, lse, dropout in itertools.product(get_mask_map(mask_impl).keys(), BIAS_MAP.keys(), ["t", "f"], ["t", "f"]):
-                if hdim == 256:
+                if hdim == 256 and hdim_v:
                 # if True:
                     pipelines.append(FmhaFwdPipeline('qr', 'row', 'f', 'f', 'f', 'f', bias, lse, dropout, squant, mask))
                     pipelines.append(FmhaFwdPipeline('qr', 'col', 'f', 'f', 'f', 'f', bias, lse, dropout, squant, mask))
@@ -486,15 +487,13 @@ def get_fwd_blobs(kernel_filter : Optional[str], receipt, mask_impl) -> Tuple[Fm
         if d == None:
             continue
         #for hdim_str, mode, mask, bias, lse in itertools.product(d.keys(), MODE_MAP.keys(), MASK_MAP.keys(), ["t", "f"], ["t", "f"]):
-        for hdim_str, mode in itertools.product(d.keys(), MODE_MAP.keys()):
-            tile = d[hdim_str]
-            hdim = int(hdim_str)
-            for pipeline in get_pipelines(dtype, hdim):
+        for ((hdim, hdim_v), tile), mode in itertools.product(d.items(), MODE_MAP.keys()):
+            for pipeline in get_pipelines(dtype, hdim, hdim_v):
                 if mode == "group":
                     if pipeline.F_spad != 't' or pipeline.F_skpad != 't':
                         # in group mode, spad/skpad must be true, since we can't predict if seqlen of current batch need pad or not
                         continue
-                if hdim == 192 and tile.F_bn1 == 128:
+                if hdim == 192 and hdim_v == 128 or hdim == 192:
                     # NOTE: this is used to speedup deepseek prefill case, we don't gen training
                     if pipeline.F_bias != 'no' or pipeline.F_lse == 't' or pipeline.F_dropout == 't':
                         continue

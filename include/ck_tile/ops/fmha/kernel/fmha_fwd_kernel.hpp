@@ -1062,7 +1062,8 @@ struct FmhaFwdKernel
                 number<FmhaPipeline::kAlignmentQ>{},
                 number<1>{});
             if constexpr(FmhaPipeline::kQLoadOnce)
-            {
+            {   
+                // CK_TILE_PRINT<FmhaPipeline::kM0, FmhaPipeline::kSubQKHeaddim, kPadSeqLenQ, kPadHeadDimQ>();
                 return pad_tensor_view(
                     q_dram_naive,
                     make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kSubQKHeaddim>{}),

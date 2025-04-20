@@ -33,6 +33,8 @@ execute_process(
   --api bwd --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt --receipt 3
   RESULT_VARIABLE ret
 )
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/generate.py)
+
 if(ret AND NOT ret EQUAL 0)
   message( FATAL_ERROR "CK Tile FMHA FAILED to genrate a list of BWD kernels via Python.")
 endif()
@@ -44,12 +46,14 @@ file(STRINGS ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt FMHA_BWD_GEN_BLOBS)
 
 add_custom_command(
   OUTPUT ${FMHA_FWD_GEN_BLOBS}
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fwd_blob_list.txt
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --api ${FMHA_FWD_APIS} --output_dir ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 add_custom_command(
   OUTPUT ${FMHA_BWD_GEN_BLOBS}
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --api bwd --output_dir ${CMAKE_CURRENT_BINARY_DIR} --receipt 3
 )
@@ -60,7 +64,7 @@ set(EXAMPLE_FMHA_FWD "tile_example_fmha_fwd")
 message("adding example ${EXAMPLE_FMHA_FWD}")
 add_executable(${EXAMPLE_FMHA_FWD} EXCLUDE_FROM_ALL fmha_fwd.cpp)
 target_include_directories(${EXAMPLE_FMHA_FWD} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-# target_sources(${EXAMPLE_FMHA_FWD} PRIVATE ${FMHA_FWD_GEN_BLOBS})
+target_sources(${EXAMPLE_FMHA_FWD} PRIVATE ${FMHA_FWD_GEN_BLOBS})
 
 set(EXAMPLE_FMHA_BWD "tile_example_fmha_bwd")
 # not using add_example_executable() to add this target, since we don't want this to have

@@ -3,14 +3,6 @@
 
 #pragma once
 
-// #define CK_TILE_MARKER(message) [[deprecated(message)]]
-// template <auto val>
-// CK_TILE_MARKER("Help function to print value")
-// inline constexpr void CK_TILE_PRINT() {}
-// template <typename type>
-// CK_TILE_MARKER("Help function to print type")
-// inline constexpr void CK_TILE_PRINT() {}
-
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/epilogue.hpp"
