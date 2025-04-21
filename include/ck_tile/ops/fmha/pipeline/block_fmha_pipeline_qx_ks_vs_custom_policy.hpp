@@ -785,7 +785,6 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
         {
             constexpr index_t N1 = GetAlignmentV<Problem>();
             constexpr index_t N0 = kNPerBlock / N1; // P
-            // CK_TILE_PRINT<kNPerBlock, kKPerBlock, kBlockSize, N1>();
 
             constexpr index_t total_pixels = kNPerBlock * kKPerBlock / kBlockSize;
             static_assert(total_pixels % N1 == 0); // TODO: this is not always true?
