@@ -418,6 +418,7 @@ def get_fmha_fwd_tile_dict_from_dtype(dtype : str) -> Optional[dict]:
             (64, 64)  : FmhaFwdTileSize(128, 64,  32, 64,  32,  64,   4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
         ### (96, 96)  : FmhaFwdTileSize(128, 128, 32, 128, 32,  96,   4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
             (128,128) : FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+            (160,160) : FmhaFwdTileSize(128, 128, 32, 160, 32,  160,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  1),
             (192,128) : FmhaFwdTileSize(128, 128, 32, 128, 32,  192,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
             (192,192) : FmhaFwdTileSize(128, 128, 32, 192, 32,  192,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  1),
             (256,256) : FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
@@ -493,7 +494,7 @@ def get_fwd_blobs(kernel_filter : Optional[str], receipt, mask_impl) -> Tuple[Fm
                     if pipeline.F_spad != 't' or pipeline.F_skpad != 't':
                         # in group mode, spad/skpad must be true, since we can't predict if seqlen of current batch need pad or not
                         continue
-                if hdim == 192: # and hdim_v = 192 or 128
+                if hdim in (160, 192):
                     # NOTE: this is used to speedup deepseek prefill case, we don't gen training
                     if pipeline.F_bias != 'no' or pipeline.F_lse == 't' or pipeline.F_dropout == 't':
                         continue
