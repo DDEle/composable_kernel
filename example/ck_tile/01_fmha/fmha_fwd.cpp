@@ -1103,6 +1103,56 @@ bool run(const ck_tile::ArgParser& arg_parser)
         fmha_fwd_args fmha_args;
         init_args(fmha_args);
 
+        // using fmha_dtype_0 = FmhaFwdFp16;
+        // using fmha_block_tile_0 = ck_tile::sequence<128, 128, 32, 128, 32, 128>;
+        // using fmha_shape_0 = ck_tile::TileFmhaShape<fmha_block_tile_0,
+        //                                     ck_tile::sequence<4, 1, 1>,
+        //                                     ck_tile::sequence<32, 32, 16>,
+        //                                     ck_tile::sequence<4, 1, 1>,
+        //                                     ck_tile::sequence<32, 32, 16>,
+        //                                     true>;
+        // using fmha_trait_0 = ck_tile::TileFmhaTraits<true,
+        //                                                     false,
+        //                                                     true,
+        //                                                     true,
+        //                                                     ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+        //                                                     false,
+        //                                                     false,
+        //                                                     false,
+        //                                                     false,
+        //                                                     -1>;
+        // using fmha_mask_0 = ck_tile::SimplifiedGenericAttentionMask<false>;
+        // using fmha_pipeline_problem_0 = ck_tile::BlockFmhaPipelineProblem<
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::QDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::KDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::VDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::SaccDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::SMPLComputeDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::BiasDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::RandValOutputDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::LSEDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::PDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::OaccDataType,
+        //     typename FmhaFwdTypeConfig<fmha_dtype_0>::ODataType,
+        //     fmha_shape_0,
+        //     false,
+        //     fmha_mask_0,
+        //     fmha_trait_0>;
+        // using fmha_pipeline_0 = ck_tile::BlockFmhaPipelineQRKSVSAsync<
+        //     fmha_pipeline_problem_0>;
+        // using fmha_epilogue_0 =
+        //     ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<FmhaFwdFp16>::OaccDataType,
+        //                                         typename FmhaFwdTypeConfig<FmhaFwdFp16>::ODataType,
+        //                                         true, true>>;
+        // using k_ = ck_tile::FmhaFwdKernel<fmha_pipeline_0, fmha_epilogue_0>;
+
+        
+        // auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<k_>(fmha_args);
+        // constexpr dim3 blocks             = k_::BlockSize();
+        // constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+        // printf( "\n" __FILE__ "\n");
+        // return ck_tile::launch_kernel(stream_config, ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs));
+
         return fmha_fwd(fmha_traits, fmha_args, stream_config);
     }();
 
