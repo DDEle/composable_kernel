@@ -384,13 +384,36 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t N0 = kBlockSize / get_warp_size();
         constexpr index_t N2 = kNPerBlock / (N1 * N0);
 
-        return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<N0, N1, N2>, sequence<K0, K1>>,
-                                       tuple<sequence<1>, sequence<1, 2>>,
-                                       tuple<sequence<0>, sequence<1, 0>>,
-                                       sequence<1, 2>,
-                                       sequence<2, 1>>{});
+        // CK_TILE_PRINT<kNPerBlock, kKPerBlock, -1, N0, N1, N2, -1, K0, K1>();
+
+        if constexpr(get_warp_size() % K0 == 0 && kNPerBlock % (N1 * N0) == 0)
+        {
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<>,
+                                           tuple<sequence<N0, N1, N2>, sequence<K0, K1>>,
+                                           tuple<sequence<1>, sequence<1, 2>>,
+                                           tuple<sequence<0>, sequence<1, 0>>,
+                                           sequence<1, 2>,
+                                           sequence<2, 1>>{});
+        }
+        else
+        {
+            constexpr index_t kKPerIter = 32;
+            static_assert(kKPerBlock % kKPerIter == 0);
+            constexpr index_t K0_m = kKPerBlock / kKPerIter;
+            constexpr index_t K2   = 2;
+            constexpr index_t K1_m = kKPerIter / K2;
+            constexpr index_t N1_m = get_warp_size() / K1_m;
+            constexpr index_t N2_m = kNPerBlock / (N1_m * N0);
+            return make_static_tile_distribution(
+                tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<N0, N1_m, N2_m>, sequence<K0_m, K1_m, K2>>,
+                    tuple<sequence<1>, sequence<1, 2>>, // N0, N1 K1
+                    tuple<sequence<0>, sequence<1, 1>>,
+                    sequence<2, 1, 2>, // K0 N2 K2
+                    sequence<0, 2, 2>>{});
+        }
     }
 
     template <typename Problem>
@@ -430,13 +453,40 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t M0 = kBlockSize / get_warp_size();
         constexpr index_t M2 = kMPerBlock / (M1 * M0);
 
-        return make_static_tile_distribution(
+        constexpr auto dist = make_static_tile_distribution(
             tile_distribution_encoding<sequence<>,
                                        tuple<sequence<M0, M1, M2>, sequence<K0, K1>>,
                                        tuple<sequence<1>, sequence<1, 2>>,
                                        tuple<sequence<0>, sequence<1, 0>>,
                                        sequence<1, 2>,
                                        sequence<2, 1>>{});
+        if constexpr(dist.get_lengths()[number<0>{}] == kMPerBlock &&
+                     dist.get_lengths()[number<1>{}] == kKPerBlock)
+        {
+            return dist;
+        }
+        else
+        {
+            // something not divisible, try a more flexible distribution
+            constexpr index_t kKPerIter = 32;
+            static_assert(kKPerBlock % kKPerIter == 0);
+            constexpr index_t K0_m = kKPerBlock / kKPerIter;
+            constexpr index_t K2   = 2;
+            constexpr index_t K1_m = kKPerIter / K2;
+            constexpr index_t M1_m = get_warp_size() / K1_m;
+            constexpr index_t M2_m = kMPerBlock / (M1_m * M0);
+            constexpr auto dist_m  = make_static_tile_distribution(
+                tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<M0, M1_m, M2_m>, sequence<K0_m, K1_m, K2>>,
+                    tuple<sequence<1>, sequence<1, 2>>, // <M>0, <M>1 K1
+                    tuple<sequence<0>, sequence<1, 1>>,
+                    sequence<2, 1, 2>, // K0 M2 K2
+                    sequence<0, 2, 2>>{});
+            static_assert(dist_m.get_lengths()[number<0>{}] == kMPerBlock &&
+                          dist_m.get_lengths()[number<1>{}] == kKPerBlock);
+            return dist_m;
+        }
     }
 
     template <typename Problem>
@@ -902,6 +952,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     {
         constexpr index_t kBlockSize = Problem::kBlockSize;
 
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
 
         constexpr index_t K1 = GetAlignmentK<Problem>();
@@ -909,14 +960,36 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t N2 = GetTransposedAlignmentK<Problem>();
         constexpr index_t N1 = get_warp_size() / K0;
         constexpr index_t N0 = kBlockSize / get_warp_size();
+        static_assert(get_warp_size() % K0 != 0 || N1 * N0 * N2 == kNPerBlock);
 
-        return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<N0, N1, N2>, sequence<K0, K1>>,
-                                       tuple<sequence<1>, sequence<1, 2>>,
-                                       tuple<sequence<0>, sequence<1, 0>>,
-                                       sequence<2, 1>,
-                                       sequence<1, 2>>{});
+        if constexpr(get_warp_size() % K0 == 0 && N1 * N0 * N2 == kNPerBlock)
+        {
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<>,
+                                           tuple<sequence<N0, N1, N2>, sequence<K0, K1>>,
+                                           tuple<sequence<1>, sequence<1, 2>>,
+                                           tuple<sequence<0>, sequence<1, 0>>,
+                                           sequence<2, 1>,
+                                           sequence<1, 2>>{});
+        }
+        else
+        {
+            constexpr index_t kKPerIter = 32;
+            static_assert(kKPerBlock % kKPerIter == 0);
+            constexpr index_t K0_m = kKPerBlock / kKPerIter;
+            constexpr index_t K2   = 2;
+            constexpr index_t K1_m = kKPerIter / K2;
+            constexpr index_t N1_m = get_warp_size() / K1_m;
+            constexpr index_t N2_m = kNPerBlock / (N1_m * N0);
+            return make_static_tile_distribution(
+                tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<N0, N1_m, N2_m>, sequence<K0_m, K1_m, K2>>,
+                    tuple<sequence<1>, sequence<1, 2>>, // N0, N1 K1
+                    tuple<sequence<0>, sequence<1, 1>>,
+                    sequence<2, 2, 1>, // K0 N2 <=> K2
+                    sequence<0, 2, 2>>{});
+        }
     }
 
     template <typename Problem>
@@ -1026,23 +1099,20 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeShuffledQRegWriteBlockDescriptor()
     {
-        constexpr index_t kBlockSize = Problem::kBlockSize;
-
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
-
-        constexpr index_t K1 = GetAlignmentQ<Problem>();
-        constexpr index_t K0 = kKPerBlock / K1;
-        constexpr index_t N2 = GetTransposedAlignmentQ<Problem>();
-        constexpr index_t N1 = get_warp_size() / K0;
-        constexpr index_t N0 = kBlockSize / get_warp_size();
-
-        return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<N0, N1, N2>, sequence<K0, K1>>,
-                                       tuple<sequence<1>, sequence<1, 2>>,
-                                       tuple<sequence<0>, sequence<1, 0>>,
-                                       sequence<2, 1>,
-                                       sequence<1, 2>>{});
+        using dram_encoding = typename decltype(MakeQDramTileDistribution<Problem>())::DstrEncode;
+        constexpr index_t y_ndim = typename dram_encoding::Ys2RHsMajor{}.size();
+        static_assert(y_ndim >= 2);
+        constexpr auto swap_last2 = generate_sequence_v2(
+            [&](auto i) {
+                return number < i == y_ndim - 2 ? y_ndim - 1
+                       : i == y_ndim - 1        ? y_ndim - 2
+                                                : i > {};
+            },
+            number<y_ndim>{});
+        using shuffled_encoding_t =
+            tile_distribution_encoding_shuffle_t<dram_encoding,
+                                                 remove_cvref_t<decltype(swap_last2)>>;
+        return make_static_tile_distribution(shuffled_encoding_t{});
     }
 
     template <typename Problem>

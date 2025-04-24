@@ -9,6 +9,13 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_default_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
+// template <auto ...val>
+// [[deprecated("Help function to print value")]]
+// inline constexpr void CK_TILE_PRINT() {}
+// template <typename ...type>
+// [[deprecated("Help function to print value")]]
+// inline constexpr void CK_TILE_PRINT() {}
+
 namespace ck_tile {
 
 template <typename Problem, typename Policy = BlockFmhaBwdPipelineDefaultPolicy>
@@ -182,7 +189,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
 
         auto k_lds_read_window =
             make_tile_window(k_lds_write_window.get_bottom_tensor_view(),
-                             make_tuple(number<kN0>{}, number<kK0>{}),
+                             make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
                              k_lds_write_window.get_window_origin(),
                              Policy::template MakeKRegBlockDescriptor<Problem>());
 
@@ -208,7 +215,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
 
         auto v_lds_read_window =
             make_tile_window(v_lds_write_window.get_bottom_tensor_view(),
-                             make_tuple(number<kN0>{}, number<kK2>{}),
+                             make_tuple(number<kN0>{}, number<kVHeaddim>{}),
                              v_lds_write_window.get_window_origin(),
                              Policy::template MakeVRegBlockDescriptor<Problem>());
 
@@ -246,6 +253,27 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
 
         block_sync_lds();
         k_reg_tensor = load_tile(k_lds_read_window);
+
+        // if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
+        //     printf("Tid: %03d, K: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+        //             get_thread_local_1d_id(),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<0>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<1>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<2>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<3>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<4>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<5>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<6>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<7>{}]))));
+        // }
         block_sync_lds();
 
         auto kt_reg_tensor = load_tile(kt_lds_read_window);
@@ -489,6 +517,56 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
          * Prefetch Q, LSE, dO, D
          */
         auto q_block_tile = load_tile(q_dram_window);
+
+        if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+        {
+            CK_TILE_PRINT<q_block_tile.get_thread_buffer().size()>();
+            printf("Tid: %03d, q_block_tile: "
+                   "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                   "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                   "\n",
+                   get_thread_local_1d_id(),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 0>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 1>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 2>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 3>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 4>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 5>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 6>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 7>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 8>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 9>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 0>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 1>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 2>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 3>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 4>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 5>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 6>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 7>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 8>{}]))),
+                   *(reinterpret_cast<const uint16_t*>(
+                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 9>{}]))));
+        }
         move_tile_window(q_dram_window, {kM0, 0});
         auto lse_block_tile = load_tile(lse_dram_window);
         move_tile_window(lse_dram_window, {kM0});
@@ -525,6 +603,27 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         auto do_reg_tensor = load_tile(do_lds_read_window);
         auto d             = load_tile(d_lds_read_window);
 
+        // if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
+        //     printf("Tid: %03d, Q: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+        //             get_thread_local_1d_id(),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<0>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<1>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<2>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<3>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<4>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<5>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<6>{}]))),
+        //             *(reinterpret_cast<const
+        //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<7>{}]))));
+        // }
+
         clear_tile(dv_acc);
         clear_tile(dk_acc);
 
@@ -548,6 +647,294 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             move_tile_window(d_dram_window, {kM0});
 
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
+
+            if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+            {
+                CK_TILE_PRINT<q_reg_tensor.get_thread_buffer().size()>();
+                printf("Tid: %03d, q_reg_tensor: "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                       "\n",
+                       get_thread_local_1d_id(),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 8>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 9>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 8>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 9>{}]))));
+
+                printf("Tid: %03d, q_reg_tensor: "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                       "\n",
+                       get_thread_local_1d_id(),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 8>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 9>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 8>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 9>{}]))));
+
+                printf("Tid: %03d, q_reg_tensor: "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                       "\n",
+                       get_thread_local_1d_id(),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 8>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 9>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 8>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 9>{}]))));
+
+                printf("Tid: %03d, q_reg_tensor: "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
+                       "\n",
+                       get_thread_local_1d_id(),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 8>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 9>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 8>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 9>{}]))));
+
+                printf("Tid: %03d, k_reg_tensor: "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x "
+                       "%04x %04x %04x %04x %04x %04x %04x %04x "
+                       "\n",
+                       get_thread_local_1d_id(),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<0 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<0 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<0 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<0 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<0 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<0 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<0 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<0 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<8 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<8 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<8 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<8 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<8 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<8 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<8 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<8 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<16 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<16 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<16 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<16 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<16 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<16 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<16 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<16 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<24 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<24 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<24 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<24 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<24 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<24 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<24 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<24 + 7>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<32 + 0>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<32 + 1>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<32 + 2>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<32 + 3>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<32 + 4>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<32 + 5>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<32 + 6>{}]))),
+                       *(reinterpret_cast<const uint16_t*>(
+                           &(k_reg_tensor.get_thread_buffer()[number<32 + 7>{}]))));
+                printf(
+                    "Tid: %03d, s_acc: %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f \n",
+                    get_thread_local_1d_id(),
+                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<0>{}]))),
+                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<1>{}]))),
+                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<2>{}]))),
+                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<3>{}]))),
+                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<4>{}]))),
+                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<5>{}]))),
+                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<6>{}]))),
+                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<7>{}]))));
+            }
 
             auto dot_reg_tensor = load_tile(dot_lds_read_window);
 
@@ -661,6 +1048,47 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             Policy::template PTFromGemm0CToGemm1A<Problem,
                                                   decltype(pt_reg_tensor),
                                                   decltype(p_gemm)>(pt_reg_tensor, p_gemm);
+
+            // if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
+            //     printf("Tid: %03d, pt: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+            //             get_thread_local_1d_id(),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<0>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<1>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<2>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<3>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<4>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<5>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<6>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<7>{}]))));
+            // }
+            // if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
+            //     printf("Tid: %03d, dot: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+            //             get_thread_local_1d_id(),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<0>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<1>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<2>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<3>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<4>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<5>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<6>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<7>{}]))));
+            // }
             gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
 
             auto qt_reg_tensor = load_tile(qt_lds_read_window);

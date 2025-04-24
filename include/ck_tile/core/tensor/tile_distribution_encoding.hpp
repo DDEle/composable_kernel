@@ -414,6 +414,35 @@ struct tile_distribution_encoding
     }
 };
 
+template <typename encoding, typename shuffle>
+class tile_distribution_encoding_shuffle
+{
+};
+template <typename encoding, index_t... shuffle>
+class tile_distribution_encoding_shuffle<encoding, sequence<shuffle...>>
+{
+    static constexpr auto get_shuffled_major()
+    {
+        return sequence<(typename encoding::Ys2RHsMajor{}.template get<shuffle>())...>{};
+    }
+    static constexpr auto get_shuffled_minor()
+    {
+        return sequence<(typename encoding::Ys2RHsMinor{}.template get<shuffle>())...>{};
+    }
+
+    public:
+    using type = tile_distribution_encoding<typename encoding::RsLengths,
+                                            typename encoding::HsLengthss,
+                                            typename encoding::Ps2RHssMajor,
+                                            typename encoding::Ps2RHssMinor,
+                                            decltype(get_shuffled_major()),
+                                            decltype(get_shuffled_minor())>;
+};
+
+template <typename encoding, typename shuffle>
+using tile_distribution_encoding_shuffle_t =
+    typename tile_distribution_encoding_shuffle<encoding, shuffle>::type;
+
 namespace detail {
 
 template <typename OuterDstr, typename InnerDstr>

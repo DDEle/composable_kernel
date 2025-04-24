@@ -21,7 +21,7 @@ string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
 # generate a list of kernels, but not actually emit files at config sta
 execute_process(
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
-  --api ${FMHA_FWD_APIS} --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/fwd_blob_list.txt  --filter "NO,*fwd_splitkv_combine_d160*_fp16_batch_*@*fwd_splitkv_d160*_fp16_batch_*"
+  --api ${FMHA_FWD_APIS} --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/fwd_blob_list.txt # --filter"NO,*fwd_splitkv_combine_d1[26]*_fp16_batch_*@*fwd_splitkv_d1[26]*_fp16_batch_*"
   RESULT_VARIABLE ret
 )
 if(ret AND NOT ret EQUAL 0)
@@ -30,7 +30,7 @@ endif()
 
 execute_process(
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
-  --api bwd --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt --receipt 3
+  --api bwd --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt --receipt 3 --filter "*d1[6]*_fp16_*@*d1[6]*_fp16_*@*d1[6]*_fp16_*kr_ktr_vr_iglp_npad_nbias_ndbias_nmask_ndropout_ndeterministic" 
   RESULT_VARIABLE ret
 )
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/generate.py)
@@ -47,14 +47,14 @@ file(STRINGS ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt FMHA_BWD_GEN_BLOBS)
 add_custom_command(
   OUTPUT ${FMHA_FWD_GEN_BLOBS}
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fwd_blob_list.txt
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py  --filter "'NO,*fwd_splitkv_combine_d160*_fp16_batch_*@*fwd_splitkv_d160*_fp16_batch_*'"
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py # --filter "'NO,*fwd_splitkv_combine_d1[26]*_fp16_batch_*@*fwd_splitkv_d1[26]*_fp16_batch_*'"
   --api ${FMHA_FWD_APIS} --output_dir ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 add_custom_command(
   OUTPUT ${FMHA_BWD_GEN_BLOBS}
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py --filter "'*d1[6]*_fp16_*@*d1[6]*_fp16_*@*d1[6]*_fp16_*kr_ktr_vr_iglp_npad_nbias_ndbias_nmask_ndropout_ndeterministic'" 
   --api bwd --output_dir ${CMAKE_CURRENT_BINARY_DIR} --receipt 3
 )
 
@@ -115,6 +115,7 @@ endif()
 list(APPEND EXAMPLE_FMHA_FWD_COMPILE_OPTIONS -Wno-float-equal)
 # list(APPEND EXAMPLE_FMHA_FWD_COMPILE_OPTIONS -v --save-temps -Wno-gnu-line-marker)
 list(APPEND EXAMPLE_FMHA_BWD_COMPILE_OPTIONS -Wno-float-equal)
+# list(APPEND EXAMPLE_FMHA_BWD_COMPILE_OPTIONS -v --save-temps -Wno-gnu-line-marker)
 
 target_compile_options(${EXAMPLE_FMHA_FWD} PRIVATE ${EXAMPLE_FMHA_FWD_COMPILE_OPTIONS})
 target_compile_options(${EXAMPLE_FMHA_BWD} PRIVATE ${EXAMPLE_FMHA_BWD_COMPILE_OPTIONS})
