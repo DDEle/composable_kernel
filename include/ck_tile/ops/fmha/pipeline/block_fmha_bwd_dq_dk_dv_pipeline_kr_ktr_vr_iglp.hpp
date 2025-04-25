@@ -9,13 +9,6 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_bwd_pipeline_default_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
-// template <auto ...val>
-// [[deprecated("Help function to print value")]]
-// inline constexpr void CK_TILE_PRINT() {}
-// template <typename ...type>
-// [[deprecated("Help function to print value")]]
-// inline constexpr void CK_TILE_PRINT() {}
-
 namespace ck_tile {
 
 template <typename Problem, typename Policy = BlockFmhaBwdPipelineDefaultPolicy>
@@ -255,7 +248,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         k_reg_tensor = load_tile(k_lds_read_window);
 
         // if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
-        //     printf("Tid: %03d, K: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+        //     printf("Tid: %03d, K: %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f \n",
         //             get_thread_local_1d_id(),
         //             *(reinterpret_cast<const
         //             uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<0>{}]))),
@@ -518,55 +511,56 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
          */
         auto q_block_tile = load_tile(q_dram_window);
 
-        if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
-        {
-            CK_TILE_PRINT<q_block_tile.get_thread_buffer().size()>();
-            printf("Tid: %03d, q_block_tile: "
-                   "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                   "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                   "\n",
-                   get_thread_local_1d_id(),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 0>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 1>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 2>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 3>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 4>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 5>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 6>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 7>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 8>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 0 + 9>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 0>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 1>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 2>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 3>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 4>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 5>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 6>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 7>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 8>{}]))),
-                   *(reinterpret_cast<const uint16_t*>(
-                       &(q_block_tile.get_thread_buffer()[number<0 + 10 + 9>{}]))));
-        }
+        // if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+        // {
+        //     CK_TILE_PRINT<q_block_tile.get_thread_buffer().size()>();
+        //     printf("Tid: %03d, q_block_tile(%d): "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "\n",
+        //            get_thread_local_1d_id(),
+        //            q_block_tile.get_thread_buffer().size(),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 0 +
+        //            9>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_block_tile.get_thread_buffer()[number<0 + 10 +
+        //            9>{}]))));
+        // }
         move_tile_window(q_dram_window, {kM0, 0});
         auto lse_block_tile = load_tile(lse_dram_window);
         move_tile_window(lse_dram_window, {kM0});
@@ -604,7 +598,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         auto d             = load_tile(d_lds_read_window);
 
         // if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
-        //     printf("Tid: %03d, Q: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+        //     printf("Tid: %03d, Q: %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f \n",
         //             get_thread_local_1d_id(),
         //             *(reinterpret_cast<const
         //             uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<0>{}]))),
@@ -648,293 +642,291 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
 
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
 
-            if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
-            {
-                CK_TILE_PRINT<q_reg_tensor.get_thread_buffer().size()>();
-                printf("Tid: %03d, q_reg_tensor: "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                       "\n",
-                       get_thread_local_1d_id(),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 8>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 0 + 9>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 8>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<0 + 10 + 9>{}]))));
+            // if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+            // {
+            //     // CK_TILE_PRINT<q_reg_tensor.get_thread_buffer().size()>();
+            //     printf("Tid: %03d, q_reg_tensor (%d): "
+            //            "\n"
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "\n"
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "\n"
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "\n"
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "\n",
+            //            get_thread_local_1d_id(),
+            //            q_reg_tensor.get_thread_buffer().size(),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            0>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            1>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            2>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            3>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            4>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            5>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            6>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            7>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            8>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+            //            9>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            0>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            1>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            2>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            3>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            4>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            5>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            6>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            7>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            8>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+            //            9>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            0>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            1>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            2>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            3>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            4>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            5>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            6>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            7>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            8>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+            //            9>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            0>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            1>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            2>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            3>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            4>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            5>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            6>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            7>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            8>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+            //            9>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            0>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            1>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            2>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            3>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            4>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            5>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            6>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            7>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            8>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+            //            9>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            0>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            1>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            2>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            3>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            4>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            5>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            6>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            7>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            8>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+            //            9>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            0>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            1>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            2>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            3>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            4>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            5>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            6>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            7>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            8>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+            //            9>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            0>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            1>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            2>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            3>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            4>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            5>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            6>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            7>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            8>{}]))),
+            //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+            //            9>{}]))));
 
-                printf("Tid: %03d, q_reg_tensor: "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                       "\n",
-                       get_thread_local_1d_id(),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 8>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 0 + 9>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 8>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<20 + 10 + 9>{}]))));
-
-                printf("Tid: %03d, q_reg_tensor: "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                       "\n",
-                       get_thread_local_1d_id(),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 8>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 0 + 9>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 8>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<40 + 10 + 9>{}]))));
-
-                printf("Tid: %03d, q_reg_tensor: "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x "
-                       "\n",
-                       get_thread_local_1d_id(),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 8>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 0 + 9>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 8>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(q_reg_tensor.get_thread_buffer()[number<60 + 10 + 9>{}]))));
-
-                printf("Tid: %03d, k_reg_tensor: "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x "
-                       "%04x %04x %04x %04x %04x %04x %04x %04x "
-                       "\n",
-                       get_thread_local_1d_id(),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<0 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<0 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<0 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<0 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<0 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<0 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<0 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<0 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<8 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<8 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<8 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<8 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<8 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<8 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<8 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<8 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<16 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<16 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<16 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<16 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<16 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<16 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<16 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<16 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<24 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<24 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<24 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<24 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<24 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<24 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<24 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<24 + 7>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<32 + 0>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<32 + 1>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<32 + 2>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<32 + 3>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<32 + 4>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<32 + 5>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<32 + 6>{}]))),
-                       *(reinterpret_cast<const uint16_t*>(
-                           &(k_reg_tensor.get_thread_buffer()[number<32 + 7>{}]))));
-                printf(
-                    "Tid: %03d, s_acc: %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f \n",
-                    get_thread_local_1d_id(),
-                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<0>{}]))),
-                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<1>{}]))),
-                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<2>{}]))),
-                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<3>{}]))),
-                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<4>{}]))),
-                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<5>{}]))),
-                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<6>{}]))),
-                    *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<7>{}]))));
-            }
+            //     // CK_TILE_PRINT<k_reg_tensor.get_thread_buffer().size()>();
+            //     printf("Tid: %03d, k_reg_tensor(%d): "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+            //            "\n",
+            //            get_thread_local_1d_id(),
+            //            k_reg_tensor.get_thread_buffer().size(),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 +
+            //            0>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 +
+            //            1>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 +
+            //            2>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 +
+            //            3>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 +
+            //            4>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 +
+            //            5>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 +
+            //            6>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 +
+            //            7>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 +
+            //            0>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 +
+            //            1>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 +
+            //            2>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 +
+            //            3>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 +
+            //            4>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 +
+            //            5>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 +
+            //            6>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 +
+            //            7>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 +
+            //            0>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 +
+            //            1>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 +
+            //            2>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 +
+            //            3>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 +
+            //            4>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 +
+            //            5>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 +
+            //            6>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 +
+            //            7>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 +
+            //            0>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 +
+            //            1>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 +
+            //            2>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 +
+            //            3>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 +
+            //            4>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 +
+            //            5>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 +
+            //            6>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 +
+            //            7>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 +
+            //            0>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 +
+            //            1>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 +
+            //            2>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 +
+            //            3>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 +
+            //            4>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 +
+            //            5>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 +
+            //            6>{}]))),
+            //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 +
+            //            7>{}]))));
+            //     // CK_TILE_PRINT<s_acc.get_thread_buffer().size()>();
+            //     printf(
+            //         "Tid: %03d, s_acc(%d): %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f \n",
+            //         get_thread_local_1d_id(),
+            //         s_acc.get_thread_buffer().size(),
+            //         *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<0>{}]))),
+            //         *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<1>{}]))),
+            //         *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<2>{}]))),
+            //         *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<3>{}]))),
+            //         *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<4>{}]))),
+            //         *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<5>{}]))),
+            //         *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<6>{}]))),
+            //         *(reinterpret_cast<const
+            //         float*>(&(s_acc.get_thread_buffer()[number<7>{}]))));
+            // }
 
             auto dot_reg_tensor = load_tile(dot_lds_read_window);
 
@@ -1050,7 +1042,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
                                                   decltype(p_gemm)>(pt_reg_tensor, p_gemm);
 
             // if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
-            //     printf("Tid: %03d, pt: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+            //     printf("Tid: %03d, pt: %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f \n",
             //             get_thread_local_1d_id(),
             //             *(reinterpret_cast<const
             //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<0>{}]))),
@@ -1070,7 +1062,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             //             uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<7>{}]))));
             // }
             // if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
-            //     printf("Tid: %03d, dot: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+            //     printf("Tid: %03d, dot: %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f \n",
             //             get_thread_local_1d_id(),
             //             *(reinterpret_cast<const
             //             uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<0>{}]))),
@@ -1235,6 +1227,250 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
 
         // STAGE 1, Q@K Gemm0
         s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
+
+        // if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+        // {
+        //     // CK_TILE_PRINT<q_reg_tensor.get_thread_buffer().size()>();
+        //     printf("Tid: %03d, q_reg_tensor (%d): "
+        //            "\n"
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "\n"
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "\n"
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "\n"
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "\n",
+        //            get_thread_local_1d_id(),
+        //            q_reg_tensor.get_thread_buffer().size(),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 0 +
+        //            9>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<0 + 10 +
+        //            9>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 0 +
+        //            9>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<20 + 10 +
+        //            9>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 0 +
+        //            9>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<40 + 10 +
+        //            9>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 0 +
+        //            9>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            0>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            1>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            2>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            3>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            4>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            5>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            6>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            7>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            8>{}]))),
+        //            ((type_convert<float>(q_reg_tensor.get_thread_buffer()[number<60 + 10 +
+        //            9>{}]))));
+
+        //     // CK_TILE_PRINT<k_reg_tensor.get_thread_buffer().size()>();
+        //     printf("Tid: %03d, k_reg_tensor(%d): "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "%6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f "
+        //            "\n",
+        //            get_thread_local_1d_id(),
+        //            k_reg_tensor.get_thread_buffer().size(),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 + 0>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 + 1>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 + 2>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 + 3>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 + 4>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 + 5>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 + 6>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<0 + 7>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 + 0>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 + 1>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 + 2>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 + 3>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 + 4>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 + 5>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 + 6>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<8 + 7>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 + 0>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 + 1>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 + 2>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 + 3>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 + 4>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 + 5>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 + 6>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<16 + 7>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 + 0>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 + 1>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 + 2>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 + 3>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 + 4>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 + 5>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 + 6>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<24 + 7>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 + 0>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 + 1>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 + 2>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 + 3>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 + 4>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 + 5>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 + 6>{}]))),
+        //            ((type_convert<float>(k_reg_tensor.get_thread_buffer()[number<32 + 7>{}]))));
+        //     // CK_TILE_PRINT<s_acc.get_thread_buffer().size()>();
+        //     printf("Tid: %03d, s_acc(%d): %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f \n",
+        //            get_thread_local_1d_id(),
+        //            s_acc.get_thread_buffer().size(),
+        //            *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<0>{}]))),
+        //            *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<1>{}]))),
+        //            *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<2>{}]))),
+        //            *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<3>{}]))),
+        //            *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<4>{}]))),
+        //            *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<5>{}]))),
+        //            *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<6>{}]))),
+        //            *(reinterpret_cast<const float*>(&(s_acc.get_thread_buffer()[number<7>{}]))));
+        // }
 
         // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)

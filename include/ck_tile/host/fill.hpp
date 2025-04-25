@@ -280,9 +280,12 @@ struct FillMonotonicSeq
     template <typename ForwardIter>
     void operator()(ForwardIter first, ForwardIter last) const
     {
-        std::generate(first, last, [=, n = init_value_]() mutable {
-            auto tmp = n;
-            if constexpr(std::is_same_v<decltype(tmp), pk_int4_t>)
+        auto init_value =
+            type_convert<std::conditional_t<std::is_same_v<T, ck_tile::half_t>, double, T>>(
+                init_value_);
+        std::generate(first, last, [=, n = init_value]() mutable {
+            T tmp = n;
+            if constexpr(std::is_same_v<T, pk_int4_t>)
             {
                 n.data += step_.data;
             }
