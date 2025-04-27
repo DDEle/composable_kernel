@@ -1119,8 +1119,30 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0;
 
-        // TODO: this is for 3d layout
-        return MakeXTLdsBlockDescriptor<Problem, 5, kNPerBlock / 5, kKPerBlock, 2, 4>();
+        using dram_encoding = typename decltype(MakeKDramTileDistribution<Problem>())::DstrEncode;
+        constexpr index_t dram_y_ndim = typename dram_encoding::Ys2RHsMajor{}.size();
+        if constexpr(dram_y_ndim == 2)
+        {
+            constexpr index_t kKPack  = GetSmemKPackK<Problem>();
+            constexpr index_t kKPackT = GetSmemKPackKT<Problem>();
+            return MakeXTLdsBlockDescriptor<Problem, kNPerBlock, kKPerBlock, kKPack, kKPackT>();
+        }
+        else if constexpr(dram_y_ndim == 3)
+        {
+            constexpr index_t KIter   = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(0);
+            constexpr index_t kKPack  = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(2);
+            constexpr index_t kKPackT = typename dram_encoding::HsLengthss{}.at(number<0>{}).at(2);
+            return MakeXTLdsBlockDescriptor<Problem,
+                                            KIter,
+                                            kNPerBlock / KIter,
+                                            kKPerBlock,
+                                            kKPack,
+                                            kKPackT>();
+        }
+        else
+        {
+            static_assert(false, "Unexpected dram y dimension");
+        }
     }
 
     template <typename Problem>
@@ -1179,8 +1201,23 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
 
-        // TODO: this is for 3d layout
-        return MakeXLdsBlockDescriptor<5, kMPerBlock, kKPerBlock / 5, 2>();
+        using dram_encoding = typename decltype(MakeQDramTileDistribution<Problem>())::DstrEncode;
+        constexpr index_t dram_y_ndim = typename dram_encoding::Ys2RHsMajor{}.size();
+        if constexpr(dram_y_ndim == 2)
+        {
+            constexpr index_t kKPack = GetSmemKPackQ<Problem>();
+            return MakeXLdsBlockDescriptor<kMPerBlock, kKPerBlock, kKPack>();
+        }
+        else if constexpr(dram_y_ndim == 3)
+        {
+            constexpr index_t KIter  = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(0);
+            constexpr index_t kKPack = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(2);
+            return MakeXLdsBlockDescriptor<KIter, kMPerBlock, kKPerBlock / KIter, kKPack>();
+        }
+        else
+        {
+            static_assert(false, "Unexpected dram y dimension");
+        }
     }
 
     template <typename Problem>
@@ -1235,8 +1272,30 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kM0;
 
-        // TODO: this is for 3d layout
-        return MakeXTLdsBlockDescriptor<Problem, 5, kNPerBlock / 5, kKPerBlock, 2, 2>();
+        using dram_encoding = typename decltype(MakeQDramTileDistribution<Problem>())::DstrEncode;
+        constexpr index_t dram_y_ndim = typename dram_encoding::Ys2RHsMajor{}.size();
+        if constexpr(dram_y_ndim == 2)
+        {
+            constexpr index_t kKPack  = GetSmemKPackQ<Problem>();
+            constexpr index_t kKPackT = GetSmemKPackQT<Problem>();
+            return MakeXTLdsBlockDescriptor<Problem, kNPerBlock, kKPerBlock, kKPack, kKPackT>();
+        }
+        else if constexpr(dram_y_ndim == 3)
+        {
+            constexpr index_t KIter   = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(0);
+            constexpr index_t kKPack  = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(2);
+            constexpr index_t kKPackT = typename dram_encoding::HsLengthss{}.at(number<0>{}).at(2);
+            return MakeXTLdsBlockDescriptor<Problem,
+                                            KIter,
+                                            kNPerBlock / KIter,
+                                            kKPerBlock,
+                                            kKPack,
+                                            kKPackT>();
+        }
+        else
+        {
+            static_assert(false, "Unexpected dram y dimension");
+        }
     }
 
     template <typename Problem>
@@ -1382,8 +1441,24 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kVHeaddim;
 
-        // TODO: this is for 3d layout
-        return MakeXLdsBlockDescriptor<5, kMPerBlock, kKPerBlock / 5, 2>();
+        using dram_encoding =
+            typename decltype(MakeOGradDramTileDistribution<Problem>())::DstrEncode;
+        constexpr index_t dram_y_ndim = typename dram_encoding::Ys2RHsMajor{}.size();
+        if constexpr(dram_y_ndim == 2)
+        {
+            constexpr index_t kKPack = GetSmemKPackOGrad<Problem>();
+            return MakeXLdsBlockDescriptor<kMPerBlock, kKPerBlock, kKPack>();
+        }
+        else if constexpr(dram_y_ndim == 3)
+        {
+            constexpr index_t KIter  = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(0);
+            constexpr index_t kKPack = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(2);
+            return MakeXLdsBlockDescriptor<KIter, kMPerBlock, kKPerBlock / KIter, kKPack>();
+        }
+        else
+        {
+            static_assert(false, "Unexpected dram y dimension");
+        }
     }
 
     template <typename Problem>
@@ -1441,17 +1516,31 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kVHeaddim;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kM0;
 
-        // constexpr index_t kKPack  = GetSmemKPackQ<Problem>();
-        // constexpr index_t kKPackT = GetSmemKPackQT<Problem>();
-
-        return MakeXTLdsBlockDescriptor<Problem,
-                                        5,
-                                        kNPerBlock / 5,
-                                        kKPerBlock,
-                                        2,
-                                        2>(); // TODO: this is for 3d layout
-
-        // return MakeXTLdsBlockDescriptor<Problem, kNPerBlock, kKPerBlock, kKPack, kKPackT>();
+        using dram_encoding =
+            typename decltype(MakeOGradDramTileDistribution<Problem>())::DstrEncode;
+        constexpr index_t dram_y_ndim = typename dram_encoding::Ys2RHsMajor{}.size();
+        if constexpr(dram_y_ndim == 2)
+        {
+            constexpr index_t kKPack  = GetSmemKPackOGrad<Problem>();
+            constexpr index_t kKPackT = GetSmemKPackOGradT<Problem>();
+            return MakeXTLdsBlockDescriptor<Problem, kNPerBlock, kKPerBlock, kKPack, kKPackT>();
+        }
+        else if constexpr(dram_y_ndim == 3)
+        {
+            constexpr index_t KIter   = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(0);
+            constexpr index_t kKPack  = typename dram_encoding::HsLengthss{}.at(number<1>{}).at(2);
+            constexpr index_t kKPackT = typename dram_encoding::HsLengthss{}.at(number<0>{}).at(2);
+            return MakeXTLdsBlockDescriptor<Problem,
+                                            KIter,
+                                            kNPerBlock / KIter,
+                                            kKPerBlock,
+                                            kKPack,
+                                            kKPackT>();
+        }
+        else
+        {
+            static_assert(false, "Unexpected dram y dimension");
+        }
     }
 
     template <typename Problem>

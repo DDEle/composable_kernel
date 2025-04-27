@@ -30,7 +30,7 @@ endif()
 
 execute_process(
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
-  --api bwd --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt --receipt 3 --filter "*d1[6]*_fp16_*@*d1[6]*_fp16_*@*d1[6]*_fp16_*kr_ktr_vr_iglp_npad_nbias_ndbias_nmask_ndropout_ndeterministic" 
+  --api bwd --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt --receipt 3 #  --filter "*d1[26]*_fp16_*@*d1[26]*_fp16_*@*d1[26]*_fp16_*kr_ktr_vr_iglp_npad_nbias_ndbias_nmask_ndropout_ndeterministic" 
   RESULT_VARIABLE ret
 )
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/generate.py)
@@ -54,7 +54,7 @@ add_custom_command(
 add_custom_command(
   OUTPUT ${FMHA_BWD_GEN_BLOBS}
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py --filter "'*d1[6]*_fp16_*@*d1[6]*_fp16_*@*d1[6]*_fp16_*kr_ktr_vr_iglp_npad_nbias_ndbias_nmask_ndropout_ndeterministic'" 
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py # --filter "'*d1[26]*_fp16_*@*d1[26]*_fp16_*@*d1[26]*_fp16_*kr_ktr_vr_iglp_npad_nbias_ndbias_nmask_ndropout_ndeterministic'" 
   --api bwd --output_dir ${CMAKE_CURRENT_BINARY_DIR} --receipt 3
 )
 
