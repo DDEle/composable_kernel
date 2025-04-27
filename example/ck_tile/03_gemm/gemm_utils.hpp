@@ -65,7 +65,7 @@ struct GemmConfig
 
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
-    static constexpr ck_tile::index_t K_Warp_Tile = 32;
+    static constexpr ck_tile::index_t K_Warp_Tile = 128;
 
     static constexpr bool DoubleSmemBuffer = false;
 #elif(CK_TILE_PIPELINE_DEFAULT == CK_TILE_PIPELINE_COMPUTE_V4)

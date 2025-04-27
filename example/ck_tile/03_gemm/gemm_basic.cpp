@@ -29,17 +29,23 @@ float gemm_calc(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config&
     constexpr int kBlockPerCu = 1;
 
     // This part comes from the Codegen
-    constexpr ck_tile::index_t M_Tile = 256;
-    constexpr ck_tile::index_t N_Tile = 256;
-    constexpr ck_tile::index_t K_Tile = 64;
+    // constexpr ck_tile::index_t M_Tile = 256;
+    // constexpr ck_tile::index_t N_Tile = 256;
+    // constexpr ck_tile::index_t K_Tile = 64;
+    constexpr ck_tile::index_t M_Tile = 128;
+    constexpr ck_tile::index_t N_Tile = 128;
+    constexpr ck_tile::index_t K_Tile = 128;
 
     constexpr ck_tile::index_t M_Warp = 2;
     constexpr ck_tile::index_t N_Warp = 2;
     constexpr ck_tile::index_t K_Warp = 1;
 
-    constexpr ck_tile::index_t M_Warp_Tile = 32;
-    constexpr ck_tile::index_t N_Warp_Tile = 32;
-    constexpr ck_tile::index_t K_Warp_Tile = 16;
+    // constexpr ck_tile::index_t M_Warp_Tile = 32;
+    // constexpr ck_tile::index_t N_Warp_Tile = 32;
+    // constexpr ck_tile::index_t K_Warp_Tile = 16;
+    constexpr ck_tile::index_t M_Warp_Tile = 16;
+    constexpr ck_tile::index_t N_Warp_Tile = 16;
+    constexpr ck_tile::index_t K_Warp_Tile = 128;
 
     using CodegenGemmShape =
         ck_tile::TileGemmShape<ck_tile::sequence<M_Tile, N_Tile, K_Tile>,
@@ -164,32 +170,33 @@ int run_gemm_example(int argc, char* argv[])
     std::string a_layout  = arg_parser.get_str("a_layout");
     std::string b_layout  = arg_parser.get_str("b_layout");
 
-    if(data_type == "fp16")
-    {
-        return run_gemm_example_prec_type<ck_tile::half_t>(a_layout, b_layout, argc, argv);
-    }
-    else if(data_type == "bf16")
-    {
-        return run_gemm_example_prec_type<ck_tile::bf16_t>(a_layout, b_layout, argc, argv);
-    }
-    else if(data_type == "fp8")
+    // if(data_type == "fp16")
+    // {
+    //     return run_gemm_example_prec_type<ck_tile::half_t>(a_layout, b_layout, argc, argv);
+    // }
+    // else if(data_type == "bf16")
+    // {
+    //     return run_gemm_example_prec_type<ck_tile::bf16_t>(a_layout, b_layout, argc, argv);
+    // }
+    // else 
+    if(data_type == "fp8")
     {
         return run_gemm_example_prec_type<ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::half_t>(
             a_layout, b_layout, argc, argv);
     }
-    else if(data_type == "bf8")
-    {
-        return run_gemm_example_prec_type<ck_tile::bf8_t, ck_tile::bf8_t, ck_tile::half_t>(
-            a_layout, b_layout, argc, argv);
-    }
+    // else if(data_type == "bf8")
+    // {
+    //     return run_gemm_example_prec_type<ck_tile::bf8_t, ck_tile::bf8_t, ck_tile::half_t>(
+    //         a_layout, b_layout, argc, argv);
+    // }
 
 #if(CK_TILE_PIPELINE_DEFAULT == CK_TILE_PIPELINE_COMPUTE_V3)
-    else if(data_type == "pk_int4_t")
-    {
-        // TODO: Add support for bhalf_t ADataType
-        return run_gemm_example_prec_type<ck_tile::half_t, ck_tile::pk_int4_t, ck_tile::half_t>(
-            a_layout, b_layout, argc, argv);
-    }
+    // else if(data_type == "pk_int4_t")
+    // {
+    //     // TODO: Add support for bhalf_t ADataType
+    //     return run_gemm_example_prec_type<ck_tile::half_t, ck_tile::pk_int4_t, ck_tile::half_t>(
+    //         a_layout, b_layout, argc, argv);
+    // }
 #endif
     else
     {
