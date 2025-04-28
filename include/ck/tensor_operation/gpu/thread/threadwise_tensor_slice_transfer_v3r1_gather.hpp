@@ -41,6 +41,7 @@ template <typename SliceLengths,
           bool DstResetCoordinateAfterRun, // control whether to move back dst coordinate after each
                                            // RunWrite(),  will be fused with MoveDstSliceWindow to
                                            // save addr computation
+          typename IndexType,
           index_t GatherDim        = 1,
           index_t NumThreadScratch = 1>
 struct ThreadwiseTensorSliceTransfer_v3r1_gather
@@ -88,7 +89,7 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
         const DstDesc& dst_desc,
         const Index& dst_slice_origin,
         const DstElementwiseOperation& dst_element_op,
-        const StaticallyIndexedArray<index_t, gather_num>& gather_offsets)
+        const StaticallyIndexedArray<IndexType, gather_num>& gather_offsets)
         : src_coord_(make_tensor_coordinate(src_desc, src_slice_origin)),
           dst_coord_(make_tensor_coordinate(dst_desc, dst_slice_origin)),
           src_element_op_(src_element_op),
@@ -221,16 +222,9 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
             auto gather_offset =
                 gather_offsets_(ordered_src_access_idx[Number<ordered_gather_dim>{}]);
 
-            // maintain a container record is_src_valid, waiting for RunWrite use.
-            const index_t ld_offset = src_coord_.GetOffset() + gather_offset;
-            const bool is_src_valid =
-                ld_offset <
-                src_desc
-                    .GetElementSpaceSize(); // hack felix, todo use coord
-                                            // coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc,
-                                            // src_coord_) && (gather_offset < 32*512);
+            const IndexType ld_offset = src_coord_.GetOffset() + gather_offset;
             src_oob_thread_scratch_tuple_(thread_scratch_id)
-                .template SetAsType<bool>(src_data_idx_seq, is_src_valid);
+                .template SetAsType<bool>(src_data_idx_seq, true);
 
             using src_vector_type = vector_type_maker_t<SrcData, SrcScalarPerVector>;
             using src_vector_t    = typename src_vector_type::type;
@@ -399,10 +393,7 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
             auto op_r = src_thread_scratch_tuple_(thread_scratch_id)
                             .template GetAsType<vector_t>(src_data_idx_seq);
 
-            const bool is_src_valid = src_oob_thread_scratch_tuple_(thread_scratch_id)
-                                          .template GetAsType<bool>(src_data_idx_seq);
-
-            auto op_r_v = is_src_valid ? op_r : vector_t(0);
+            auto op_r_v = op_r;
 
             src_thread_scratch_tuple_(thread_scratch_id)
                 .template SetAsType<vector_t>(src_data_idx_seq, op_r_v);
@@ -945,7 +936,7 @@ struct ThreadwiseTensorSliceTransfer_v3r1_gather
     DstCoord dst_coord_;
     const SrcElementwiseOperation src_element_op_;
     const DstElementwiseOperation dst_element_op_;
-    StaticallyIndexedArray<index_t, gather_num> gather_offsets_;
+    StaticallyIndexedArray<IndexType, gather_num> gather_offsets_;
 };
 
 } // namespace ck
