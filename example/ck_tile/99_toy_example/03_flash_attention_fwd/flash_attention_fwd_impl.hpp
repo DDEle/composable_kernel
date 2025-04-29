@@ -254,6 +254,74 @@ struct FlashAttentionFwdImpl
             const auto s =
                 tile_elementwise_in(type_convert<SMPLComputeDataType, SaccDataType>, s_acc);
 
+            // if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 64){
+            //     printf("===== Device side =====\n");
+            //     printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\nTid: %03d,
+            //     %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\nTid: %03d, %5.3f %5.3f %5.3f
+            //     %5.3f %5.3f %5.3f %5.3f %5.3f\nTid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f
+            //     %5.3f %5.3f\n",
+            //             get_thread_local_1d_id(),
+            //             *(reinterpret_cast<const float*>(&(s.get_thread_buffer()[number<0>{}]))),
+            //             *(reinterpret_cast<const float*>(&(s.get_thread_buffer()[number<1>{}]))),
+            //             *(reinterpret_cast<const float*>(&(s.get_thread_buffer()[number<2>{}]))),
+            //             *(reinterpret_cast<const float*>(&(s.get_thread_buffer()[number<3>{}]))),
+            //             *(reinterpret_cast<const float*>(&(s.get_thread_buffer()[number<4>{}]))),
+            //             *(reinterpret_cast<const float*>(&(s.get_thread_buffer()[number<5>{}]))),
+            //             *(reinterpret_cast<const float*>(&(s.get_thread_buffer()[number<6>{}]))),
+            //             *(reinterpret_cast<const float*>(&(s.get_thread_buffer()[number<7>{}]))),
+            //             get_thread_local_1d_id(),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<8+0>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<8+1>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<8+2>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<8+3>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<8+4>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<8+5>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<8+6>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<8+7>{}]))),
+            //             get_thread_local_1d_id(),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<16+0>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<16+1>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<16+2>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<16+3>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<16+4>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<16+5>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<16+6>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<16+7>{}]))),
+            //             get_thread_local_1d_id(),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<24+0>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<24+1>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<24+2>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<24+3>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<24+4>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<24+5>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<24+6>{}]))),
+            //             *(reinterpret_cast<const
+            //             float*>(&(s.get_thread_buffer()[number<24+7>{}]))));
+            // }
+
 #if defined(TOY_FA_FWD_OPT)
             // prefetch load v tile
             auto v_prefetch = load_tile(v_dram_window);
@@ -263,7 +331,7 @@ struct FlashAttentionFwdImpl
             auto m_local = block_tile_reduce<SMPLComputeDataType>(
                 s, sequence<1>{}, f_max, std::numeric_limits<SMPLComputeDataType>::lowest());
 
-            block_tile_reduce_sync(m_local, f_max);
+            block_tile_reduce_sync(m_local, f_max, bool_constant<true>{});
 
             // m{j-1}
             const auto m_old = m;
@@ -292,7 +360,7 @@ struct FlashAttentionFwdImpl
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
 
-            block_tile_reduce_sync(rowsum_p, f_sum);
+            block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<true>{});
 
             // l{j}, Oacc{j}
             sweep_tile_span(p_spans[I0], [&](auto idx0) {
@@ -317,16 +385,79 @@ struct FlashAttentionFwdImpl
             // Oacc{j}
             constexpr index_t k1_loops = kN0PerBlock / kK1PerBlock;
 
+            using thisT = ck_tile::FlashAttentionFwdImpl<_Float16,
+                                                         _Float16,
+                                                         _Float16,
+                                                         float,
+                                                         float,
+                                                         _Float16,
+                                                         float,
+                                                         _Float16,
+                                                         256,
+                                                         128,
+                                                         128,
+                                                         128,
+                                                         32,
+                                                         128,
+                                                         32>;
+
             static_for<0, k1_loops, 1>{}([&](auto i_k1) {
                 const auto v = load_tile(v_dram_window); // load next v
                 move_tile_window(v_dram_window, {0, kK1PerBlock});
+
+                if(0 && get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+                {
+                    printf("Tid: %03d v(%d) in0=%d\n"
+                           "%04x %04x %04x %04x %04x %04x %04x %04x "
+                           "%04x %04x %04x %04x %04x %04x %04x %04x "
+                           "\n",
+                           get_thread_local_1d_id(),
+                           v.get_thread_buffer().size(),
+                           iN0,
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<0 + 0>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<0 + 1>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<0 + 2>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<0 + 3>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<0 + 4>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<0 + 5>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<0 + 6>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<0 + 7>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<8 + 0>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<8 + 1>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<8 + 2>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<8 + 3>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<8 + 4>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<8 + 5>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<8 + 6>{}]))),
+                           *(reinterpret_cast<const uint16_t*>(
+                               &(v.get_thread_buffer()[number<8 + 7>{}]))));
+                }
                 store_tile(v_lds_window, v);
                 block_sync_lds();
+                if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+                    printf("gemm1 start\n");
                 gemm1(o_acc,
                       get_slice_tile(p,
                                      sequence<0, i_k1 * kK1PerBlock>{},
                                      sequence<kM0PerBlock, (i_k1 + 1) * kK1PerBlock>{}),
                       v_lds_window);
+                if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+                    printf("gemm1 end\n");
                 block_sync_lds();
             });
 #else
@@ -347,6 +478,45 @@ struct FlashAttentionFwdImpl
                 move_tile_window(v_dram_window, {0, kK1PerBlock});
                 block_sync_lds();
                 vWarpTile = load_tile(v_lds_gemm_window);
+                // if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 64){
+                //     printf("===== Device V =====\n");
+                //     printf("Tid: %03d, %04x %04x %04x %04x %04x %04x %04x %04x\nTid: %03d, %04x
+                //     %04x %04x %04x %04x %04x %04x %04x\n",
+                //             get_thread_local_1d_id(),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<0>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<1>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<2>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<3>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<4>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<5>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<6>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<7>{}]))),
+                //             get_thread_local_1d_id(),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<8+0>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<8+1>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<8+2>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<8+3>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<8+4>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<8+5>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<8+6>{}]))),
+                //             *(reinterpret_cast<const
+                //             uint16_t*>(&(vWarpTile.get_thread_buffer()[number<8+7>{}]))));
+                // }
             }
             if constexpr(k1_loops > 2)
             {

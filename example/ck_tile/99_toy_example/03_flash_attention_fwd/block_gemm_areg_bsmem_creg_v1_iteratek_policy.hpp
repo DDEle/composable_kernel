@@ -23,7 +23,9 @@ struct BlockGemmARegBSmemCRegV1K8Policy
         }
         else if constexpr(kM0 == 128)
         {
-            return make_tuple(WarpGemmMfmaF16F16F32M32N32K16TransposedCDistribution{}, 4, 1);
+            // return make_tuple(WarpGemmMfmaF16F16F32M32N32K16TransposedCDistribution{}, 4, 1);
+            return make_tuple(
+                WarpGemmMfmaF16F16F32M32N32K16SwizzleBTransposedCDistribution{}, 4, 1);
         }
         else
         {

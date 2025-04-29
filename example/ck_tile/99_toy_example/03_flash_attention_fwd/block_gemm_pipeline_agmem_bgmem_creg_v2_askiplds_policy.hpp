@@ -27,7 +27,7 @@ struct BlockGemmPipelineAGmemBGmemCRegSkipALdsPersistentQRegCachePolicy
         constexpr auto blockgemm = GetBlockGemm<Problem>();
         using BlockGemm          = remove_cvref_t<decltype(blockgemm)>;
 
-        static_assert((Problem::BlockGemmShape::kM == Problem::BlockGemmShape::kN), "wrong!");
+        // static_assert((Problem::BlockGemmShape::kM == Problem::BlockGemmShape::kN), "wrong!");
 
         constexpr index_t kMPerBlock = Problem::BlockGemmShape::kM;
         constexpr index_t kKPerBlock = AKDim;

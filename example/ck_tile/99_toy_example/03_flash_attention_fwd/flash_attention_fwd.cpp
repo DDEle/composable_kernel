@@ -90,11 +90,38 @@ int main(int argc, char* argv[])
         ck_tile::FillUniformDistribution<KDataType>{-3.f, 3.f}(k_host);
         ck_tile::FillUniformDistribution<VDataType>{-3.f, 3.f}(v_host);
         break;
+    case 3:
+        ck_tile::FillUniformDistributionIntegerValue<QDataType>{-3.f, 3.f}(q_host);
+        ck_tile::FillUniformDistributionIntegerValue<KDataType>{1.f, 1.f}(k_host);
+        ck_tile::FillUniformDistributionIntegerValue<VDataType>{1.f, 1.f}(v_host);
+        break;
+    case 4:
+        ck_tile::FillUniformDistributionIntegerValue<QDataType>{1.f, 1.f}(q_host);
+        ck_tile::FillUniformDistributionIntegerValue<KDataType>{-3.f, 3.f}(k_host);
+        ck_tile::FillUniformDistributionIntegerValue<VDataType>{1.f, 1.f}(v_host);
+        break;
+    case 5:
+        ck_tile::FillUniformDistributionIntegerValue<QDataType>{1.f, 1.f}(q_host);
+        ck_tile::FillUniformDistributionIntegerValue<KDataType>{1.f, 1.f}(k_host);
+        ck_tile::FillUniformDistributionIntegerValue<VDataType>{-3.f, 3.f}(v_host);
+        break;
     default:
         ck_tile::FillUniformDistributionIntegerValue<QDataType>{-2.f, 2.f}(q_host);
         ck_tile::FillUniformDistributionIntegerValue<KDataType>{-2.f, 2.f}(k_host);
         ck_tile::FillUniformDistributionIntegerValue<VDataType>{-2.f, 2.f}(v_host);
     }
+
+    // auto it = reinterpret_cast<uint16_t*>(k_host.data()) + 128 * 128;
+    // for (auto count = 0; count < 32; ++count) {
+    //     printf("Tid: %03d, %04x %04x %04x %04x %04x %04x %04x %04x\n", count, *it, *(it+1),
+    //     *(it+2), *(it+3), *(it+4), *(it+5), *(it+6), *(it+7)); it += 128;
+    // }
+    // it = reinterpret_cast<uint16_t*>(k_host.data()) + 128 * 128;
+    // for (auto count = 0; count < 32; ++count) {
+    //     printf("Tid: %03d, %04x %04x %04x %04x %04x %04x %04x %04x\n", count+32, *(it+8),
+    //     *(it+9), *(it+10), *(it+11), *(it+12), *(it+13), *(it+14), *(it+15)); it += 128;
+    // }
+
     ck_tile::DeviceMem q_buf(q_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem k_buf(k_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem v_buf(v_host.get_element_space_size_in_bytes());
@@ -121,7 +148,7 @@ int main(int argc, char* argv[])
     constexpr ck_tile::index_t kWarpPerBlock = kBlockSize / warpSize;
     constexpr ck_tile::index_t kBlockPerCu   = kWarpPerCu / kWarpPerBlock;
 
-    float ave_time = ck_tile::launch_kernel(ck_tile::stream_config{nullptr, true},
+    float ave_time = ck_tile::launch_kernel(ck_tile::stream_config{nullptr, true, 0, 0, 1},
                                             ck_tile::make_kernel<kBlockSize, kBlockPerCu>(
                                                 ck_tile::FlashAttentionFwd<QDataType,
                                                                            KDataType,
@@ -171,10 +198,225 @@ int main(int argc, char* argv[])
 
         ck_tile::reference_batched_gemm<QDataType, KDataType, SaccDataType, SMPLComputeDataType>(
             q_host, k_host, s_host_ref);
+
+#if 0
+        printf("===== Host sacc =====\n");
+        auto it = reinterpret_cast<float*>(s_host_ref.data());
+        for (auto count = 0; count < 32; ++count) {
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count,
+                *it,
+                *(it+1),
+                *(it+2),
+                *(it+3),
+                *(it+4),
+                *(it+5),
+                *(it+6),
+                *(it+7));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count,
+                *(it+16),
+                *(it+16+1),
+                *(it+16+2),
+                *(it+16+3),
+                *(it+16+4),
+                *(it+16+5),
+                *(it+16+6),
+                *(it+16+7));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count,
+                *(it+32),
+                *(it+32+1),
+                *(it+32+2),
+                *(it+32+3),
+                *(it+32+4),
+                *(it+32+5),
+                *(it+32+6),
+                *(it+32+7));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count,
+                *(it+48),
+                *(it+48+1),
+                *(it+48+2),
+                *(it+48+3),
+                *(it+48+4),
+                *(it+48+5),
+                *(it+48+6),
+                *(it+48+7));
+            it += 256;
+        }
+        it = reinterpret_cast<float*>(s_host_ref.data());
+        for (auto count = 0; count < 32; ++count) {
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count+32,
+                *(it+8),
+                *(it+9),
+                *(it+10),
+                *(it+11),
+                *(it+12),
+                *(it+13),
+                *(it+14),
+                *(it+15));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count+32,
+                *(it+16+8),
+                *(it+16+9),
+                *(it+16+10),
+                *(it+16+11),
+                *(it+16+12),
+                *(it+16+13),
+                *(it+16+14),
+                *(it+16+15));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count+32,
+                *(it+32+8),
+                *(it+32+9),
+                *(it+32+10),
+                *(it+32+11),
+                *(it+32+12),
+                *(it+32+13),
+                *(it+32+14),
+                *(it+32+15));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count+32,
+                *(it+48+8),
+                *(it+48+9),
+                *(it+48+10),
+                *(it+48+11),
+                *(it+48+12),
+                *(it+48+13),
+                *(it+48+14),
+                *(it+48+15));
+            it += 256;
+        }
+
+        it = reinterpret_cast<float*>(s_host_ref.data()) + 128;
+        for (auto count = 0; count < 32; ++count) {
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count,
+                *it,
+                *(it+1),
+                *(it+2),
+                *(it+3),
+                *(it+4),
+                *(it+5),
+                *(it+6),
+                *(it+7));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count,
+                *(it+16),
+                *(it+16+1),
+                *(it+16+2),
+                *(it+16+3),
+                *(it+16+4),
+                *(it+16+5),
+                *(it+16+6),
+                *(it+16+7));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count,
+                *(it+32),
+                *(it+32+1),
+                *(it+32+2),
+                *(it+32+3),
+                *(it+32+4),
+                *(it+32+5),
+                *(it+32+6),
+                *(it+32+7));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count,
+                *(it+48),
+                *(it+48+1),
+                *(it+48+2),
+                *(it+48+3),
+                *(it+48+4),
+                *(it+48+5),
+                *(it+48+6),
+                *(it+48+7));
+            it += 256;
+        }
+        it = reinterpret_cast<float*>(s_host_ref.data()) + 128;
+        for (auto count = 0; count < 32; ++count) {
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count+32,
+                *(it+8),
+                *(it+9),
+                *(it+10),
+                *(it+11),
+                *(it+12),
+                *(it+13),
+                *(it+14),
+                *(it+15));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count+32,
+                *(it+16+8),
+                *(it+16+9),
+                *(it+16+10),
+                *(it+16+11),
+                *(it+16+12),
+                *(it+16+13),
+                *(it+16+14),
+                *(it+16+15));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count+32,
+                *(it+32+8),
+                *(it+32+9),
+                *(it+32+10),
+                *(it+32+11),
+                *(it+32+12),
+                *(it+32+13),
+                *(it+32+14),
+                *(it+32+15));
+            printf("Tid: %03d, %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f %5.3f\n",
+                count+32,
+                *(it+48+8),
+                *(it+48+9),
+                *(it+48+10),
+                *(it+48+11),
+                *(it+48+12),
+                *(it+48+13),
+                *(it+48+14),
+                *(it+48+15));
+            it += 256;
+        }
+#endif
+
         ck_tile::reference_batched_softmax<SMPLComputeDataType, SMPLComputeDataType, PDataType>(
             s_host_ref, p_host_ref);
+
         ck_tile::reference_batched_gemm<PDataType, VDataType, OaccDataType, ODataType>(
             p_host_ref, v_host, o_host_ref);
+
+        // printf("===== Host V =====\n");
+        // for (auto i = 0; i < 2; ++i) {
+        //     auto it2 = reinterpret_cast<uint16_t*>(v_host.data());
+        //     for (auto count = 0; count < 32; ++count) {
+        //         printf("Tid: %03d, %04x %04x %04x %04x %04x %04x %04x %04x\n",
+        //             count,
+        //             *(it2+i*16),
+        //             *(it2+i*16+1),
+        //             *(it2+i*16+2),
+        //             *(it2+i*16+3),
+        //             *(it2+i*16+4),
+        //             *(it2+i*16+5),
+        //             *(it2+i*16+6),
+        //             *(it2+i*16+7));
+        //         it2 += 128;
+        //     }
+        //     it2 = reinterpret_cast<uint16_t*>(v_host.data());
+        //     for (auto count = 0; count < 32; ++count) {
+        //         printf("Tid: %03d, %04x %04x %04x %04x %04x %04x %04x %04x\n",
+        //             count+32,
+        //             *(it2+i*16+8),
+        //             *(it2+i*16+9),
+        //             *(it2+i*16+10),
+        //             *(it2+i*16+11),
+        //             *(it2+i*16+12),
+        //             *(it2+i*16+13),
+        //             *(it2+i*16+14),
+        //             *(it2+i*16+15));
+        //         it2 += 128;
+        //     }
+        // }
 
         pass &= ck_tile::check_err(o_host_dev, o_host_ref);
         std::cout << "valid:" << (pass ? "y" : "n") << std::endl;

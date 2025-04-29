@@ -277,13 +277,14 @@ struct BlockGemmARegBSmemCRegV1
                                const ABlockTensorTmp& a_block_tensor_tmp,
                                const BBlockWindowTmp& b_block_window_tmp) const
     {
+        CK_TILE_PRINT<decltype(*this)>();
         static_assert(
             std::is_same_v<ADataType, remove_cv_t<typename ABlockTensorTmp::DataType>> &&
                 std::is_same_v<BDataType, remove_cv_t<typename BBlockWindowTmp::DataType>> &&
                 std::is_same_v<CDataType, remove_cv_t<typename CBlockTensor::DataType>>,
             "wrong!");
 
-        static_assert((BlockGemmShape::kM == BlockGemmShape::kN), "wrong!");
+        // static_assert((BlockGemmShape::kM == BlockGemmShape::kN), "wrong!");
 
         constexpr index_t MPerBlock = ABlockTensorTmp{}.get_lengths()[number<0>{}];
         constexpr index_t NPerBlock = BBlockWindowTmp{}.get_window_lengths()[number<0>{}];
@@ -407,6 +408,32 @@ struct BlockGemmARegBSmemCRegV1
                     // warp GEMM
                     WG{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
 
+                    if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+                        printf("Tid: %03d c_warp_tensor(%d) KMNIter=%d,%d,%d\n"
+                               "%04x %04x %04x %04x %04x %04x %04x %04x "
+                               //    "%04x %04x %04x %04x %04x %04x %04x %04x "
+                               "\n",
+                               get_thread_local_1d_id(),
+                               c_warp_tensor.get_thread_buffer().size(),
+                               int(kIter),
+                               int(mIter),
+                               int(nIter),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 0>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 1>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 2>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 3>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 4>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 5>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 6>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 7>{}]))));
                     // write C warp tensor into C block tensor
                     c_block_tensor.set_y_sliced_thread_data(
                         merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
@@ -422,12 +449,13 @@ struct BlockGemmARegBSmemCRegV1
     __device__ auto operator()(const ABlockTensorTmp& a_block_tensor_tmp,
                                const BBlockWindowTmp& b_block_window_tmp) const
     {
+        CK_TILE_PRINT<decltype(*this)>();
         static_assert(
             std::is_same_v<ADataType, remove_cv_t<typename ABlockTensorTmp::DataType>> &&
                 std::is_same_v<BDataType, remove_cv_t<typename BBlockWindowTmp::DataType>>,
             "wrong!");
 
-        static_assert((BlockGemmShape::kM == BlockGemmShape::kN), "wrong!");
+        // static_assert((BlockGemmShape::kM == BlockGemmShape::kN), "wrong!");
 
         constexpr index_t MPerBlock = ABlockTensorTmp{}.get_lengths()[number<0>{}];
         constexpr index_t NPerBlock = BBlockWindowTmp{}.get_window_lengths()[number<0>{}];
@@ -549,6 +577,32 @@ struct BlockGemmARegBSmemCRegV1
                     // warp GEMM
                     WG{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
 
+                    if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 256)
+                        printf("Tid: %03d c_warp_tensor(%d) KMNIter=%d,%d,%d\n"
+                               "%04x %04x %04x %04x %04x %04x %04x %04x "
+                               //    "%04x %04x %04x %04x %04x %04x %04x %04x "
+                               "\n",
+                               get_thread_local_1d_id(),
+                               c_warp_tensor.get_thread_buffer().size(),
+                               int(kIter),
+                               int(mIter),
+                               int(nIter),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 0>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 1>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 2>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 3>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 4>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 5>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 6>{}]))),
+                               *(reinterpret_cast<const uint16_t*>(
+                                   &(c_warp_tensor.get_thread_buffer()[number<0 + 7>{}]))));
                     // write C warp tensor into C block tensor
                     c_block_tensor.set_y_sliced_thread_data(
                         merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),

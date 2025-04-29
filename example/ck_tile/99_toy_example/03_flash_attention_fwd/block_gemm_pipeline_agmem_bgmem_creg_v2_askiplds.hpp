@@ -306,6 +306,26 @@ struct BlockGemmPipelineAGmemBGmemCReg
 
             // LDS read 0
             bWarpTile = load_tile(b_lds_gemm_window);
+            //     if(get_block_1d_id() == 0 && get_thread_local_1d_id() < 64){
+            //         printf("Tid: %03d, %04x %04x %04x %04x %04x %04x %04x %04x\n",
+            //                 get_thread_local_1d_id(),
+            //                 *(reinterpret_cast<const
+            //                 uint16_t*>(&(bWarpTile.get_thread_buffer()[number<0>{}]))),
+            //                 *(reinterpret_cast<const
+            //                 uint16_t*>(&(bWarpTile.get_thread_buffer()[number<1>{}]))),
+            //                 *(reinterpret_cast<const
+            //                 uint16_t*>(&(bWarpTile.get_thread_buffer()[number<2>{}]))),
+            //                 *(reinterpret_cast<const
+            //                 uint16_t*>(&(bWarpTile.get_thread_buffer()[number<3>{}]))),
+            //                 *(reinterpret_cast<const
+            //                 uint16_t*>(&(bWarpTile.get_thread_buffer()[number<4>{}]))),
+            //                 *(reinterpret_cast<const
+            //                 uint16_t*>(&(bWarpTile.get_thread_buffer()[number<5>{}]))),
+            //                 *(reinterpret_cast<const
+            //                 uint16_t*>(&(bWarpTile.get_thread_buffer()[number<6>{}]))),
+            //                 *(reinterpret_cast<const
+            //                 uint16_t*>(&(bWarpTile.get_thread_buffer()[number<7>{}]))));
+            //     }
         }
 
         if constexpr(k_loops > 2)
@@ -374,9 +394,9 @@ struct BlockGemmPipelineAGmemBGmemCReg
     {
         return operator()(
             a_dram_block_window_tmp,
-            [](const ADataType & a) { return a; },
+            [](const ADataType& a) { return a; },
             b_dram_block_window_tmp,
-            [](const BDataType & b) { return b; },
+            [](const BDataType& b) { return b; },
             a_reg_block_tensor_tmp,
             p_smem);
     }
@@ -388,7 +408,7 @@ struct BlockGemmPipelineAGmemBGmemCReg
     {
         return operator()(
             b_dram_block_window_tmp,
-            [](const BDataType & b) { return b; },
+            [](const BDataType& b) { return b; },
             a_reg_block_tensor_tmp,
             p_smem);
     }
