@@ -128,6 +128,7 @@ macro(enable_clang_tidy)
         ${CLANG_TIDY_ANALYZE_TEMPORARY_DTORS}
         -header-filter='${CLANG_TIDY_HEADER_FILTER}'
     )
+    message(STATUS "CLANG_TIDY_ALL: ${CLANG_TIDY_ALL}")
     add_custom_target(tidy ${CLANG_TIDY_ALL})
     mark_as_analyzer(tidy)
     add_custom_target(tidy-base)
@@ -142,21 +143,25 @@ function(clang_tidy_check TARGET)
     # TODO: Use generator expressions instead
     # COMMAND ${CLANG_TIDY_COMMAND} $<TARGET_PROPERTY:${TARGET},SOURCES>
     # COMMAND ${CLANG_TIDY_COMMAND} $<JOIN:$<TARGET_PROPERTY:${TARGET},SOURCES>, >
+
+    set(tidy_target tidy-target-${TARGET})
+    add_custom_target(${tidy_target} COMMENT "clang-tidy: Running clang-tidy on target ${SOURCE}...")
     foreach(SOURCE ${SOURCES})
         if((NOT "${SOURCE}" MATCHES "(h|hpp|hxx)$") AND (NOT "${SOURCE}" MATCHES "TARGET_OBJECTS"))
             string(MD5 tidy_file "${SOURCE}")
-            set(tidy_target tidy-target-${TARGET}-${tidy_file})
-            add_custom_target(${tidy_target}
+            set(tidy_target_file tidy-target-${TARGET}-${tidy_file})
+            add_custom_target(${tidy_target_file}
                 # for some targets clang-tidy not able to get information from .clang-tidy
                 DEPENDS ${SOURCE}
                 COMMAND ${CLANG_TIDY_COMMAND} "-config=\{CheckOptions: \[\{key: bugprone-reserved-identifier.AllowedIdentifiers,value: __HIP_PLATFORM_HCC__\; __HIP_PLATFORM_AMD__\; __HIP_ROCclr__\}\]\}" ${SOURCE} "-export-fixes=${CLANG_TIDY_FIXIT_DIR}/${TARGET}-${tidy_file}.yaml"
                 WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                 COMMENT "clang-tidy: Running clang-tidy on target ${SOURCE}..."
             )
-            add_dependencies(${tidy_target} ${TARGET})
-            add_dependencies(${tidy_target} tidy-base)
-            add_dependencies(tidy ${tidy_target})
+            add_dependencies(${tidy_target_file} ${TARGET})
+            add_dependencies(${tidy_target_file} tidy-base)
+            add_dependencies(${tidy_target} ${tidy_target_file})
         endif()
     endforeach()
+    add_dependencies(tidy ${tidy_target})
 endfunction()
 
