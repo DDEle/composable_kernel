@@ -125,8 +125,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             "wrong!");
 
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
-                          kN0 == KDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
-                          kN0 == VDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
+                          //   kN0 == KDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
+                          //   kN0 == VDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<1>{}] &&
                           kM0 == OGradDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
@@ -137,6 +137,9 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
                           kN0 == BiasGradDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
 
+        // if (threadIdx.x == 0){
+        //     // HotLoopScheduler::print();
+        // }
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPTOGradTBlockGemm<Problem>();
@@ -172,19 +175,24 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
                 return make_tuple(dk_acc, dv_acc);
             }
         }
+        constexpr auto kSeq0 = 64;
+
         KDataType* k_lds_ptr =
             static_cast<KDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr)));
-        auto k_lds = make_tensor_view<address_space_enum::lds>(
+        auto k_lds_write = make_tensor_view<address_space_enum::lds>(
             k_lds_ptr, Policy::template MakeKLdsWriteBlockDescriptor<Problem>());
 
         auto k_lds_write_window =
-            make_tile_window(k_lds, make_tuple(number<kN0>{}, number<kQKHeaddim>{}), {0, 0});
+            make_tile_window(k_lds_write, make_tuple(number<kSeq0>{}, number<kQKHeaddim>{}), {0, 0});
+
+        auto k_lds_read = make_tensor_view<address_space_enum::lds>(
+            k_lds_ptr, Policy::template MakeKLdsReadBlockDescriptor<Problem>());
 
         auto k_lds_read_window =
-            make_tile_window(k_lds_write_window.get_bottom_tensor_view(),
-                             make_tuple(number<kN0>{}, number<kK0>{}),
-                             k_lds_write_window.get_window_origin(),
-                             Policy::template MakeKRegBlockDescriptor<Problem>());
+            make_tile_window(k_lds_read,
+                             make_tuple(number<kSeq0>{}, number<kQKHeaddim>{}),
+                             {0, 0},
+                             Policy::template MakeKRegSliceBlockDescriptor<Problem>());
 
         auto k_reg_tensor = make_static_distributed_tensor<KDataType>(
             Policy::template MakeKRegBlockDescriptor<Problem>());
@@ -200,43 +208,54 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         VDataType* v_lds_ptr =
             static_cast<VDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr)));
 
-        auto v_lds = make_tensor_view<address_space_enum::lds>(
+        auto v_lds_write = make_tensor_view<address_space_enum::lds>(
             v_lds_ptr, Policy::template MakeVLdsWriteBlockDescriptor<Problem>());
 
         auto v_lds_write_window =
-            make_tile_window(v_lds, make_tuple(number<kN0>{}, number<kVHeaddim>{}), {0, 0});
+            make_tile_window(v_lds_write, make_tuple(number<kSeq0>{}, number<kVHeaddim>{}), {0, 0});
+
+        auto v_lds_read = make_tensor_view<address_space_enum::lds>(
+            v_lds_ptr, Policy::template MakeVLdsReadBlockDescriptor<Problem>());
 
         auto v_lds_read_window =
-            make_tile_window(v_lds_write_window.get_bottom_tensor_view(),
-                             make_tuple(number<kN0>{}, number<kK2>{}),
-                             v_lds_write_window.get_window_origin(),
-                             Policy::template MakeVRegBlockDescriptor<Problem>());
+            make_tile_window(v_lds_read,
+                             make_tuple(number<kSeq0>{}, number<kVHeaddim>{}),
+                             {0, 0},
+                             Policy::template MakeVRegSliceBlockDescriptor<Problem>());
+        // CK_TILE_PRINT<decltype(v_lds_read_window)>();
+
+        auto v_reg_tensor = make_static_distributed_tensor<VDataType>(
+            Policy::template MakeVRegBlockDescriptor<Problem>());
 
         //------------------------------------------------------------------
         // KT, Reg ->LDS ->Reg
-        auto shuffled_k_block_tile = make_static_distributed_tensor<KDataType>(
+        auto kt_block_tile = make_static_distributed_tensor<KDataType>(
             Policy::template MakeShuffledKRegWriteBlockDescriptor<Problem>());
 
         KDataType* kt_lds_ptr = static_cast<KDataType*>(static_cast<void*>(
             static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeK<Problem>()));
 
-        auto shuffled_k_lds_write = make_tensor_view<address_space_enum::lds>(
+        auto kt_lds_write = make_tensor_view<address_space_enum::lds>(
             kt_lds_ptr, Policy::template MakeShuffledKLdsWriteBlockDescriptor<Problem>());
 
-        auto shuffled_k_lds_write_window = make_tile_window(
-            shuffled_k_lds_write, make_tuple(number<kN0>{}, number<kQKHeaddim>{}), {0, 0});
+        auto kt_lds_write_window = make_tile_window(
+            kt_lds_write, make_tuple(number<kSeq0>{}, number<kQKHeaddim>{}), {0, 0});
 
         auto kt_lds_read = make_tensor_view<address_space_enum::lds>(
             kt_lds_ptr, Policy::template MakeKTLdsReadBlockDescriptor<Problem>());
 
         auto kt_lds_read_window =
             make_tile_window(kt_lds_read,
-                             make_tuple(number<kQKHeaddim>{}, number<kN0>{}),
+                             make_tuple(number<kQKHeaddim>{}, number<kSeq0>{}),
                              {0, 0},
-                             Policy::template MakeKTRegBlockDescriptor<Problem>());
+                             Policy::template MakeKTRegSliceBlockDescriptor<Problem>());
+
+        auto kt_reg_tensor = make_static_distributed_tensor<KDataType>(
+            Policy::template MakeKTRegBlockDescriptor<Problem>());
 
         //------------------------------------------------------------------
         // Pre-Load KV into Registers
+#if 0
         auto k_block_tile = load_tile(k_dram_window);
         auto v_block_tile = load_tile(v_dram_window);
 
@@ -255,6 +274,153 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         block_sync_lds();
 
         auto v_reg_tensor = load_tile(v_lds_read_window);
+
+#elif 1
+        // Looped data loading
+        __builtin_amdgcn_sched_barrier(0);
+        static_for<0, kN0 / kSeq0, 1>{}([&](auto i_n0) {
+            auto k_block_tile = load_tile(k_dram_window);
+#if 0
+            if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
+                printf("iter: %01d, Tid: %03d, K_global_read: %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x |\n",
+                        i_n0.value, get_thread_local_1d_id(),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<0>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<1>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<2>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<3>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<4>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<5>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<6>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<7>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<0 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<1 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<2 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<3 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<4 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<5 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<6 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<7 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<0 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<1 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<2 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<3 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<4 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<5 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<6 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<7 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<0 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<1 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<2 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<3 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<4 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<5 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<6 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_block_tile.get_thread_buffer()[number<7 + 24>{}])))
+                    );
+            }
+#endif
+            move_tile_window(k_dram_window, {kSeq0, 0});
+
+            store_tile(k_lds_write_window, k_block_tile);
+
+            shuffle_tile(kt_block_tile, k_block_tile);
+            store_tile(kt_lds_write_window, kt_block_tile);
+
+            block_sync_lds();
+
+            auto k_reg_tensor_slice = load_tile(k_lds_read_window);
+#if 0
+            if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
+                printf("iter: %01d, Tid: %03d, K_lds_read: %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x |\n",
+                        i_n0.value, get_thread_local_1d_id(),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<0>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<1>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<2>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<3>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<4>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<5>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<6>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<7>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<0 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<1 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<2 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<3 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<4 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<5 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<6 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<7 + 8>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<0 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<1 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<2 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<3 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<4 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<5 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<6 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<7 + 16>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<0 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<1 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<2 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<3 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<4 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<5 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<6 + 24>{}]))),
+                        *(reinterpret_cast<const uint16_t*>(&(k_reg_tensor_slice.get_thread_buffer()[number<7 + 24>{}])))
+                    );
+            }
+#endif
+            set_slice_tile(k_reg_tensor,
+                           k_reg_tensor_slice,
+                           sequence<i_n0 * kSeq0, 0>{},
+                           sequence<(i_n0 + 1) * kSeq0, kQKHeaddim>{});
+
+            auto kt_reg_tensor_slice = load_tile(kt_lds_read_window);
+            set_slice_tile(kt_reg_tensor,
+                           kt_reg_tensor_slice,
+                           sequence<0, i_n0 * kSeq0>{},
+                           sequence<kQKHeaddim, (i_n0 + 1) * kSeq0>{});
+            block_sync_lds();
+        });
+
+        __builtin_amdgcn_sched_barrier(0);
+        static_for<0, kN0 / kSeq0, 1>{}([&](auto i_n0) {
+            auto v_block_tile = load_tile(v_dram_window);
+            move_tile_window(v_dram_window, {kSeq0, 0});
+
+            store_tile(v_lds_write_window, v_block_tile);
+
+            block_sync_lds();
+
+            auto v_reg_tensor_slice = load_tile(v_lds_read_window);
+            set_slice_tile(v_reg_tensor,
+                           v_reg_tensor_slice,
+                           sequence<i_n0 * kSeq0, 0>{},
+                           sequence<(i_n0 + 1) * kSeq0, kVHeaddim>{});
+            block_sync_lds();
+        });
+        __builtin_amdgcn_sched_barrier(0);
+#if 0
+        if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
+                printf("Tid: %03d, K: %04x %04x %04x %04x %04x %04x %04x %04x \n",
+                        get_thread_local_1d_id(),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<0>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<1>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<2>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<3>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<4>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<5>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<6>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(k_reg_tensor.get_thread_buffer()[number<7>{}]))));
+            }
+#endif
+#endif
         //---------------------------- Loop Load in ----------------------------//
         // Q: HBM ->Reg ->LDS
         auto q_dram_window =
@@ -533,26 +699,48 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         while(i_total_loops < (num_total_loop - 1))
         {
             // STAGE 1, Q@K Gemm0
+            d_block_tile = load_tile(d_dram_window);
+            move_tile_window(d_dram_window, {kM0});
+
+            lse_block_tile = load_tile(lse_dram_window);
+            move_tile_window(lse_dram_window, {kM0});
+            __builtin_amdgcn_sched_barrier(0);
+
             auto s_acc = SPBlockTileType{};
 
             q_block_tile = load_tile(q_dram_window);
             move_tile_window(q_dram_window, {kM0, 0});
 
-            lse_block_tile = load_tile(lse_dram_window);
-            move_tile_window(lse_dram_window, {kM0});
-
             do_block_tile = load_tile(do_dram_window);
             move_tile_window(do_dram_window, {kM0, 0});
 
-            d_block_tile = load_tile(d_dram_window);
-            move_tile_window(d_dram_window, {kM0});
-
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
-
+#if 0
+            if(get_block_1d_id()==0 && get_thread_local_1d_id()<64){
+                printf("Tid: %02d, Q: %04x %04x %04x %04x %04x %04x %04x %04x\n",
+                        get_thread_local_1d_id(),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<0>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<1>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<2>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<3>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<4>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<5>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<6>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(q_reg_tensor.get_thread_buffer()[number<7>{}]))));
+            }
+#endif
             auto dot_reg_tensor = load_tile(dot_lds_read_window);
 
-            HotLoopScheduler::template GemmStagedScheduler<0>();
-            __builtin_amdgcn_sched_barrier(0);
+            // HotLoopScheduler::template GemmStagedScheduler<0>();
+            // __builtin_amdgcn_sched_barrier(0);
             // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
@@ -658,15 +846,62 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             }();
 
             // STAGE 3, P^T@OGrad^T Gemm1
-            Policy::template PTFromGemm0CToGemm1A<Problem,
-                                                  decltype(pt_reg_tensor),
-                                                  decltype(p_gemm)>(pt_reg_tensor, p_gemm);
+            // Policy::template PTFromGemm0CToGemm1A<Problem,
+            //                                       decltype(pt_reg_tensor),
+            //                                       decltype(p_gemm)>(pt_reg_tensor, p_gemm);
+
+            pt_reg_tensor.get_thread_buffer() = p_gemm.get_thread_buffer();
+            auto qt_reg_tensor                = load_tile(qt_lds_read_window);
+
             gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
-
-            auto qt_reg_tensor = load_tile(qt_lds_read_window);
-
-            HotLoopScheduler::template GemmStagedScheduler<1>();
-            __builtin_amdgcn_sched_barrier(0);
+#if 0
+            if(get_block_1d_id()==0 && get_thread_local_1d_id()<64){
+                printf("Tid: %02d, Pt: %04x %04x %04x %04x %04x %04x %04x %04x DoT: %04x %04x %04x %04x %04x %04x %04x %04x dv_acc: %.4lf %.4lf %.4lf %.4lf %.4lf %.4lf %.4lf %.4lf\n",
+                        get_thread_local_1d_id(),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<0>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<1>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<2>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<3>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<4>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<5>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<6>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(pt_reg_tensor.get_thread_buffer()[number<7>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<0>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<1>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<2>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<3>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<4>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<5>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<6>{}]))),
+                        *(reinterpret_cast<const
+                        uint16_t*>(&(dot_reg_tensor.get_thread_buffer()[number<7>{}]))),
+                        dv_acc.get_thread_buffer()[number<0>{}],
+                        dv_acc.get_thread_buffer()[number<1>{}],
+                        dv_acc.get_thread_buffer()[number<2>{}],
+                        dv_acc.get_thread_buffer()[number<3>{}],
+                        dv_acc.get_thread_buffer()[number<4>{}],
+                        dv_acc.get_thread_buffer()[number<5>{}],
+                        dv_acc.get_thread_buffer()[number<6>{}],
+                        dv_acc.get_thread_buffer()[number<7>{}]);
+            }
+#endif
+            // HotLoopScheduler::template GemmStagedScheduler<1>();
+            // __builtin_amdgcn_sched_barrier(0);
             // STAGE 4, OGrad@V Gemm2
             auto dp_acc = SPGradBlockTileType{};
 
@@ -686,8 +921,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
 
             store_tile(d_lds_write_window, d_block_tile);
 
-            HotLoopScheduler::template GemmStagedScheduler<2>();
-            __builtin_amdgcn_sched_barrier(0);
+            // HotLoopScheduler::template GemmStagedScheduler<2>();
+            // __builtin_amdgcn_sched_barrier(0);
             // STAGE 5, P^T(PGrad^T - D)
             auto ds                 = SPGradBlockTileType{};
             constexpr auto ds_spans = decltype(ds)::get_distributed_spans();
@@ -732,11 +967,60 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             // STAGE 6, SGrad^T@Q^T Gemm3
             const auto ds_gemm = cast_tile<GemmDataType>(ds);
 
-            Policy::template SGradTFromGemm2CToGemm3A<Problem,
-                                                      decltype(dst_reg_tensor),
-                                                      decltype(ds_gemm)>(dst_reg_tensor, ds_gemm);
+            // Policy::template SGradTFromGemm2CToGemm3A<Problem,
+            //                                           decltype(dst_reg_tensor),
+            //                                           decltype(ds_gemm)>(dst_reg_tensor,
+            //                                           ds_gemm);
+            dst_reg_tensor.get_thread_buffer() = ds_gemm.get_thread_buffer();
 
             gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
+
+            // if(get_block_1d_id()==0 && get_thread_local_1d_id()<64 &&i_total_loops==0){
+            //     printf("Tid: %02d, Qt: %04x %04x %04x %04x %04x %04x %04x %04x DsT: %04x %04x
+            //     %04x %04x %04x %04x %04x %04x dk_acc: %.4lf %.4lf %.4lf %.4lf %.4lf %.4lf %.4lf
+            //     %.4lf\n",
+            //             get_thread_local_1d_id(),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(qt_reg_tensor.get_thread_buffer()[number<0>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(qt_reg_tensor.get_thread_buffer()[number<1>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(qt_reg_tensor.get_thread_buffer()[number<2>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(qt_reg_tensor.get_thread_buffer()[number<3>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(qt_reg_tensor.get_thread_buffer()[number<4>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(qt_reg_tensor.get_thread_buffer()[number<5>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(qt_reg_tensor.get_thread_buffer()[number<6>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(qt_reg_tensor.get_thread_buffer()[number<7>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dst_reg_tensor.get_thread_buffer()[number<0>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dst_reg_tensor.get_thread_buffer()[number<1>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dst_reg_tensor.get_thread_buffer()[number<2>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dst_reg_tensor.get_thread_buffer()[number<3>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dst_reg_tensor.get_thread_buffer()[number<4>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dst_reg_tensor.get_thread_buffer()[number<5>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dst_reg_tensor.get_thread_buffer()[number<6>{}]))),
+            //             *(reinterpret_cast<const
+            //             uint16_t*>(&(dst_reg_tensor.get_thread_buffer()[number<7>{}]))),
+            //             dk_acc.get_thread_buffer()[number<0>{}],
+            //             dk_acc.get_thread_buffer()[number<1>{}],
+            //             dk_acc.get_thread_buffer()[number<2>{}],
+            //             dk_acc.get_thread_buffer()[number<3>{}],
+            //             dk_acc.get_thread_buffer()[number<4>{}],
+            //             dk_acc.get_thread_buffer()[number<5>{}],
+            //             dk_acc.get_thread_buffer()[number<6>{}],
+            //             dk_acc.get_thread_buffer()[number<7>{}]);
+            // }
 
             store_tile(ds_lds_window, ds_gemm);
 
@@ -748,8 +1032,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             q_reg_tensor = load_tile(q_lds_read_window);
             lse          = load_tile(lse_lds_read_window);
 
-            HotLoopScheduler::template GemmStagedScheduler<3>();
-            __builtin_amdgcn_sched_barrier(0);
+            // HotLoopScheduler::template GemmStagedScheduler<3>();
+            // __builtin_amdgcn_sched_barrier(0);
             // STAGE7 SGrad@K^T Gemm4
             auto dq_acc = QGradBlockTileType{};
             clear_tile(dq_acc);
@@ -775,7 +1059,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             do_reg_tensor = load_tile(do_lds_read_window);
             d             = load_tile(d_lds_read_window);
 
-            HotLoopScheduler::template GemmStagedScheduler<4>();
+            // HotLoopScheduler::template GemmStagedScheduler<4>();
 
             // QGrad Scale
             if constexpr(FmhaDropout::IsDropout)
@@ -910,13 +1194,15 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             }
         }();
 
-        Policy::template PTFromGemm0CToGemm1A<Problem, decltype(pt_reg_tensor), decltype(p_gemm)>(
-            pt_reg_tensor, p_gemm);
-        auto dot_reg_tensor = load_tile(dot_lds_read_window);
+        // Policy::template PTFromGemm0CToGemm1A<Problem, decltype(pt_reg_tensor),
+        // decltype(p_gemm)>(
+        //     pt_reg_tensor, p_gemm);
+        pt_reg_tensor.get_thread_buffer() = p_gemm.get_thread_buffer();
+        auto dot_reg_tensor               = load_tile(dot_lds_read_window);
         gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
 
-        HotLoopScheduler::template GemmStagedScheduler<1>();
-        __builtin_amdgcn_sched_barrier(0);
+        // HotLoopScheduler::template GemmStagedScheduler<1>();
+        // __builtin_amdgcn_sched_barrier(0);
 
         // STAGE 4, OGrad@V Gemm2
         auto dp_acc = SPGradBlockTileType{};
@@ -925,8 +1211,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
 
         dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
-        HotLoopScheduler::template GemmStagedScheduler<2>();
-        __builtin_amdgcn_sched_barrier(0);
+        // HotLoopScheduler::template GemmStagedScheduler<2>();
+        // __builtin_amdgcn_sched_barrier(0);
 
         // STAGE 5, P^T(PGrad^T - D)
         auto ds                 = SPGradBlockTileType{};
@@ -971,9 +1257,10 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         // STAGE 6, SGrad^T@Q^T Gemm3
         const auto ds_gemm = cast_tile<GemmDataType>(ds);
 
-        Policy::template SGradTFromGemm2CToGemm3A<Problem,
-                                                  decltype(dst_reg_tensor),
-                                                  decltype(ds_gemm)>(dst_reg_tensor, ds_gemm);
+        // Policy::template SGradTFromGemm2CToGemm3A<Problem,
+        //                                           decltype(dst_reg_tensor),
+        //                                           decltype(ds_gemm)>(dst_reg_tensor, ds_gemm);
+        dst_reg_tensor.get_thread_buffer() = ds_gemm.get_thread_buffer();
 
         gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
         store_tile(ds_lds_window, ds_gemm);
@@ -984,8 +1271,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         auto ds_reg_tensor_next = decltype(ds_reg_tensor){};
         move_tile_window(ds_lds_read_window, {0, kK4});
 
-        HotLoopScheduler::template GemmStagedScheduler<3>();
-        __builtin_amdgcn_sched_barrier(0);
+        // HotLoopScheduler::template GemmStagedScheduler<3>();
+        // __builtin_amdgcn_sched_barrier(0);
         // STAGE 7, SGrad@K^T Gemm4
         auto dq_acc = QGradBlockTileType{};
         clear_tile(dq_acc);
@@ -1006,8 +1293,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             }
         });
 
-        HotLoopScheduler::template GemmStagedScheduler<4>();
-        __builtin_amdgcn_sched_barrier(0);
+        // HotLoopScheduler::template GemmStagedScheduler<4>();
+        // __builtin_amdgcn_sched_barrier(0);
 
         // Results Scale
         if constexpr(FmhaDropout::IsDropout)

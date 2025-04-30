@@ -39,6 +39,11 @@ using WarpGemmMfmaF16F16F32M16N16K32 = WarpGemmImpl<WarpGemmAtrributeMfmaIterate
     2>>;
 #endif
 
+using WarpGemmMfmaF16F16F32M16N16K32StaggeredK = WarpGemmImpl<WarpGemmAtrributeMfmaIterateK<
+    WarpGemmAttributeMfmaImplF16F16F32M16N16K16<WGAttrCtlEnum::Default_>,
+    2,
+    true>>;
+
 using WarpGemmMfmaF16F16F32M32N32K8SwizzleA = WarpGemmImpl<WarpGemmAtrributeMfmaIterateK_SwizzleA<
     WarpGemmAttributeMfmaImplF16F16F32M32N32K8<WGAttrCtlEnum::Default_>,
     1>>;
@@ -96,6 +101,11 @@ using WarpGemmMfmaF16F16F32M64N4K16 = WarpGemmImpl<WarpGemmAtrributeMfmaIterateK
     WarpGemmAttributeMfmaImplF16F16F32M64N4K4<WGAttrCtlEnum::Default_>,
     4>>;
 
+using WarpGemmMfmaF16F16F32M16N32K16TransposedCDistribution =
+    WarpGemmImpl<WarpGemmAtrributeMfmaIterateNAndTransposedCDistribution<
+        WarpGemmAttributeMfmaImplF16F16F32M16N16K16<WGAttrCtlEnum::Default_>,
+        2>>;
+
 // fp16 2:4 structured sparsity
 
 using WarpGemmSmfmacF16F16F32M32N32K16 = WarpGemmSmfmacImpl<WarpGemmAttributeSmfmac<
@@ -129,6 +139,11 @@ using WarpGemmMfmaBf16Bf16F32M16N16K32 = WarpGemmImpl<WarpGemmAtrributeMfmaItera
     WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<WGAttrCtlEnum::Default_>,
     2>>;
 #endif
+
+using WarpGemmMfmaBf16Bf16F32M16N16K32StaggeredK = WarpGemmImpl<WarpGemmAtrributeMfmaIterateK<
+    WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<WGAttrCtlEnum::Default_>,
+    2,
+    true>>;
 
 using WarpGemmMfmaBf16Bf16F32M32N32K8SwizzleA = WarpGemmImpl<WarpGemmAtrributeMfmaIterateK_SwizzleA<
     WarpGemmAttributeMfmaImplBf16Bf16F32M32N32K8<WGAttrCtlEnum::Default_>,
@@ -188,6 +203,10 @@ using WarpGemmMfmaBf16Bf16F32M64N4K16 = WarpGemmImpl<WarpGemmAtrributeMfmaIterat
     WarpGemmAttributeMfmaImplBf16Bf16F32M64N4K4<WGAttrCtlEnum::Default_>,
     4>>;
 
+using WarpGemmMfmaBf16Bf16F32M16N32K16TransposedCDistribution =
+    WarpGemmImpl<WarpGemmAtrributeMfmaIterateNAndTransposedCDistribution<
+        WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<WGAttrCtlEnum::Default_>,
+        2>>;
 // fp8
 
 using WarpGemmMfma_f32_32x32x16_fp8_fp8 = WarpGemmImpl<

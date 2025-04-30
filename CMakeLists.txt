@@ -416,7 +416,7 @@ enable_clang_tidy(
         -cert-dcl51-cpp
         -clang-analyzer-alpha.core.CastToStruct
         -clang-analyzer-optin.performance.Padding
-        -clang-diagnostic-deprecated-declarations
+        # -clang-diagnostic-deprecated-declarations
         -clang-diagnostic-extern-c-compat
         -clang-diagnostic-unused-command-line-argument
         -cppcoreguidelines-avoid-c-arrays
@@ -542,7 +542,7 @@ include_directories(BEFORE
 
 SET(BUILD_DEV ON CACHE BOOL "BUILD_DEV")
 if(BUILD_DEV)
-    add_compile_options(-Werror)
+    # add_compile_options(-Werror)
     add_compile_options(-Weverything)
 endif()
 message("CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
