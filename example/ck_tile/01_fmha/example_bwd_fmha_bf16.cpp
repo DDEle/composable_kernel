@@ -40,17 +40,17 @@ using fmha_bwd_convert_dq_kernel_0 = ck_tile::FmhaBwdConvertQGradKernel<fmha_bwd
 
 using convert_dq_trait_0 = fmha_bwd_convert_dq_traits_<128, FmhaBwdFp16, false, true, false, false>;
 
-template <>
-void fmha_bwd_convert_dq_oneshot_<convert_dq_trait_0>(const ck_tile::stream_config& s,
-                                                      fmha_bwd_args a)
-{
-    using k_                               = fmha_bwd_convert_dq_kernel_0;
-    auto [kargs, grids]                    = fmha_bwd_convert_dq_create_kargs_and_grids<k_>(a);
-    constexpr dim3 blocks                  = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs)(
-        ck_tile::stream_config{s.stream_id_});
-}
+// template <>
+// void fmha_bwd_convert_dq_oneshot_<convert_dq_trait_0>(const ck_tile::stream_config& s,
+//                                                       fmha_bwd_args a)
+// {
+//     using k_                               = fmha_bwd_convert_dq_kernel_0;
+//     auto [kargs, grids]                    = fmha_bwd_convert_dq_create_kargs_and_grids<k_>(a);
+//     constexpr dim3 blocks                  = k_::BlockSize();
+//     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+//     ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs)(
+//         ck_tile::stream_config{s.stream_id_});
+// }
 
 template <>
 std::string fmha_bwd_convert_dq_get_name_<convert_dq_trait_0>()
@@ -189,16 +189,16 @@ using fmha_bwd_dot_do_o_kernel_0 = ck_tile::FmhaBwdOGradDotOKernel<fmha_bwd_dot_
 
 using dot_do_o_trait_0 = fmha_bwd_dot_do_o_traits_<128, FmhaBwdFp16, false, true, false>;
 
-template <>
-void fmha_bwd_dot_do_o_oneshot_<dot_do_o_trait_0>(const ck_tile::stream_config& s, fmha_bwd_args a)
-{
-    using k_                               = fmha_bwd_dot_do_o_kernel_0;
-    auto [kargs, grids]                    = fmha_bwd_dot_do_o_create_kargs_and_grids<k_>(a);
-    constexpr dim3 blocks                  = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs)(
-        ck_tile::stream_config{s.stream_id_});
-}
+// template <>
+// void fmha_bwd_dot_do_o_oneshot_<dot_do_o_trait_0>(const ck_tile::stream_config& s, fmha_bwd_args a)
+// {
+//     using k_                               = fmha_bwd_dot_do_o_kernel_0;
+//     auto [kargs, grids]                    = fmha_bwd_dot_do_o_create_kargs_and_grids<k_>(a);
+//     constexpr dim3 blocks                  = k_::BlockSize();
+//     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+//     ck_tile::make_kernel<blocks.x, kBlockPerCu>(k_{}, grids, blocks, 0, kargs)(
+//         ck_tile::stream_config{s.stream_id_});
+// }
 
 template <>
 std::string fmha_bwd_dot_do_o_get_name_<dot_do_o_trait_0>()
@@ -234,15 +234,16 @@ float fmha_bwd_(const ck_tile::stream_config& s, fmha_bwd_args a)
                   << fmha_bwd_convert_dq_get_name_<convert_dq_trait_>() << std::flush;
     return ck_tile::launch_kernel(
         s,
-        [=](const ck_tile::stream_config& s_) {
-            fmha_bwd_dot_do_o_oneshot_<dot_do_o_trait_>(s_, a);
-        },
+        // [=](const ck_tile::stream_config& s_) {
+        //     fmha_bwd_dot_do_o_oneshot_<dot_do_o_trait_>(s_, a);
+        // },
         [=](const ck_tile::stream_config& s_) {
             fmha_bwd_dq_dk_dv_oneshot_<dq_dk_dv_trait_>(s_, a);
-        },
-        [=](const ck_tile::stream_config& s_) {
-            fmha_bwd_convert_dq_oneshot_<convert_dq_trait_>(s_, a);
-        });
+        }
+        // [=](const ck_tile::stream_config& s_) {
+        //     fmha_bwd_convert_dq_oneshot_<convert_dq_trait_>(s_, a);
+        // }
+    );
 }
 
 float fmha_bwd(fmha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_config& s)

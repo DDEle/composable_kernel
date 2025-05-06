@@ -124,6 +124,9 @@ set(STANDALONE_EXAMPLE_FA_BWD "standalone_example_fa_bwd")
 add_executable(${STANDALONE_EXAMPLE_FA_BWD} EXCLUDE_FROM_ALL example_bwd_fmha_bf16.cpp)
 target_compile_options(${STANDALONE_EXAMPLE_FA_BWD} PRIVATE ${STANDALONE_EXAMPLE_FA_BWD_COMPILE_OPTIONS})
 
+add_executable(example_k_tensor EXCLUDE_FROM_ALL example_k_tensor.cpp)
+target_compile_options(example_k_tensor PRIVATE ${STANDALONE_EXAMPLE_FA_BWD_COMPILE_OPTIONS} --offload-device-only)
+
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
 # by cmake will print too many files, execvp: /bin/sh: Argument list too long
 # however, this property may affect global

@@ -77,9 +77,15 @@ struct tile_window_with_static_distribution
         private:
         static constexpr auto get_vector_dim_y_scalar_per_vector()
         {
-            const auto [ys_vector_lengths, ys_vector_strides] =
-                tile_window_with_static_distribution::
-                    get_window_adaptor_ys_safe_vector_length_strides();
+
+            constexpr auto ys_vector_lengths_strides = tile_window_with_static_distribution::
+                get_window_adaptor_ys_safe_vector_length_strides();
+            constexpr auto ys_vector_lengths = ys_vector_lengths_strides.template get<0>();
+            constexpr auto ys_vector_strides = ys_vector_lengths_strides.template get<1>();
+
+            constexpr auto ys_vector_lengths_seq = TO_SEQUENCE(ys_vector_lengths, ys_vector_lengths.size());
+            constexpr auto ys_vector_strides_seq = TO_SEQUENCE(ys_vector_strides, ys_vector_strides.size());
+            CK_TILE_PRINT<decltype(ys_vector_lengths_seq), decltype(ys_vector_strides_seq)>();
 
             index_t VectorDimY_      = 0;
             index_t ScalarPerVector_ = 1;
@@ -107,7 +113,8 @@ struct tile_window_with_static_distribution
         // using vector_t      = typename vector_type_t::type;
         using vector_t = thread_buffer<DataType, ScalarPerVector / PackedSize>;
 
-        private:
+        // private:
+        public:
         static constexpr auto scalars_per_access_ = [] {
             constexpr auto scalars_per_access_arr = generate_array(
                 [&](auto i) { return (i == VectorDimY) ? ScalarPerVector : 1; }, number<NDimY>{});
@@ -124,6 +131,20 @@ struct tile_window_with_static_distribution
 
             constexpr auto thread_tensor_lengths_ys =
                 to_sequence(tile_dstr.get_ys_to_d_descriptor().get_lengths());
+            CK_TILE_PRINT<decltype(tile_dstr.get_ys_to_d_descriptor())>();
+            using get_ys_to_d_descriptor_t = ck_tile::tensor_descriptor<
+                ck_tile::tuple<ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<1>,
+                                                               ck_tile::constant<4>,
+                                                               ck_tile::constant<2>,
+                                                               ck_tile::constant<4>>,
+                                                false>>,
+                ck_tile::tuple<ck_tile::sequence<0>>,
+                ck_tile::tuple<ck_tile::sequence<1, 2, 3, 4>>,
+                ck_tile::sequence<1, 2, 3, 4>,
+                ck_tile::constant<32>,
+                ck_tile::sequence<-1, -1, -1, -1, -1>,
+                ck_tile::sequence<-1, -1, -1, -1, -1>>;
+            CK_TILE_PRINT<decltype(thread_tensor_lengths_ys)>();
 
             // FIXME: need logic to judge dim access order
             using DimAccessOrder = typename arithmetic_sequence_gen<0, NDimY, 1>::type;
@@ -259,8 +280,19 @@ struct tile_window_with_static_distribution
     CK_TILE_DEVICE static constexpr auto get_window_adaptor_ys_safe_vector_length_strides()
     {
         // bottom tensor top dimension vector lengths and strides
-        const auto [bottom_tensor_top_dim_vector_lengths, bottom_tensor_top_dim_vector_strides] =
+        constexpr auto bottom_tensor_top_dim_vector_lengths_strides =
             BottomTensorDesc::get_top_dimension_safe_vector_length_strides();
+        constexpr auto bottom_tensor_top_dim_vector_lengths =
+            bottom_tensor_top_dim_vector_lengths_strides.template get<0>();
+        constexpr auto bottom_tensor_top_dim_vector_strides =
+            bottom_tensor_top_dim_vector_lengths_strides.template get<1>();
+
+        constexpr auto bottom_tensor_top_dim_vector_lengths_seq =
+            TO_SEQUENCE(bottom_tensor_top_dim_vector_lengths, bottom_tensor_top_dim_vector_lengths.size());
+        constexpr auto bottom_tensor_top_dim_vector_strides_seq =
+            TO_SEQUENCE(bottom_tensor_top_dim_vector_strides, bottom_tensor_top_dim_vector_strides.size());
+        CK_TILE_PRINT<decltype(bottom_tensor_top_dim_vector_lengths_seq),
+                      decltype(bottom_tensor_top_dim_vector_strides_seq)>();
 
         // window vector lengths/strides
         const auto window_adaptor_bottom_dim_vector_lengths = bottom_tensor_top_dim_vector_lengths;

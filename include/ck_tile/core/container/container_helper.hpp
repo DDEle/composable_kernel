@@ -389,6 +389,7 @@ template <typename T, index_t N, index_t... Is>
 CK_TILE_HOST_DEVICE constexpr auto get_container_subset(const array<T, N>& arr, sequence<Is...>)
 {
     static_assert(N >= sizeof...(Is), "wrong! size");
+    static_assert(((N > Is) && ...), "wrong! index");
 
     if constexpr(sizeof...(Is) > 0)
     {

@@ -182,8 +182,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         auto k_lds_write = make_tensor_view<address_space_enum::lds>(
             k_lds_ptr, Policy::template MakeKLdsWriteBlockDescriptor<Problem>());
 
-        auto k_lds_write_window =
-            make_tile_window(k_lds_write, make_tuple(number<kSeq0>{}, number<kQKHeaddim>{}), {0, 0});
+        auto k_lds_write_window = make_tile_window(
+            k_lds_write, make_tuple(number<kSeq0>{}, number<kQKHeaddim>{}), {0, 0});
 
         auto k_lds_read = make_tensor_view<address_space_enum::lds>(
             k_lds_ptr, Policy::template MakeKLdsReadBlockDescriptor<Problem>());
@@ -193,6 +193,160 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
                              make_tuple(number<kSeq0>{}, number<kQKHeaddim>{}),
                              {0, 0},
                              Policy::template MakeKRegSliceBlockDescriptor<Problem>());
+        CK_TILE_PRINT<BlockFmhaShape>();
+        // using aaa =
+        //     ck_tile::TileFmhaBwdShape<ck_tile::sequence<16, 128, 128, 16, 128, 16, 32, 128, 128>,
+        //                               ck_tile::sequence<1, 4, 1>,
+        //                               ck_tile::sequence<16, 16, 32>,
+        //                               ck_tile::sequence<4, 1, 1>,
+        //                               ck_tile::sequence<16, 32, 16>,
+        //                               ck_tile::sequence<1, 4, 1>,
+        //                               ck_tile::sequence<16, 16, 32>,
+        //                               ck_tile::sequence<4, 1, 1>,
+        //                               ck_tile::sequence<16, 32, 16>,
+        //                               ck_tile::sequence<1, 4, 1>,
+        //                               ck_tile::sequence<16, 16, 32>>;
+        using k_lds_read_window_t = decltype(k_lds_read_window);
+
+        // array<tuple<WindowAdaptorCoord, BottomTensorCoord>, NumCoord>
+        CK_TILE_PRINT<decltype(k_lds_read_window.pre_computed_coords_)>();
+        using pre_computed_coords_ = ck_tile::array<
+            ck_tile::tuple<ck_tile::tensor_adaptor_coordinate<11,
+                                                              ck_tile::sequence<0, 1>,
+                                                              ck_tile::sequence<9, 10, 3, 6, 8>>,
+                           ck_tile::tensor_coordinate<13, ck_tile::sequence<11, 12>>>,
+            1>;
+
+        // /root/ck/include/ck_tile/core/tensor/tile_window.hpp:69
+        CK_TILE_PRINT<typename k_lds_read_window_t::WindowAdaptorCoord>();
+        using WindowAdaptor = typename k_lds_read_window_t::WindowAdaptor;
+        static_assert(
+            std::is_same_v<typename decltype(Policy::template MakeKRegSliceBlockDescriptor<
+                                             Problem>())::PsYs2XsAdaptor,
+                           WindowAdaptor>);
+        CK_TILE_PRINT<WindowAdaptor>();
+        using WindowAdaptor_t = ck_tile::tensor_adaptor<
+            ck_tile::tuple<ck_tile::replicate<ck_tile::tuple<ck_tile::constant<1>>>,
+                           ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<1>,
+                                                           ck_tile::constant<4>,
+                                                           ck_tile::constant<16>>,
+                                            false>,
+                           ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<4>,
+                                                           ck_tile::constant<2>,
+                                                           ck_tile::constant<4>,
+                                                           ck_tile::constant<4>>,
+                                            false>,
+                           ck_tile::merge_v2_magic_division<
+                               ck_tile::tuple<ck_tile::constant<1>, ck_tile::constant<4>>>,
+                           ck_tile::merge_v2_magic_division<
+                               ck_tile::tuple<ck_tile::constant<4>, ck_tile::constant<16>>>>,
+            ck_tile::tuple<ck_tile::sequence<>,
+                           ck_tile::sequence<0>,
+                           ck_tile::sequence<1>,
+                           ck_tile::sequence<2, 4>,
+                           ck_tile::sequence<8, 5>>,
+            ck_tile::tuple<ck_tile::sequence<2>,
+                           ck_tile::sequence<3, 4, 5>,
+                           ck_tile::sequence<6, 7, 8, 9>,
+                           ck_tile::sequence<10>,
+                           ck_tile::sequence<11>>,
+            ck_tile::sequence<0, 1>,
+            ck_tile::sequence<10, 11, 3, 6, 7, 9>>;
+        CK_TILE_PRINT<typename k_lds_read_window_t::AdaptorTopIndex>();
+
+        using BottomTensorDesc = typename k_lds_read_window_t::BottomTensorDesc;
+        static_assert(
+            std::is_same_v<decltype(Policy::template MakeKLdsReadBlockDescriptor<Problem>()),
+                           BottomTensorDesc>);
+        CK_TILE_PRINT<BottomTensorDesc>();
+        CK_TILE_PRINT<typename k_lds_read_window_t::BottomTensorIndex>();
+
+        using load_store_traits = typename k_lds_read_window_t::load_store_traits;
+        CK_TILE_PRINT<load_store_traits::NumAccess>();
+        CK_TILE_PRINT<decltype(load_store_traits::scalars_per_access_)>();
+
+        constexpr auto tmp0 = BottomTensorDesc::get_top_dimension_safe_vector_length_strides();
+        // ck_tile::tuple<ck_tile::array<int, 2>, ck_tile::array<int, 2>>
+        CK_TILE_PRINT<tmp0.template get<0>().template get<0>(),
+                      tmp0.template get<0>().template get<1>(),
+                      tmp0.template get<1>().template get<0>(),
+                      tmp0.template get<1>().template get<1>()>();
+        CK_TILE_PRINT<ck_tile::constant<BottomTensorDesc::get_num_of_hidden_dimension()>,
+                      decltype(WindowAdaptor::get_bottom_dimension_hidden_ids())>();
+        CK_TILE_PRINT<k_lds_read_window_t::TileDstr::get_num_of_dimension_p()>();
+        CK_TILE_PRINT<k_lds_read_window_t::NDimWindowAdaptorTop>();
+        
+
+        using Traits        = load_store_traits;
+        constexpr auto tmp2 = generate_tuple(
+            [&](auto i) {
+                using SFC_Ys         = typename Traits::SFC_Ys;
+                constexpr auto NDimY = k_lds_read_window_t::NDimY;
+
+                constexpr index_t iCoordAccess = i / NDimY;
+                constexpr index_t j_           = i % NDimY;
+                constexpr index_t j            = j_ * Traits::ScalarPerVector;
+                constexpr auto iAccess         = number<iCoordAccess>{};
+
+                // data index [y0, y1, ...]
+                constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+
+                constexpr auto idx_ys = generate_tuple(
+                    [&](auto jj) {
+                        return jj == Traits::VectorDimY ? (idx_ys_start[jj] + j) : idx_ys_start[jj];
+                    },
+                    number<NDimY>{});
+                constexpr auto tile_dstr = typename k_lds_read_window_t::TileDstr{};
+
+                constexpr index_t d = tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
+                                      Traits::PackedSize;
+                // constexpr auto idx_ys = idx_ys_start[number<jj>{}];
+                constexpr index_t vec_idx = j / Traits::PackedSize;
+
+                constexpr auto idx_ys_seq = TO_SEQUENCE(idx_ys, NDimY);
+                return merge_sequences(ck_tile::sequence<iCoordAccess, j, d, vec_idx>{},
+                                       idx_ys_seq);
+            },
+            number<(Traits::PackedSize / Traits::ScalarPerVector) * Traits::NumAccess>{});
+        CK_TILE_PRINT<number<Traits::PackedSize>,
+                      number<Traits::ScalarPerVector>,
+                      decltype(tmp2)>();
+        using tmp3 = ck_tile::tuple<
+            //clang-format off
+            ck_tile::sequence<0, 0, 0, 0, 0, 0, 0, 0>,
+            ck_tile::sequence<0, 1, 32, 1, 1, 0, 0, 0>,
+            ck_tile::sequence<0, 2, 64, 2, 2, 0, 0, 0>,
+            ck_tile::sequence<0, 3, 96, 3, 3, 0, 0, 0>,
+            ck_tile::sequence<1, 0, 1, 0, 0, 0, 0, 1>,
+            ck_tile::sequence<1, 1, 33, 1, 1, 0, 0, 1>,
+            ck_tile::sequence<1, 2, 65, 2, 2, 0, 0, 1>,
+            ck_tile::sequence<1, 3, 97, 3, 3, 0, 0, 1>,
+            ck_tile::sequence<2, 0, 2, 0, 0, 0, 0, 2>,
+            ck_tile::sequence<2, 1, 34, 1, 1, 0, 0, 2>,
+            ck_tile::sequence<2, 2, 66, 2, 2, 0, 0, 2>,
+            ck_tile::sequence<2, 3, 98, 3, 3, 0, 0, 2>,
+            ck_tile::sequence<3, 0, 3, 0, 0, 0, 0, 3>,
+            ck_tile::sequence<3, 1, 35, 1, 1, 0, 0, 3>,
+            ck_tile::sequence<3, 2, 67, 2, 2, 0, 0, 3>,
+            ck_tile::sequence<3, 3, 99, 3, 3, 0, 0, 3>,
+            ck_tile::sequence<4, 0, 7, 0, 0, 0, 1, 3>,
+            ck_tile::sequence<4, 1, 39, 1, 1, 0, 1, 3>,
+            ck_tile::sequence<4, 2, 71, 2, 2, 0, 1, 3>,
+            ck_tile::sequence<4, 3, 103, 3, 3, 0, 1, 3>,
+            ck_tile::sequence<5, 0, 6, 0, 0, 0, 1, 2>,
+            ck_tile::sequence<5, 1, 38, 1, 1, 0, 1, 2>,
+            ck_tile::sequence<5, 2, 70, 2, 2, 0, 1, 2>,
+            ck_tile::sequence<5, 3, 102, 3, 3, 0, 1, 2>,
+            ck_tile::sequence<6, 0, 5, 0, 0, 0, 1, 1>,
+            ck_tile::sequence<6, 1, 37, 1, 1, 0, 1, 1>,
+            ck_tile::sequence<6, 2, 69, 2, 2, 0, 1, 1>,
+            ck_tile::sequence<6, 3, 101, 3, 3, 0, 1, 1>,
+            ck_tile::sequence<7, 0, 4, 0, 0, 0, 1, 0>,
+            ck_tile::sequence<7, 1, 36, 1, 1, 0, 1, 0>,
+            ck_tile::sequence<7, 2, 68, 2, 2, 0, 1, 0>,
+            ck_tile::sequence<7, 3, 100, 3, 3, 0, 1, 0>
+            //clang-format on
+            >;
 
         auto k_reg_tensor = make_static_distributed_tensor<KDataType>(
             Policy::template MakeKRegBlockDescriptor<Problem>());
@@ -279,7 +433,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
         // Looped data loading
         __builtin_amdgcn_sched_barrier(0);
         static_for<0, kN0 / kSeq0, 1>{}([&](auto i_n0) {
-            auto k_block_tile = load_tile(k_dram_window);
+            auto k_block_tile = load_tile(k_dram_window); // buffer_load_dword
 #if 0
             if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
                 printf("iter: %01d, Tid: %03d, K_global_read: %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x |\n",
@@ -321,14 +475,18 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
 #endif
             move_tile_window(k_dram_window, {kSeq0, 0});
 
-            store_tile(k_lds_write_window, k_block_tile);
+            store_tile(k_lds_write_window, k_block_tile); // ds_write_b32
 
             shuffle_tile(kt_block_tile, k_block_tile);
             store_tile(kt_lds_write_window, kt_block_tile);
 
             block_sync_lds();
 
-            auto k_reg_tensor_slice = load_tile(k_lds_read_window);
+            auto k_reg_tensor_slice =
+                load_tile(k_lds_read_window); // expect: ds_read_b128
+                                              // actually ds_read_b32/ds_read_b16
+            asm volatile("s_endpgm");
+            __builtin_amdgcn_sched_barrier(0);
 #if 0
             if(get_block_1d_id()==0 && get_thread_local_1d_id()<256){
                 printf("iter: %01d, Tid: %03d, K_lds_read: %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x | %04x %04x %04x %04x %04x %04x %04x %04x |\n",

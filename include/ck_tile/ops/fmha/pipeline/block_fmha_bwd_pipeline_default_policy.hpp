@@ -47,6 +47,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
             false,
             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 16 ? false : true,
+            // false,
             true>;
 
         using BlockGemmPolicy =
@@ -115,6 +116,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             Problem::BlockFmhaShape::Gemm2WarpTile::at(number<2>{}),
             false,
             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 16 ? false : true,
+            // false,
             true>;
 
         using BlockGemmPolicy =
@@ -786,8 +788,8 @@ struct BlockFmhaBwdPipelineDefaultPolicy
 
         constexpr auto lds_16x128_block_desc = transform_tensor_descriptor(
             lds_16x128_block_desc_raw,
-            make_tuple(make_merge_transform_v3_division_mod(
-                           make_tuple(number<MWarp>{}, number<MRepeat>{}, number<MRow>{},number<MPair>{})),
+            make_tuple(make_merge_transform_v3_division_mod(make_tuple(
+                           number<MWarp>{}, number<MRepeat>{}, number<MRow>{}, number<MPair>{})),
                        make_merge_transform_v3_division_mod(make_tuple(number<KWarp>{},
                                                                        number<KRow>{},
                                                                        number<KBit3>{},
@@ -875,7 +877,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t MWarp   = 2;
         constexpr index_t KWarp   = 2;
         constexpr index_t KRow    = 2;
-        constexpr index_t MRow   = 2;
+        constexpr index_t MRow    = 2;
         constexpr index_t KBit0   = 2;
         constexpr index_t KBit1   = 2;
         constexpr index_t KBit2   = 2;
@@ -928,8 +930,11 @@ struct BlockFmhaBwdPipelineDefaultPolicy
 
         constexpr auto lds_64x128_block_desc = transform_tensor_descriptor(
             lds_64x128_block_desc_raw,
-            make_tuple(make_merge_transform_v3_division_mod(make_tuple(
-                           number<MGroup>{}, number<MWarp>{}, number<MRepeat>{}, number<MRow>{}, number<MPair>{})),
+            make_tuple(make_merge_transform_v3_division_mod(make_tuple(number<MGroup>{},
+                                                                       number<MWarp>{},
+                                                                       number<MRepeat>{},
+                                                                       number<MRow>{},
+                                                                       number<MPair>{})),
                        make_merge_transform_v3_division_mod(make_tuple(number<KWarp>{},
                                                                        number<KRow>{},
                                                                        number<KBit3>{},
@@ -948,7 +953,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
         constexpr index_t MWarp   = 2;
         constexpr index_t KWarp   = 2;
         constexpr index_t KRow    = 2;
-        constexpr index_t MRow   = 2;
+        constexpr index_t MRow    = 2;
         constexpr index_t KBit0   = 2;
         constexpr index_t KBit1   = 2;
         constexpr index_t KBit2   = 2;
@@ -997,14 +1002,18 @@ struct BlockFmhaBwdPipelineDefaultPolicy
 
         constexpr auto lds_64x128_block_desc = transform_tensor_descriptor(
             lds_64x128_block_desc_raw,
-            make_tuple(make_merge_transform_v3_division_mod(make_tuple(
-                           number<MGroup>{}, number<MWarp>{}, number<MRepeat>{}, number<MRow>{}, number<MPair>{})),
+            make_tuple(make_merge_transform_v3_division_mod(make_tuple(number<MGroup>{},
+                                                                       number<MWarp>{},
+                                                                       number<MRepeat>{},
+                                                                       number<MRow>{},
+                                                                       number<MPair>{})),
                        make_merge_transform_v3_division_mod(make_tuple(number<KWarp>{},
                                                                        number<KRow>{},
-                                                                       number<K1 * KBit0 * KBit3>{},
                                                                        number<KBit2>{},
-                                                                       number<KBit1>{}))),
-            make_tuple(sequence<0, 4, 5, 8, 2>{}, sequence<1, 3, 9, 7, 6>{}),
+                                                                       number<KBit1>{},
+                                                                       number<K1 * KBit0 * KBit3>{}
+                                                                    ))),
+            make_tuple(sequence<0, 4, 5, 8, 2>{}, sequence<1, 3, 7, 6, 9>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
 
         return lds_64x128_block_desc;
@@ -1304,8 +1313,32 @@ struct BlockFmhaBwdPipelineDefaultPolicy
 
         constexpr auto k_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             k_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
+        CK_TILE_PRINT<decltype(k_block_outer_dstr_encoding)>();
+        // using k_block_outer_dstr_encoding_t = ck_tile::tile_distribution_encoding<
+        //     ck_tile::sequence<1>,
+        //     ck_tile::tuple<ck_tile::sequence<1, 4>, ck_tile::sequence<4>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>>,
+        //     ck_tile::sequence<1, 2>,
+        //     ck_tile::sequence<0, 0>>;
+        CK_TILE_PRINT<typename WarpGemm::BWarpDstrEncoding>();
+        // using BWarpDstrEncoding = ck_tile::tile_distribution_encoding<
+        //     ck_tile::sequence<>,
+        //     ck_tile::tuple<ck_tile::sequence<16>, ck_tile::sequence<2, 4, 4>>,
+        //     ck_tile::tuple<ck_tile::sequence<2, 1>>,
+        //     ck_tile::tuple<ck_tile::sequence<1, 0>>,
+        //     ck_tile::sequence<2, 2>,
+        //     ck_tile::sequence<0, 2>>;
 
         constexpr auto k_block_dstr = make_static_tile_distribution(k_block_dstr_encode);
+        CK_TILE_PRINT<decltype(k_block_dstr_encode)>();
+        // using k_block_dstr_t = ck_tile::tile_distribution_encoding<
+        //     ck_tile::sequence<1>,
+        //     ck_tile::tuple<ck_tile::sequence<1, 4, 16>, ck_tile::sequence<4, 2, 4, 4>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 1>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 2>>,
+        //     ck_tile::sequence<1, 2, 2, 2>,
+        //     ck_tile::sequence<0, 0, 1, 3>>;
 
         return k_block_dstr;
     }
