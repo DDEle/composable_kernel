@@ -58,11 +58,25 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
 
     //> store rows/cols into thread registers in chunks of 16
     //> e.g. [k0,...,k15,k64,...,k79] or [k0,...,k15,k32,...,k47]
-    static constexpr index_t KThreadChunk = 16;
+    static constexpr index_t KThreadChunk = []() {
+        if constexpr(std::is_same_v<ComputeTypeA, f4x2_pk_t> &&
+                     std::is_same_v<ComputeTypeB, f4x2_pk_t>)
+            return 32;
+        else
+            return 16;
+    }();
 
     static constexpr index_t KPerThread    = KPerBlock / xdlops_gemm.K0PerXdlops;
     static constexpr index_t KRepeat       = KPerThread / KPack;
     static constexpr index_t KPerInnerLoop = KPack;
+
+    static constexpr index_t APackedSize = pack_size_v<ADataType>;
+    static constexpr index_t BPackedSize = pack_size_v<BDataType>;
+
+    // Number of A packed-data-type elements in a K pack
+    static constexpr index_t KPackADataType = KPack / APackedSize;
+    // Number of B packed-data-type elements in a K pack
+    static constexpr index_t KPackBDataType = KPack / BPackedSize;
 
     static constexpr index_t MWaves = MPerBlock / (MRepeat * MPerXDL);
     static constexpr index_t NWaves = NPerBlock / (NRepeat * NPerXDL);
@@ -116,7 +130,7 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
 
         const auto xdlops_a_idx = xdlops_gemm.CalculateAThreadOriginDataIndex();
 
-        return make_tuple(0, waveId_m, xdlops_a_idx[I1], KThreadChunk*2 * xdlops_a_idx[I0]);
+        return make_tuple(0, waveId_m, xdlops_a_idx[I1], KThreadChunk * xdlops_a_idx[I0]);
     }
 
     __device__ static auto CalculateBThreadOriginDataIndex()
@@ -127,7 +141,7 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
 
         const auto xdlops_b_idx = xdlops_gemm.CalculateBThreadOriginDataIndex();
 
-        return make_tuple(0, waveId_n, xdlops_b_idx[I1], KThreadChunk*2 * xdlops_b_idx[I0]);
+        return make_tuple(0, waveId_n, xdlops_b_idx[I1], KThreadChunk * xdlops_b_idx[I0]);
         //                              [0-15]                          [0-3]
     }
 
@@ -323,15 +337,19 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
     // Read buffer + Compute buffer
     // A[M0, M1, M2, KPack]
     static constexpr auto a_thread_desc_ = make_naive_tensor_descriptor(
-        make_tuple(Number<MRepeat>{}, I1, Number<KRepeat>{}, Number<KPack/2>{}),
-        make_tuple(
-            Number<KPack/2>{}, Number<KRepeat * MRepeat * KPack/2>{}, Number<MRepeat * KPack/2>{}, I1));
+        make_tuple(Number<MRepeat>{}, I1, Number<KRepeat>{}, Number<KPackADataType>{}),
+        make_tuple(Number<KPackADataType>{},
+                   Number<KRepeat * MRepeat * KPackADataType>{},
+                   Number<MRepeat * KPackADataType>{},
+                   I1));
 
     // B[N0, N1, N2, KPack]
     static constexpr auto b_thread_desc_ = make_naive_tensor_descriptor(
-        make_tuple(Number<NRepeat>{}, I1, Number<KRepeat>{}, Number<KPack/2>{}),
-        make_tuple(
-            Number<KPack/2>{}, Number<KRepeat * NRepeat * KPack/2>{}, Number<NRepeat * KPack/2>{}, I1));
+        make_tuple(Number<NRepeat>{}, I1, Number<KRepeat>{}, Number<KPackBDataType>{}),
+        make_tuple(Number<KPackBDataType>{},
+                   Number<KRepeat * NRepeat * KPackBDataType>{},
+                   Number<NRepeat * KPackBDataType>{},
+                   I1));
 
     // C[M, N, NumRegXdlops]
     static constexpr auto c_thread_desc_ = make_naive_tensor_descriptor_packed(
@@ -341,7 +359,7 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
                                                          ComputeTypeA,
                                                          decltype(a_block_desc_m0_m1_m2_k),
                                                          decltype(a_thread_desc_),
-                                                         Sequence<1, 1, 1, KThreadChunk * 2>,
+                                                         Sequence<1, 1, 1, KThreadChunk>,
                                                          Sequence<0, 1, 2, 3>,
                                                          3,
                                                          A_K1,
@@ -351,7 +369,7 @@ struct BlockwiseGemmXdlops_mx_pipeline_base
                                                          ComputeTypeB,
                                                          decltype(b_block_desc_n0_n1_n2_k),
                                                          decltype(b_thread_desc_),
-                                                         Sequence<1, 1, 1, KThreadChunk * 2>,
+                                                         Sequence<1, 1, 1, KThreadChunk>,
                                                          Sequence<0, 1, 2, 3>,
                                                          3,
                                                          B_K1,

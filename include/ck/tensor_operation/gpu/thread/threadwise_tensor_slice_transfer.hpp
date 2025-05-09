@@ -244,13 +244,7 @@ struct ThreadwiseTensorSliceTransfer_v2
 
     using SrcCoordStep = decltype(make_tensor_coordinate_step(SrcDesc{}, Index{}));
 
-    static constexpr index_t PackedSize = []() {
-        if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t> ||
-                     is_same_v<remove_cvref_t<SrcData>, f4x2_pk_t>)
-            return 2;
-        else
-            return 1;
-    }();
+    static constexpr index_t PackedSize = pack_size_v<SrcData>;
 
     __device__ constexpr ThreadwiseTensorSliceTransfer_v2(const SrcDesc& src_desc,
                                                           const Index& src_slice_origin_idx)
@@ -1042,13 +1036,7 @@ struct ThreadwiseTensorSliceTransfer_v4
 
     using SrcCoordStep = decltype(make_tensor_coordinate_step(SrcDesc{}, Index{}));
 
-    static constexpr index_t PackedSize = []() {
-        if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t> ||
-                     is_same_v<remove_cvref_t<SrcData>, f4x2_pk_t>)
-            return 2;
-        else
-            return 1;
-    }();
+    static constexpr index_t PackedSize = pack_size_v<SrcData>;
 
     __device__ constexpr ThreadwiseTensorSliceTransfer_v4(const Index& src_ref_idx)
         : src_ref_coord_(make_tensor_coordinate(SrcDesc{}, src_ref_idx))
@@ -1059,11 +1047,7 @@ struct ThreadwiseTensorSliceTransfer_v4
         // static_assert(SliceLengths::At(Number<SrcVectorDim>{}) % SrcScalarPerVector == 0,
         //               "wrong! Not divisible");
 
-        if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t> ||
-                     is_same_v<remove_cvref_t<SrcData>, f4x2_pk_t>)
-        {
-            static_assert(SrcScalarPerVector % PackedSize == 0, "pk data N cannot be 1");
-        }
+        static_assert(SrcScalarPerVector % PackedSize == 0, "pk data N cannot be 1");
     }
 
     template <typename SrcRefToOriginDisplacement,
@@ -1077,8 +1061,6 @@ struct ThreadwiseTensorSliceTransfer_v4
                         const DstOriginIdx&,
                         DstBuffer& dst_buf) const
     {
-        // if(get_thread_local_1d_id() < 4)
-        //     printf("TID%03d %s:%d\n", get_thread_local_1d_id(), __FILE__, __LINE__);
         static_assert(SrcDesc::IsKnownAtCompileTime() && DstDesc::IsKnownAtCompileTime(),
                       "wrong! SrcDesc and DstDesc need to known at compile-time");
 
@@ -1509,13 +1491,7 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic
 
     using Index = MultiIndex<nDim>;
 
-    static constexpr index_t PackedSize = []() {
-        if constexpr(is_same_v<remove_cvref_t<SrcData>, pk_i4_t> ||
-                     is_same_v<remove_cvref_t<SrcData>, f4x2_pk_t>)
-            return 2;
-        else
-            return 1;
-    }();
+    static constexpr index_t PackedSize = pack_size_v<SrcData>;
 
     __device__ constexpr ThreadwiseTensorSliceTransfer_StaticToStatic(
         const ElementwiseOperation& element_op)
