@@ -286,9 +286,9 @@ struct ThreadwiseTensorSliceTransfer_v2
         static_assert(is_known_at_compile_time<remove_cvref_t<DstSliceOriginIdx>>::value,
                       "wrong! DstSliceOrigin need to known at compile-time");
 
-        static_assert(
-            is_same<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>::value &&
-            "wrong! inconsistent type");
+        // static_assert(
+        //     is_same<remove_cvref_t<typename DstBuffer::type>, remove_cvref_t<DstData>>::value &&
+        //     "wrong! inconsistent type");
 
         // DstDesc and dst_slice_origin_idx are known at compile-time
         constexpr auto dst_desc             = remove_cvref_t<DstDesc>{};
@@ -310,22 +310,24 @@ struct ThreadwiseTensorSliceTransfer_v2
         constexpr auto num_access = SpaceFillingCurve::GetNumOfAccess();
 
         static_for<0, num_access, 1>{}([&](auto idx_1d) {
-            typename vector_type_maker<SrcData, SrcScalarPerVector / PackedSize>::type src_vector;
+            typename vector_type_maker<int32_t, SrcScalarPerVector / PackedSize / 4>::type
+                src_vector;
 
             using src_vector_t =
-                typename vector_type_maker<SrcData, SrcScalarPerVector / PackedSize>::type::type;
+                typename vector_type_maker<int32_t,
+                                           SrcScalarPerVector / PackedSize / 4>::type::type;
             constexpr auto src_data_idx = SpaceFillingCurve::GetIndex(idx_1d);
 
             const bool is_src_valid =
                 coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord_);
 
             // copy data from src_buf into src_vector
-            src_vector.template AsType<src_vector_t>()(Number<0>{}) =
-                src_buf.template Get<src_vector_t>(src_coord_.GetOffset() / PackedSize,
-                                                   is_src_valid);
+            src_vector.template AsType<src_vector_t>()(Number<0>{}) = src_buf.template Get<
+                typename vector_type_maker<SrcData, SrcScalarPerVector / PackedSize>::type::type>(
+                src_coord_.GetOffset() / PackedSize, is_src_valid);
 
             // copy data from src_vector into dst_buf
-            static_for<0, SrcScalarPerVector / PackedSize, 1>{}([&](auto i) {
+            static_for<0, SrcScalarPerVector / PackedSize, 4>{}([&](auto i) {
                 constexpr index_t dst_offset =
                     dst_desc.CalculateOffset(to_multi_index(dst_slice_origin_idx) + src_data_idx +
                                              i * src_scalar_step_in_vector);
@@ -339,8 +341,9 @@ struct ThreadwiseTensorSliceTransfer_v2
                 }
                 else
                 {
-                    dst_buf(Number<dst_offset>{}) =
-                        type_convert<DstData>(src_vector.template AsType<SrcData>()[i]);
+                    CK_PRINT<decltype(dst_buf), decltype(src_vector), DstData, SrcData>();
+                    dst_buf(Number<dst_offset / 4>{}) =
+                        type_convert<int32_t>(src_vector.template AsType<int32_t>()[i]);
                 }
             });
 

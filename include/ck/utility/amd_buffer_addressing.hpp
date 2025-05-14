@@ -311,20 +311,21 @@ enum struct AmdBufferCoherenceEnum
 };
 
 template <index_t N, AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
-__device__ typename vector_type<int8_t, N>::type
-amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
-                         index_t src_thread_addr_offset,
-                         index_t src_wave_addr_offset)
+__device__ auto amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
+                                         index_t src_thread_addr_offset,
+                                         index_t src_wave_addr_offset)
 {
+    using int8xn_t = typename vector_type<int8_t, N>::type;
     static_assert(N == 1 || N == 2 || N == 4 || N == 8 || N == 16 || N == 32 || N == 64,
                   "wrong! not implemented");
 
     if constexpr(N == 1)
     {
-        return llvm_amdgcn_raw_buffer_load_i8(src_wave_buffer_resource,
-                                              src_thread_addr_offset,
-                                              src_wave_addr_offset,
-                                              static_cast<index_t>(coherence));
+        return static_cast<int8xn_t>(
+            llvm_amdgcn_raw_buffer_load_i8(src_wave_buffer_resource,
+                                           src_thread_addr_offset,
+                                           src_wave_addr_offset,
+                                           static_cast<index_t>(coherence)));
     }
     else if constexpr(N == 2)
     {
@@ -334,7 +335,7 @@ amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
                                                       src_wave_addr_offset,
                                                       static_cast<index_t>(coherence));
 
-        return bit_cast<int8x2_t>(tmp);
+        return bit_cast<int8xn_t>(tmp);
     }
     else if constexpr(N == 4)
     {
@@ -342,8 +343,12 @@ amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
                                                       src_thread_addr_offset,
                                                       src_wave_addr_offset,
                                                       static_cast<index_t>(coherence));
-
-        return bit_cast<int8x4_t>(tmp);
+#ifdef PACK_UNPACK_BUG_FIXED
+        return bit_cast<int8xn_t>(tmp);
+#else
+        // workaround for compiler pack/unpack bug to just return i32
+        return tmp;
+#endif
     }
     else if constexpr(N == 8)
     {
@@ -352,7 +357,7 @@ amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
                                                           src_wave_addr_offset,
                                                           static_cast<index_t>(coherence));
 
-        return bit_cast<int8x8_t>(tmp);
+        return bit_cast<int8xn_t>(tmp);
     }
     else if constexpr(N == 16)
     {
@@ -360,7 +365,7 @@ amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
                                                           src_thread_addr_offset,
                                                           src_wave_addr_offset,
                                                           static_cast<index_t>(coherence));
-        return bit_cast<int8x16_t>(tmp);
+        return bit_cast<int8xn_t>(tmp);
     }
     else if constexpr(N == 32)
     {
@@ -378,7 +383,7 @@ amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
         tmp.AsType<int32x4_t>()(Number<0>{}) = tmp0;
         tmp.AsType<int32x4_t>()(Number<1>{}) = tmp1;
 
-        return bit_cast<int8x32_t>(tmp);
+        return bit_cast<int8xn_t>(tmp);
     }
     else if constexpr(N == 64)
     {
@@ -409,16 +414,16 @@ amd_buffer_load_impl_raw(int32x4_t src_wave_buffer_resource,
         tmp.AsType<int32x4_t>()(Number<2>{}) = tmp2;
         tmp.AsType<int32x4_t>()(Number<3>{}) = tmp3;
 
-        return bit_cast<int8x64_t>(tmp);
+        return bit_cast<int8xn_t>(tmp);
     }
 }
 
 template <typename T,
           index_t N,
           AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
-__device__ typename vector_type<T, N>::type amd_buffer_load_impl(int32x4_t src_wave_buffer_resource,
-                                                                 index_t src_thread_addr_offset,
-                                                                 index_t src_wave_addr_offset)
+__device__ auto amd_buffer_load_impl(int32x4_t src_wave_buffer_resource,
+                                     index_t src_thread_addr_offset,
+                                     index_t src_wave_addr_offset)
 {
     static_assert(
         (is_same<T, double>::value && (N == 1 || N == 2 || N == 4 || N == 8)) ||
@@ -438,7 +443,15 @@ __device__ typename vector_type<T, N>::type amd_buffer_load_impl(int32x4_t src_w
     using r_t     = typename vector_type<T, N>::type;
     auto raw_data = amd_buffer_load_impl_raw<sizeof(T) * N, coherence>(
         src_wave_buffer_resource, src_thread_addr_offset, src_wave_addr_offset);
-    return bit_cast<r_t>(raw_data);
+#ifdef PACK_UNPACK_BUG_FIXED
+    constexpr bool pack_unpack_bug_fixed = true;
+#else
+    constexpr bool pack_unpack_bug_fixed = false;
+#endif
+    if constexpr(!pack_unpack_bug_fixed && sizeof(T) * N == 4)
+        return (raw_data);
+    else
+        return bit_cast<r_t>(raw_data);
 }
 
 template <index_t N, AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
@@ -825,11 +838,10 @@ __device__ void amd_buffer_atomic_max_impl(const typename vector_type<T, N>::typ
 template <typename T,
           index_t N,
           AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
-__device__ typename vector_type_maker<T, N>::type::type
-amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
-                                            index_t src_thread_element_offset,
-                                            bool src_thread_element_valid,
-                                            index_t src_element_space_size)
+__device__ auto amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
+                                                            index_t src_thread_element_offset,
+                                                            bool src_thread_element_valid,
+                                                            index_t src_element_space_size)
 {
     const int32x4_t src_wave_buffer_resource =
         make_wave_buffer_resource(p_src_wave, src_element_space_size);
@@ -848,9 +860,24 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
 
 #else
     // CK_PRINT<T, vector_t, scalar_t>();
-    vector_t tmp{amd_buffer_load_impl<scalar_t, vector_size, coherence>(
-        src_wave_buffer_resource, src_thread_addr_offset, 0)};
-    return src_thread_element_valid ? tmp : vector_t(0);
+#ifdef PACK_UNPACK_BUG_FIXED
+    constexpr bool pack_unpack_bug_fixed = true;
+#else
+    constexpr bool pack_unpack_bug_fixed = false;
+#endif
+    if constexpr(!pack_unpack_bug_fixed && sizeof(scalar_t) * vector_size == 4)
+    {
+        auto tmp = amd_buffer_load_impl<scalar_t, vector_size, coherence>(
+            src_wave_buffer_resource, src_thread_addr_offset, 0);
+        return src_thread_element_valid ? tmp : static_cast<decltype(tmp)>(0);
+    }
+    else
+    {
+        // workaround for compiler pack/unpack bug to just return i32
+        vector_t tmp{amd_buffer_load_impl<scalar_t, vector_size, coherence>(
+            src_wave_buffer_resource, src_thread_addr_offset, 0)};
+        return src_thread_element_valid ? tmp : vector_t(0);
+    }
 #endif
 }
 
