@@ -44,23 +44,23 @@ using DeviceOpInstance = ck::tensor_operation::device::DeviceGemmMX_Xdl_CShuffle
     GemmSpec,         // GemmSpec
     ScaleBlockSize,   // ScaleBlockSize: Scaling block size
     256,              // BlockSize: Thread block size
-    128,              // MPerBlock
-    128,              // NPerBlock
+    64,               // MPerBlock
+    64,               // NPerBlock
     KPerBlock,        // KPerBlock
     16,               // AK1
     16,               // BK1
     16,               // MPerXDL
     16,               // NPerXDL
-    4,                // MXdlPerWave
-    4,                // NXdlPerWave
-    S<8, 32, 1>,      // ABlockTransferThreadClusterLengths_AK0_M_AK1
+    2,                // MXdlPerWave
+    2,                // NXdlPerWave
+    S<16, 16, 1>,     // ABlockTransferThreadClusterLengths_AK0_M_AK1
     S<1, 0, 2>,       // ABlockTransferThreadClusterArrangeOrder
     S<1, 0, 2>,       // ABlockTransferSrcAccessOrder
     2,                // ABlockTransferSrcVectorDim
     16,               // ABlockTransferSrcScalarPerVector
     16,               // ABlockTransferDstScalarPerVector_AK1
     false,            // ABlockLdsExtraM
-    S<8, 32, 1>,      // BBlockTransferThreadClusterLengths_BK0_N_BK1
+    S<16, 16, 1>,     // BBlockTransferThreadClusterLengths_BK0_N_BK1
     S<1, 0, 2>,       // BBlockTransferThreadClusterArrangeOrder
     S<1, 0, 2>,       // BBlockTransferSrcAccessOrder
     2,                // BBlockTransferSrcVectorDim
