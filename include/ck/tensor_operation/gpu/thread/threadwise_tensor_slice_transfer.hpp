@@ -320,7 +320,10 @@ struct ThreadwiseTensorSliceTransfer_v2
                 coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord_);
 
             // copy data from src_buf into src_vector
-            src_vector.template AsType<src_vector_t>()(Number<0>{}) =
+            // CK_PRINT<decltype(src_vector), src_vector_t>();
+            // using a = CK_PRINT<ck::vector_type<ck::e8m0_bexp_t, 4>,
+            //                    ck::non_native_vector_base<ck::e8m0_bexp_t, 4>>;
+            src_vector.template AsTypeTryInt32<src_vector_t>()(Number<0>{}) =
                 src_buf.template Get<src_vector_t>(src_coord_.GetOffset() / PackedSize,
                                                    is_src_valid);
 
@@ -329,6 +332,31 @@ struct ThreadwiseTensorSliceTransfer_v2
                 constexpr index_t dst_offset =
                     dst_desc.CalculateOffset(to_multi_index(dst_slice_origin_idx) + src_data_idx +
                                              i * src_scalar_step_in_vector);
+                using src_element_t =
+                    decltype(src_vector.template AsTypeTryInt32<SrcData>()[Number<0>{}]);
+                CK_PRINT<decltype(dst_buf),
+                         remove_cvref_t<src_element_t>,
+                         int32_t,
+                         SrcData,
+                         DstData>();
+                if constexpr(is_same_v<remove_cvref_t<src_element_t>, int32_t> &&
+                             is_same_v<SrcData, DstData>)
+                {
+                    using a =
+                        ck::StaticBuffer<ck::AddressSpaceEnum::Vgpr, ck::e8m0_bexp_t, 8, true>;
+                    constexpr auto int32_ratio = sizeof(int32_t) / sizeof(SrcData);
+                    if constexpr(i % int32_ratio == 0)
+                    {
+                        auto&& src_ =
+                            src_vector
+                                .template AsTypeTryInt32<SrcData>()[Number<i / int32_ratio>{}];
+                        if constexpr(InvalidElementAsNaN)
+                            dst_buf.TryGetI32(Number<dst_offset>{}) =
+                                is_src_valid ? src_ : NumericLimits<DstData>::QuietNaN();
+                        else
+                            dst_buf.TryGetI32(Number<dst_offset>{}) = src_;
+                    }
+                }
 
                 if constexpr(InvalidElementAsNaN)
                 {

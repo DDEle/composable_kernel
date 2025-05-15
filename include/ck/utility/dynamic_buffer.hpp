@@ -91,6 +91,7 @@ struct DynamicBuffer
 
             if constexpr(InvalidElementUseNumericalZeroValue)
             {
+                CK_PRINT<1>();
                 return amd_buffer_load_invalid_element_return_zero<remove_cvref_t<T>,
                                                                    t_per_x,
                                                                    coherence>(

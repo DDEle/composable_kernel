@@ -12,26 +12,31 @@ template <AddressSpaceEnum AddressSpace,
           typename T,
           index_t N,
           bool InvalidElementUseNumericalZeroValue> // TODO remove this bool, no longer needed
-struct StaticBuffer : public StaticallyIndexedArray<T, N>
+struct StaticBuffer
 {
     using type = T;
-    using base = StaticallyIndexedArray<T, N>;
 
-    __host__ __device__ constexpr StaticBuffer() : base{} {}
+    union
+    {
+        StaticallyIndexedArray<T, N> t;
+        StaticallyIndexedArray<int32_t, N * sizeof(T) / sizeof(int32_t)> i32;
+    } data_;
+
+    __host__ __device__ constexpr StaticBuffer() : data_{decltype(data_.t){}} {}
 
     template <typename... Ys>
     __host__ __device__ constexpr StaticBuffer& operator=(const Tuple<Ys...>& y)
     {
-        static_assert(base::Size() == sizeof...(Ys), "wrong! size not the same");
+        static_assert(data_.t.Size() == sizeof...(Ys), "wrong! size not the same");
         StaticBuffer& x = *this;
-        static_for<0, base::Size(), 1>{}([&](auto i) { x(i) = y[i]; });
+        static_for<0, data_.t.Size(), 1>{}([&](auto i) { x(i) = y[i]; });
         return x;
     }
 
     __host__ __device__ constexpr StaticBuffer& operator=(const T& y)
     {
         StaticBuffer& x = *this;
-        static_for<0, base::Size(), 1>{}([&](auto i) { x(i) = y; });
+        static_for<0, data_.t.Size(), 1>{}([&](auto i) { x(i) = y; });
         return x;
     }
 
@@ -45,14 +50,42 @@ struct StaticBuffer : public StaticallyIndexedArray<T, N>
     template <index_t I>
     __host__ __device__ constexpr const T& operator[](Number<I> i) const
     {
-        return base::operator[](i);
+        return data_.t[i];
     }
 
     // write access
     template <index_t I>
     __host__ __device__ constexpr T& operator()(Number<I> i)
     {
-        return base::operator()(i);
+        return data_.t(i);
+    }
+
+    static constexpr bool use_int32 =
+        (sizeof(T) == 1 || sizeof(T) == 2) && (sizeof(T) * N % 4 == 0);
+
+    template <index_t I>
+    __host__ __device__ constexpr const auto& TryGetI32(Number<I> i) const
+    {
+        if constexpr(!use_int32)
+        {
+            return data_.t[i];
+        }
+        else
+        {
+            return data_.i32[Number<i * sizeof(T) / sizeof(int32_t)>{}];
+        }
+    }
+    template <index_t I>
+    __host__ __device__ constexpr auto& TryGetI32(Number<I> i)
+    {
+        if constexpr(!use_int32)
+        {
+            return data_.t(i);
+        }
+        else
+        {
+            return data_.i32(Number<i * sizeof(T) / sizeof(int32_t)>{});
+        }
     }
 
     __host__ __device__ void Set(T x)

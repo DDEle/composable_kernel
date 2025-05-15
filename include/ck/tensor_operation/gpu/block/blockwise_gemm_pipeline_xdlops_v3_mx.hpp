@@ -510,7 +510,7 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
 
                     // TODO: consider scheduling the scale load
                     // -------------------------------------------------------------------------------------------
-                    __builtin_amdgcn_sched_barrier(0);
+                    // __builtin_amdgcn_sched_barrier(0);
                     block_sync_lds();
                     a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
                     b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
@@ -536,6 +536,7 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                 vector_type<AScaleDataType, KXdlPack * MXdlPack> a_scale_thread_vec;
                                 vector_type<BScaleDataType, KXdlPack * NXdlPack> b_scale_thread_vec;
 
+#if 0
                                 // Pack scale_thread_buf into scale_thread_vec
                                 static_for<0, KXdlPack * MXdlPack, 1>{}([&](auto s) {
                                     a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
@@ -548,6 +549,29 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                         b_scale_thread_bufs(
                                             scale_comp_buf)[Number<b_scale_offset + s>{}];
                                 });
+#else
+                                static_assert(KXdlPack * MXdlPack % 4 == 0,
+                                              "KXdlPack * MXdlPack must be divisible by 4");
+                                static_for<0, KXdlPack * MXdlPack, 1>{}([&](auto s) {
+                                    if constexpr(s % 4 == 0)
+                                        a_scale_thread_vec
+                                            .template AsTypeTryInt32<AScaleDataType>()(
+                                                Number<s / 4>{}) =
+                                            a_scale_thread_bufs(scale_comp_buf)
+                                                .TryGetI32(Number<a_scale_offset + s>{});
+                                });
+                                static_assert(KXdlPack * NXdlPack % 4 == 0,
+                                              "KXdlPack * NXdlPack must be divisible by 4");
+                                static_for<0, KXdlPack * NXdlPack, 1>{}([&](auto s) {
+                                    if constexpr(s % 4 == 0)
+                                        b_scale_thread_vec
+                                            .template AsTypeTryInt32<BScaleDataType>()(
+                                                Number<s / 4>{}) =
+                                            b_scale_thread_bufs(scale_comp_buf)
+                                                .TryGetI32(Number<b_scale_offset + s>{});
+                                });
+
+#endif
 
                                 static_for<0, KXdlPack, 1>{}([&](auto ikxdl) {
                                     static_for<0, MXdlPack, 1>{}([&](auto imxdl) {
@@ -595,11 +619,11 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                             xdlops_gemm.template Run<ikxdl * MXdlPack + imxdl,
                                                                      ikxdl * NXdlPack + inxdl>(
                                                 a_thread_vec.template AsType<mfma_input_type_a>(),
-                                                a_scale_thread_vec
-                                                    .template AsType<mfma_scale_input_type_a>(),
+                                                a_scale_thread_vec.template AsTypeTryInt32<
+                                                    mfma_scale_input_type_a>(),
                                                 b_thread_vec.template AsType<mfma_input_type_b>(),
-                                                b_scale_thread_vec
-                                                    .template AsType<mfma_scale_input_type_b>(),
+                                                b_scale_thread_vec.template AsTypeTryInt32<
+                                                    mfma_scale_input_type_b>(),
                                                 c_thread_buf.GetVectorTypeReference(
                                                     Number<c_offset>{}));
                                         });
@@ -736,6 +760,7 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                         vector_type<AScaleDataType, KXdlPack * MXdlPack> a_scale_thread_vec;
                         vector_type<BScaleDataType, KXdlPack * NXdlPack> b_scale_thread_vec;
 
+#if 0
                         // Pack scale_thread_buf into scale_thread_vec
                         static_for<0, KXdlPack * MXdlPack, 1>{}([&](auto s) {
                             a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
@@ -747,6 +772,20 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                 b_scale_thread_bufs(I0)[Number<b_scale_offset + s>{}];
                         });
 
+#else
+                        static_assert(KXdlPack * MXdlPack % 4 == 0,
+                                      "KXdlPack * MXdlPack must be divisible by 4");
+                        static_for<0, KXdlPack * MXdlPack / 4, 1>{}([&](auto s) {
+                            a_scale_thread_vec.template AsTypeTryInt32<AScaleDataType>()(s) =
+                                a_scale_thread_bufs(I0).TryGetI32(Number<a_scale_offset + s>{});
+                        });
+                        static_assert(KXdlPack * NXdlPack % 4 == 0,
+                                      "KXdlPack * NXdlPack must be divisible by 4");
+                        static_for<0, KXdlPack * NXdlPack / 4, 1>{}([&](auto s) {
+                            b_scale_thread_vec.template AsTypeTryInt32<BScaleDataType>()(s) =
+                                b_scale_thread_bufs(I0).TryGetI32(Number<b_scale_offset + s>{});
+                        });
+#endif
                         static_for<0, KXdlPack, 1>{}([&](auto ikxdl) {
                             static_for<0, MXdlPack, 1>{}([&](auto imxdl) {
                                 static_for<0, NXdlPack, 1>{}([&](auto inxdl) {
@@ -781,18 +820,18 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                         typename vector_type<BScaleDataType,
                                                              KXdlPack * NXdlPack>::type;
 
-                                    constexpr index_t c_offset =
-                                        c_thread_desc_.CalculateOffset(make_tuple(m0, n0, imxdl, inxdl, 0));
+                                    constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
+                                        make_tuple(m0, n0, imxdl, inxdl, 0));
 
                                     // MFMA accumulation
                                     xdlops_gemm.template Run<ikxdl * MXdlPack + imxdl,
                                                              ikxdl * NXdlPack + inxdl>(
                                         a_thread_vec.template AsType<mfma_input_type_a>(),
                                         a_scale_thread_vec
-                                            .template AsType<mfma_scale_input_type_a>(),
+                                            .template AsTypeTryInt32<mfma_scale_input_type_a>(),
                                         b_thread_vec.template AsType<mfma_input_type_b>(),
                                         b_scale_thread_vec
-                                            .template AsType<mfma_scale_input_type_b>(),
+                                            .template AsTypeTryInt32<mfma_scale_input_type_b>(),
                                         c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                                 });
                             });
@@ -864,6 +903,7 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                         vector_type<AScaleDataType, KXdlPack * MXdlPack> a_scale_thread_vec;
                         vector_type<BScaleDataType, KXdlPack * NXdlPack> b_scale_thread_vec;
 
+#if 0
                         // Pack scale_thread_buf into scale_thread_vec
                         static_for<0, KXdlPack * MXdlPack, 1>{}([&](auto s) {
                             a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
@@ -875,6 +915,20 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                 b_scale_thread_bufs(I1)[Number<b_scale_offset + s>{}];
                         });
 
+#else
+                        static_assert(KXdlPack * MXdlPack % 4 == 0,
+                                      "KXdlPack * MXdlPack must be divisible by 4");
+                        static_for<0, KXdlPack * MXdlPack / 4, 1>{}([&](auto s) {
+                            a_scale_thread_vec.template AsTypeTryInt32<AScaleDataType>()(s) =
+                                a_scale_thread_bufs(I1).TryGetI32(Number<a_scale_offset + s>{});
+                        });
+                        static_assert(KXdlPack * NXdlPack % 4 == 0,
+                                      "KXdlPack * NXdlPack must be divisible by 4");
+                        static_for<0, KXdlPack * NXdlPack / 4, 1>{}([&](auto s) {
+                            b_scale_thread_vec.template AsTypeTryInt32<BScaleDataType>()(s) =
+                                b_scale_thread_bufs(I1).TryGetI32(Number<b_scale_offset + s>{});
+                        });
+#endif
                         static_for<0, KXdlPack, 1>{}([&](auto ikxdl) {
                             static_for<0, MXdlPack, 1>{}([&](auto imxdl) {
                                 static_for<0, NXdlPack, 1>{}([&](auto inxdl) {
@@ -909,18 +963,18 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                         typename vector_type<BScaleDataType,
                                                              KXdlPack * NXdlPack>::type;
 
-                                    constexpr index_t c_offset =
-                                        c_thread_desc_.CalculateOffset(make_tuple(m0, n0, imxdl, inxdl, 0));
+                                    constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
+                                        make_tuple(m0, n0, imxdl, inxdl, 0));
 
                                     // MFMA accumulation
                                     xdlops_gemm.template Run<ikxdl * MXdlPack + imxdl,
                                                              ikxdl * NXdlPack + inxdl>(
                                         a_thread_vec.template AsType<mfma_input_type_a>(),
                                         a_scale_thread_vec
-                                            .template AsType<mfma_scale_input_type_a>(),
+                                            .template AsTypeTryInt32<mfma_scale_input_type_a>(),
                                         b_thread_vec.template AsType<mfma_input_type_b>(),
                                         b_scale_thread_vec
-                                            .template AsType<mfma_scale_input_type_b>(),
+                                            .template AsTypeTryInt32<mfma_scale_input_type_b>(),
                                         c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                                 });
                             });
@@ -946,6 +1000,7 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                         vector_type<AScaleDataType, KXdlPack * MXdlPack> a_scale_thread_vec;
                         vector_type<BScaleDataType, KXdlPack * NXdlPack> b_scale_thread_vec;
 
+#if 0
                         // Pack scale_thread_buf into scale_thread_vec
                         static_for<0, KXdlPack * MXdlPack, 1>{}([&](auto s) {
                             a_scale_thread_vec.template AsType<AScaleDataType>()(s) =
@@ -957,6 +1012,20 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                 b_scale_thread_bufs(I0)[Number<b_scale_offset + s>{}];
                         });
 
+#else
+                        static_assert(KXdlPack * MXdlPack % 4 == 0,
+                                      "KXdlPack * MXdlPack must be divisible by 4");
+                        static_for<0, KXdlPack * MXdlPack / 4, 1>{}([&](auto s) {
+                            a_scale_thread_vec.template AsTypeTryInt32<AScaleDataType>()(s) =
+                                a_scale_thread_bufs(I0).TryGetI32(Number<a_scale_offset + s>{});
+                        });
+                        static_assert(KXdlPack * NXdlPack % 4 == 0,
+                                      "KXdlPack * NXdlPack must be divisible by 4");
+                        static_for<0, KXdlPack * NXdlPack / 4, 1>{}([&](auto s) {
+                            b_scale_thread_vec.template AsTypeTryInt32<BScaleDataType>()(s) =
+                                b_scale_thread_bufs(I0).TryGetI32(Number<b_scale_offset + s>{});
+                        });
+#endif
                         static_for<0, KXdlPack, 1>{}([&](auto ikxdl) {
                             static_for<0, MXdlPack, 1>{}([&](auto imxdl) {
                                 static_for<0, NXdlPack, 1>{}([&](auto inxdl) {
@@ -991,18 +1060,18 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                         typename vector_type<BScaleDataType,
                                                              KXdlPack * NXdlPack>::type;
 
-                                    constexpr index_t c_offset =
-                                        c_thread_desc_.CalculateOffset(make_tuple(m0, n0, imxdl, inxdl, 0));
+                                    constexpr index_t c_offset = c_thread_desc_.CalculateOffset(
+                                        make_tuple(m0, n0, imxdl, inxdl, 0));
 
                                     // MFMA accumulation
                                     xdlops_gemm.template Run<ikxdl * MXdlPack + imxdl,
                                                              ikxdl * NXdlPack + inxdl>(
                                         a_thread_vec.template AsType<mfma_input_type_a>(),
                                         a_scale_thread_vec
-                                            .template AsType<mfma_scale_input_type_a>(),
+                                            .template AsTypeTryInt32<mfma_scale_input_type_a>(),
                                         b_thread_vec.template AsType<mfma_input_type_b>(),
                                         b_scale_thread_vec
-                                            .template AsType<mfma_scale_input_type_b>(),
+                                            .template AsTypeTryInt32<mfma_scale_input_type_b>(),
                                         c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                                 });
                             });

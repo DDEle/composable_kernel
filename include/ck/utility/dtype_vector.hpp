@@ -1549,6 +1549,7 @@ struct vector_type<T, 4, typename ck::enable_if_t<!is_native_type<T>()>>
         StaticallyIndexedArray<d1_t, 4> d1x4_;
         StaticallyIndexedArray<d2_t, 2> d2x2_;
         StaticallyIndexedArray<d4_t, 1> d4x1_;
+        StaticallyIndexedArray<int32_t, 1> di32_;
     } data_;
 
     __host__ __device__ constexpr vector_type() : data_{type{}} {}
@@ -1603,6 +1604,23 @@ struct vector_type<T, 4, typename ck::enable_if_t<!is_native_type<T>()>>
         {
             return err;
         }
+    }
+
+    template <typename X = int32_t>
+    __host__ __device__ constexpr const auto& AsTypeTryInt32() const
+    {
+        if constexpr(sizeof(T) == 1)
+            return data_.di32_;
+        else
+            return AsType<X>();
+    }
+    template <typename X = int32_t>
+    __host__ __device__ constexpr auto& AsTypeTryInt32()
+    {
+        if constexpr(sizeof(T) == 1)
+            return data_.di32_;
+        else
+            return AsType<X>();
     }
 };
 
