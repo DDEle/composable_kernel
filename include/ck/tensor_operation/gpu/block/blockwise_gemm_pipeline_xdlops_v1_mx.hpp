@@ -136,15 +136,17 @@ struct BlockwiseGemmXdlops_pipeline_v1_mx<BlockGemmPipelineScheduler::Intrawave,
     using Base::MakeCGridDescriptor_G_M0_N0_M1_N1_M2_M3_M4_N2;
     using Base::MakeCGridDescriptor_M0_N0_M1_N1_M2_M3_M4_N2;
 
-    using Base::a_block_desc_m0_m1_m2_k;
-    using Base::b_block_desc_n0_n1_n2_k;
+    using Base::a_block_desc_m0_m1_m2_m3_k;
+    using Base::a_block_desc_m0_m1_m2_n3_k;
 
     using Base::AMmaKStride;
+    using Base::APackedSize;
     using Base::BMmaKStride;
+    using Base::BPackedSize;
     using Base::KThreadChunk;
 
     using AccType      = typename Base::AccType;
-    using Tuple4       = typename Base::Tuple4;
+    using Tuple5       = typename Base::Tuple5;
     using ComputeTypeA = typename Base::ComputeTypeA;
     using ComputeTypeB = typename Base::ComputeTypeB;
 
@@ -522,11 +524,19 @@ struct BlockwiseGemmXdlops_pipeline_v1_mx<BlockGemmPipelineScheduler::Intrawave,
                     static_for<0, xdlops_gemm.K1PerXdlops / 2 / KThreadChunk, 1>{}([&](auto chunk) {
                         constexpr auto a_k_step_chunk =
                             k_step + chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
-                        a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
-                                           make_tuple(m0, I0, I0, Number<a_k_step_chunk>{}),
+                        a_thread_copy_.Run(a_block_desc_m0_m1_m2_m3_k,
+                                           make_tuple(Number<m0 / MXdlPack>{},
+                                                      I0,
+                                                      Number<m0 % MXdlPack>{},
+                                                      I0,
+                                                      Number<a_k_step_chunk>{}),
                                            a_block_buf,
                                            a_thread_desc_,
-                                           make_tuple(m0, I0, k, Number<chunk * KThreadChunk>{}),
+                                           make_tuple(Number<m0 / MXdlPack>{},
+                                                      I0,
+                                                      Number<m0 % MXdlPack>{},
+                                                      k,
+                                                      Number<chunk * KThreadChunk>{}),
                                            a_thread_buf);
                     });
                 });
@@ -535,11 +545,19 @@ struct BlockwiseGemmXdlops_pipeline_v1_mx<BlockGemmPipelineScheduler::Intrawave,
                     static_for<0, xdlops_gemm.K1PerXdlops / 2 / KThreadChunk, 1>{}([&](auto chunk) {
                         constexpr auto b_k_step_chunk =
                             k_step + chunk * KThreadChunk * xdlops_gemm.mfma_instr.num_input_blks;
-                        b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
-                                           make_tuple(n0, I0, I0, Number<b_k_step_chunk>{}),
+                        b_thread_copy_.Run(b_block_desc_n0_n1_n2_n3_k,
+                                           make_tuple(Number<n0 / NXdlPack>{},
+                                                      I0,
+                                                      Number<n0 % NXdlPack>{},
+                                                      I0,
+                                                      Number<b_k_step_chunk>{}),
                                            b_block_buf,
                                            b_thread_desc_,
-                                           make_tuple(n0, I0, k, Number<chunk * KThreadChunk>{}),
+                                           make_tuple(Number<n0 / NXdlPack>{},
+                                                      I0,
+                                                      Number<n0 % NXdlPack>{},
+                                                      k,
+                                                      Number<chunk * KThreadChunk>{}),
                                            b_thread_buf);
                     });
                 });
