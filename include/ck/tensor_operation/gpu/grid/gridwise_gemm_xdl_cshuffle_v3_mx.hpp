@@ -7,8 +7,9 @@
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
 #include "ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_mx_selector.hpp"
-#include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_v4r1.hpp"
+// #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_v4r1.hpp"
 #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_v6r1.hpp"
+#include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_direct_load.hpp"
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 #include "ck/tensor_operation/gpu/grid/block_to_ctile_map.hpp"
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer.hpp"
@@ -778,19 +779,18 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
         // in some cases.
         else if constexpr(is_same<tensor_layout::gemm::RowMajor, ALayout>::value)
         {
-            constexpr auto a_lds_block_desc =
-                make_naive_tensor_descriptor(make_tuple(AK0Number, Number<MPerBlock>{}, AK1Number),
-                                             make_tuple(AK1Number, Number<KPerBlock>{}, I1));
+            constexpr auto a_lds_block_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(AK0Number, Number<MPerBlock>{}, AK1Number));
 
-            constexpr auto a_lds_block_desc_permuted = transform_tensor_descriptor(
-                a_lds_block_desc,
-                make_tuple(make_xor_with_modulo_transform(
-                               make_tuple(Number<MPerBlock>{}, Number<AK0Number>{})),
-                           make_pass_through_transform(AK1Number)),
-                make_tuple(Sequence<1, 0>{}, Sequence<2>{}),
-                make_tuple(Sequence<1, 0>{}, Sequence<2>{}));
+            // constexpr auto a_lds_block_desc_permuted = transform_tensor_descriptor(
+            //     a_lds_block_desc,
+            //     make_tuple(make_xor_with_modulo_transform(
+            //                    make_tuple(Number<MPerBlock>{}, Number<AK0Number>{})),
+            //                make_pass_through_transform(AK1Number)),
+            //     make_tuple(Sequence<1, 0>{}, Sequence<2>{}),
+            //     make_tuple(Sequence<1, 0>{}, Sequence<2>{}));
 
-            return a_lds_block_desc_permuted;
+            return a_lds_block_desc;
         }
         else // ColumnMajor A
         {
@@ -894,19 +894,18 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
         else if constexpr(is_same<tensor_layout::gemm::ColumnMajor, BLayout>::value)
         {
             // NLdsLayer * K0 as logical Bank
-            constexpr auto b_lds_block_desc =
-                make_naive_tensor_descriptor(make_tuple(BK0Number, Number<NPerBlock>{}, BK1Number),
-                                             make_tuple(BK1Number, Number<KPerBlock>{}, I1));
+            constexpr auto b_lds_block_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(BK0Number, Number<NPerBlock>{}, BK1Number));
 
-            constexpr auto b_lds_block_desc_permuted = transform_tensor_descriptor(
-                b_lds_block_desc,
-                make_tuple(make_xor_with_modulo_transform(
-                               make_tuple(Number<NPerBlock>{}, Number<BK0Number>{})),
-                           make_pass_through_transform(BK1Number)),
-                make_tuple(Sequence<1, 0>{}, Sequence<2>{}),
-                make_tuple(Sequence<1, 0>{}, Sequence<2>{}));
+            // constexpr auto b_lds_block_desc_permuted = transform_tensor_descriptor(
+            //     b_lds_block_desc,
+            //     make_tuple(make_xor_with_modulo_transform(
+            //                    make_tuple(Number<NPerBlock>{}, Number<BK0Number>{})),
+            //                make_pass_through_transform(BK1Number)),
+            //     make_tuple(Sequence<1, 0>{}, Sequence<2>{}),
+            //     make_tuple(Sequence<1, 0>{}, Sequence<2>{}));
 
-            return b_lds_block_desc_permuted;
+            return b_lds_block_desc;
         }
         else // RowMajor B
         {
@@ -1382,65 +1381,37 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
 
         // A matrix blockwise copy
         auto a_blockwise_copy =
-            ThreadGroupTensorSliceTransfer_v4r1<ThisThreadBlock,
-                                                AElementwiseOperation,
-                                                ck::tensor_operation::element_wise::PassThrough,
-                                                InMemoryDataOperationEnum::Set,
-                                                Sequence<AK0Number, MPerBlock, AK1Number>,
-                                                ABlockTransferThreadClusterLengths_AK0_M_AK1,
-                                                ABlockTransferThreadClusterArrangeOrder,
-                                                ADataType,
-                                                ADataType,
-                                                decltype(a_grid_desc_ak0_m_ak1),
-                                                decltype(a_block_desc_ak0_m_ak1),
-                                                ABlockTransferSrcAccessOrder,
-                                                Sequence<0, 1, 2>,
-                                                ABlockTransferSrcVectorDim,
-                                                2,
-                                                ABlockTransferSrcScalarPerVector,
-                                                ABlockTransferDstScalarPerVector_AK1,
-                                                1,
-                                                1,
-                                                AThreadTransferSrcResetCoordinateAfterRun,
-                                                true,
-                                                BlockwiseGemmPipe::GlobalBufferNum>(
+            ThreadGroupTensorSliceTransfer_DirectLoad<ThisThreadBlock,
+                                                      Sequence<AK0Number, MPerBlock, AK1Number>,
+                                                      ABlockTransferThreadClusterLengths_AK0_M_AK1,
+                                                      ADataType,
+                                                      ADataType,
+                                                      decltype(a_grid_desc_ak0_m_ak1),
+                                                      decltype(a_block_desc_ak0_m_ak1),
+                                                      ABlockTransferSrcVectorDim,
+                                                      2,
+                                                      ABlockTransferSrcScalarPerVector>(
                 a_grid_desc_ak0_m_ak1,
                 make_multi_index(0, m_block_data_idx_on_grid, 0),
-                a_element_op,
                 a_block_desc_ak0_m_ak1,
-                make_multi_index(0, 0, 0),
-                ck::tensor_operation::element_wise::PassThrough{});
+                make_multi_index(0, 0, 0));
 
         // B matrix blockwise copy
         auto b_blockwise_copy =
-            ThreadGroupTensorSliceTransfer_v4r1<ThisThreadBlock,
-                                                BElementwiseOperation,
-                                                ck::tensor_operation::element_wise::PassThrough,
-                                                InMemoryDataOperationEnum::Set,
-                                                Sequence<BK0Number, NPerBlock, BK1Number>,
-                                                BBlockTransferThreadClusterLengths_BK0_N_BK1,
-                                                BBlockTransferThreadClusterArrangeOrder,
-                                                BDataType,
-                                                BDataType,
-                                                decltype(b_grid_desc_bk0_n_bk1),
-                                                decltype(b_block_desc_bk0_n_bk1),
-                                                BBlockTransferSrcAccessOrder,
-                                                Sequence<0, 1, 2>,
-                                                BBlockTransferSrcVectorDim,
-                                                2,
-                                                BBlockTransferSrcScalarPerVector,
-                                                BBlockTransferDstScalarPerVector_BK1,
-                                                1,
-                                                1,
-                                                BThreadTransferSrcResetCoordinateAfterRun,
-                                                true,
-                                                BlockwiseGemmPipe::GlobalBufferNum>(
+            ThreadGroupTensorSliceTransfer_DirectLoad<ThisThreadBlock,
+                                                      Sequence<BK0Number, NPerBlock, BK1Number>,
+                                                      BBlockTransferThreadClusterLengths_BK0_N_BK1,
+                                                      BDataType,
+                                                      BDataType,
+                                                      decltype(b_grid_desc_bk0_n_bk1),
+                                                      decltype(b_block_desc_bk0_n_bk1),
+                                                      BBlockTransferSrcVectorDim,
+                                                      2,
+                                                      BBlockTransferSrcScalarPerVector>(
                 b_grid_desc_bk0_n_bk1,
                 make_multi_index(0, n_block_data_idx_on_grid, 0),
-                b_element_op,
                 b_block_desc_bk0_n_bk1,
-                make_multi_index(0, 0, 0),
-                ck::tensor_operation::element_wise::PassThrough{});
+                make_multi_index(0, 0, 0));
 
         // LDS allocation for A and B: be careful of alignment
         constexpr auto a_block_space_size_aligned = math::integer_least_multiple(

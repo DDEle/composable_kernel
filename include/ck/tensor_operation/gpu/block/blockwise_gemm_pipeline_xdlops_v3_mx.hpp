@@ -367,8 +367,8 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
         StaticallyIndexedArray<decltype(b_scale_thread_buf), Number<2>{}> b_scale_thread_bufs;
 
         // Global prefetch 1
-        a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
-        b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
+        a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf);
+        b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf);
 
         a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
         b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
@@ -417,12 +417,12 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
             make_multi_index(-NWaves * NRepeat / NXdlPack, KRepeat / KXdlPack, 0));
 
         // Local prefill 1
-        a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
-        b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
+        // a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
+        // b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
 
         // Global prefetch 2
-        a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
-        b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
+        a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf);
+        b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf);
 
         a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
         b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
@@ -508,8 +508,8 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                         a_scale_grid_desc,
                         make_multi_index(-MWaves * MRepeat / MXdlPack, KRepeat / KXdlPack, 0));
 
-                    a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
-                    a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
+                    // a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
+                    a_blockwise_copy.Run(a_grid_desc, a_grid_buf, a_block_desc, a_block_buf);
 
                     // Prefetch b_scales
                     static_for<0, NRepeat / NXdlPack, 1>{}([&](auto n0) {
@@ -533,8 +533,8 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                         b_scale_grid_desc,
                         make_multi_index(-NWaves * NRepeat / NXdlPack, KRepeat / KXdlPack, 0));
 
-                    b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
-                    b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
+                    // b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
+                    b_blockwise_copy.Run(b_grid_desc, b_grid_buf, b_block_desc, b_block_buf);
 
                     a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
                     b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
@@ -738,8 +738,8 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
             });
 
             block_sync_lds();
-            a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
-            b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
+            // a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
+            // b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
 
             static_for<0, MRepeat / MXdlPack, 1>{}([&](auto m0) {
                 static_for<0, NRepeat / NXdlPack, 1>{}([&](auto n0) {

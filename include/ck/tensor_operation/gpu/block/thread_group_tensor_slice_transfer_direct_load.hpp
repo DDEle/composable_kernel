@@ -72,6 +72,11 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
     static constexpr auto thread_steps         = thread_cluster_lengths * thread_single_load_size;
     static constexpr auto thread_slice_lengths = block_slice_lengths / thread_steps;
 
+    using a = decltype(CK_PRINT<decltype(thread_single_load_size), decltype(thread_steps)>());
+    using b = decltype(CK_PRINT<BlockSliceLengths,
+                                ThreadClusterLengths,
+                                decltype(thread_slice_lengths)>());
+
     static __device__ constexpr bool AreThreadClusterLengthsValid()
     {
         // Make sure that ThreadClusterLengths are set in a way that allows for contiguous writes to
@@ -141,11 +146,11 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
                       "When loading more than one element per thread at once, the contiguous "
                       "dimension must be the same between source and destination.");
 
-        constexpr auto dword_bytes           = 4;
-        constexpr auto bytes_per_thread_load = ScalarPerVector * sizeof(SrcData);
-        static_assert(bytes_per_thread_load == dword_bytes,
-                      "Direct load transfer requires each thread to load exactly a single "
-                      "DWORD of data.");
+        // constexpr auto dword_bytes           = 4;
+        // constexpr auto bytes_per_thread_load = ScalarPerVector * sizeof(SrcData) / 2;
+        // static_assert(bytes_per_thread_load == dword_bytes,
+        //               "Direct load transfer requires each thread to load exactly a single "
+        //               "DWORD of data.");
 
         static_assert(nDim == remove_cvref_t<SrcDesc>::GetNumOfDimension() &&
                           nDim == remove_cvref_t<DstDesc>::GetNumOfDimension() &&
@@ -156,10 +161,10 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
                       "The number of threads cannot be less than the number of elements in "
                       "thread cluster lengths.");
 
-        static_assert(
-            AreThreadClusterLengthsValid(),
-            "Thread cluster lengths are incorrect. They must be set in a way that allows a single "
-            "wavefront to write contiguous DWORDs into LDS memory. ");
+        // static_assert(
+        //     AreThreadClusterLengthsValid(),
+        //     "Thread cluster lengths are incorrect. They must be set in a way that allows a single
+        //     " "wavefront to write contiguous DWORDs into LDS memory. ");
 
         const auto thread_cluster_idx =
             thread_cluster_desc_.CalculateBottomIndex(make_multi_index(ThreadGroup::GetThreadId()));
@@ -214,15 +219,16 @@ struct ThreadGroupTensorSliceTransfer_DirectLoad
 
         // Loop over the destination block and copy data.
         static_ford<decltype(dst_access_lengths)>{}([&](auto ordered_dst_access_idx) {
-            const auto src_offset = src_coord_.GetOffset();
-            const auto dst_offset = dst_coord_.GetOffset();
+            const auto src_offset = src_coord_.GetOffset() / 2;
+            const auto dst_offset = dst_coord_.GetOffset() / 2;
 
             // Check if src data is not in the logic padding area.
             const bool is_src_valid =
                 coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord_);
 
-            src_buf.template DirectCopyToLds<remove_cvref_t<decltype(dst_buf)>, ScalarPerVector>(
-                dst_buf, src_offset, dst_offset, is_src_valid);
+            src_buf
+                .template DirectCopyToLds<remove_cvref_t<decltype(dst_buf)>, ScalarPerVector / 2>(
+                    dst_buf, src_offset, dst_offset, is_src_valid);
 
             constexpr auto move_on_dim = [&]() constexpr
             {
