@@ -499,6 +499,21 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                                         b_thread_vec.template AsType<mfma_input_type>(),
                                         c_thread_buf_per_scale.GetVectorTypeReference(Number<0>{}));
                                 });
+
+                                // if (c_thread_buf_per_scale[Number<0>{}] != 128)
+                                // if (get_block_1d_id() == 96)
+                                // // if (get_block_1d_id() == 96 && get_warp_local_1d_id() == 1 &&
+                                // int(m0) == 1) printf(
+                                //     "Tid: %03d, Warp: %03d, Bid: %03d, Mrepeat: %03d ik %03d c:
+                                //     %.0f %.0f %.0f %.0f \n", get_thread_local_1d_id(),
+                                //     get_warp_local_1d_id(),
+                                //     get_block_1d_id(),
+                                //     int(m0),
+                                //     int(i) + int(mfma_reg_buf),
+                                //     c_thread_buf_per_scale[Number<0>{}],
+                                //     c_thread_buf_per_scale[Number<1>{}],
+                                //     c_thread_buf_per_scale[Number<2>{}],
+                                //     c_thread_buf_per_scale[Number<3>{}]);
                                 constexpr index_t c_offset =
                                     c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
 
@@ -539,7 +554,7 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                         });
                     });
 
-                    HotLoopScheduler();
+                    // HotLoopScheduler();
                     __builtin_amdgcn_sched_barrier(0);
 
                     static_for<0, MRepeat, 1>{}([&](auto m0) {
@@ -558,6 +573,31 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                             });
                         });
                     });
+
+                    __builtin_amdgcn_sched_barrier(0);
+                    block_sync_lds();
+#if(defined(__gfx950__) || defined(__gfx942__)) && 0
+                    // divide block work by [M, N]
+                    if(get_block_1d_id() == 96)
+                        printf("Tid: %03d, Warp: %03d, Bid: %03d, k %03d, c: %.0f %.0f %.0f %.0f | "
+                               "%.0f %.0f %.0f %.0f | %.0f %.0f %.0f %.0f |\n",
+                               get_thread_local_1d_id(),
+                               get_warp_local_1d_id(),
+                               get_block_1d_id(),
+                               int(i) + int(mfma_reg_buf),
+                               c_thread_buf[Number<0>{}],
+                               c_thread_buf[Number<1>{}],
+                               c_thread_buf[Number<2>{}],
+                               c_thread_buf[Number<3>{}],
+                               c_thread_buf[Number<0 + 4>{}],
+                               c_thread_buf[Number<1 + 4>{}],
+                               c_thread_buf[Number<2 + 4>{}],
+                               c_thread_buf[Number<3 + 4>{}],
+                               c_thread_buf[Number<8 + 0>{}],
+                               c_thread_buf[Number<8 + 1>{}],
+                               c_thread_buf[Number<8 + 2>{}],
+                               c_thread_buf[Number<8 + 3>{}]);
+#endif
 
                     static_for<0, MRepeat, 1>{}([&](auto m0) {
                         a_scale_thread_copy.Run(a_scale_grid_desc,
@@ -607,6 +647,7 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                                  b_thread_bufs(I1));
             block_sync_lds();
             a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
+            CK_PRINT<MRepeat, NRepeat, KRepeat, index_t(num_scale_k_block)>();
 
             static_for<0, MRepeat, 1>{}([&](auto m0) {
                 static_for<0, NRepeat, 1>{}([&](auto n0) {
@@ -654,6 +695,23 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                                 b_thread_vec.template AsType<mfma_input_type>(),
                                 c_thread_buf_per_scale.GetVectorTypeReference(Number<0>{}));
                         });
+
+
+                        // if (c_thread_buf_per_scale[Number<0>{}] != 128)
+                        // if (get_block_1d_id() == 96)
+                        // // if (get_block_1d_id() == 96 && get_warp_local_1d_id() == 1 && int(m0)
+                        // == 1)
+                        //         printf(
+                        //             "Tid: %03d, Warp: %03d, Bid: %03d, Mrepeat: %03d ik %03d c:
+                        //             %.0f %.0f %.0f %.0f \n", get_thread_local_1d_id(),
+                        //             get_warp_local_1d_id(),
+                        //             get_block_1d_id(),
+                        //             int(m0),
+                        //             int(num_loop-2),
+                        //             c_thread_buf_per_scale[Number<0>{}],
+                        //             c_thread_buf_per_scale[Number<1>{}],
+                        //             c_thread_buf_per_scale[Number<2>{}],
+                        //             c_thread_buf_per_scale[Number<3>{}]);
                         constexpr index_t c_offset =
                             c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
 
@@ -671,6 +729,29 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                     });
                 });
             });
+
+#if(defined(__gfx950__) || defined(__gfx942__)) && 0
+            // divide block work by [M, N]
+            if(get_block_1d_id() == 96)
+                printf("Tid: %03d, Warp: %03d, Bid: %03d, k: %03d, c: %.0f %.0f %.0f %.0f | %.0f "
+                       "%.0f %.0f %.0f | %.0f %.0f %.0f %.0f |\n",
+                       get_thread_local_1d_id(),
+                       get_warp_local_1d_id(),
+                       get_block_1d_id(),
+                       int(num_loop - 2),
+                       c_thread_buf[Number<0>{}],
+                       c_thread_buf[Number<1>{}],
+                       c_thread_buf[Number<2>{}],
+                       c_thread_buf[Number<3>{}],
+                       c_thread_buf[Number<0 + 4>{}],
+                       c_thread_buf[Number<1 + 4>{}],
+                       c_thread_buf[Number<2 + 4>{}],
+                       c_thread_buf[Number<3 + 4>{}],
+                       c_thread_buf[Number<8 + 0>{}],
+                       c_thread_buf[Number<8 + 1>{}],
+                       c_thread_buf[Number<8 + 2>{}],
+                       c_thread_buf[Number<8 + 3>{}]);
+#endif
 
             static_for<0, MRepeat, 1>{}([&](auto m0) {
                 static_for<0, num_scale_n_block, 1>{}([&](auto n0) {
@@ -756,6 +837,24 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                         constexpr index_t c_offset =
                             c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
 
+
+                        // // if (c_thread_buf_per_scale[Number<0>{}] != 128)
+                        // if constexpr (int(m0) == 0)
+                        // if (get_block_1d_id() == 96)
+                        // // // // if (get_block_1d_id() == 96 && get_warp_local_1d_id() == 1 &&
+                        // int(m0) == 1)
+                        //     printf(
+                        //         "Tid: %03d, Warp: %03d, Bid: %03d, Mrepeat: %03d ik %03d c: %.0f
+                        //         %.0f %.0f %.0f \n", get_thread_local_1d_id(),
+                        //         get_warp_local_1d_id(),
+                        //         get_block_1d_id(),
+                        //         int(m0),
+                        //         int(num_loop-1),
+                        //         c_thread_buf_per_scale[Number<0>{}],
+                        //         c_thread_buf_per_scale[Number<1>{}],
+                        //         c_thread_buf_per_scale[Number<2>{}],
+                        //         c_thread_buf_per_scale[Number<3>{}]);
+
                         static_for<0, xdlops_gemm.GetRegSizePerXdlops() / 2, 1>{}([&](auto t) {
                             using pk_fma_type = typename vector_type<AccDataType, 2>::type;
 
@@ -770,25 +869,29 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                     });
                 });
             });
-            
-#if defined(__gfx950__) || defined(__gfx942__) && 0 
-                    printf(
-                        "Tid: %03d, c: %.0f %.0f %.0f %.0f | %.0f %.0f %.0f %.0f | %.0f %.0f %.0f %.0f |\n",
-                        get_thread_local_1d_id(),
-                        c_thread_buf[Number<0>{}],
-                        c_thread_buf[Number<1>{}],
-                        c_thread_buf[Number<2>{}],
-                        c_thread_buf[Number<3>{}],
-                        c_thread_buf[Number<0 + 4>{}],
-                        c_thread_buf[Number<1 + 4>{}],
-                        c_thread_buf[Number<2 + 4>{}],
-                        c_thread_buf[Number<3 + 4>{}],
-                        c_thread_buf[Number<8 + 0>{}],
-                        c_thread_buf[Number<8 + 1>{}],
-                        c_thread_buf[Number<8 + 2>{}],
-                        c_thread_buf[Number<8 + 3>{}]);
+
+#if(defined(__gfx950__) || defined(__gfx942__)) && 1
+            // divide block work by [M, N]
+            if(get_block_1d_id() == 96)
+                printf("Tid: %03d, Warp: %03d, Bid: %03d, k %03d, "
+                       "c: %.0f %.0f %.0f %.0f | %.0f %.0f %.0f %.0f | %.0f %.0f %.0f %.0f |\n",
+                       get_thread_local_1d_id(),
+                       get_warp_local_1d_id(),
+                       get_block_1d_id(),
+                       int(num_loop - 1),
+                       c_thread_buf[Number<0>{}],
+                       c_thread_buf[Number<1>{}],
+                       c_thread_buf[Number<2>{}],
+                       c_thread_buf[Number<3>{}],
+                       c_thread_buf[Number<0 + 4>{}],
+                       c_thread_buf[Number<1 + 4>{}],
+                       c_thread_buf[Number<2 + 4>{}],
+                       c_thread_buf[Number<3 + 4>{}],
+                       c_thread_buf[Number<8 + 0>{}],
+                       c_thread_buf[Number<8 + 1>{}],
+                       c_thread_buf[Number<8 + 2>{}],
+                       c_thread_buf[Number<8 + 3>{}]);
 #endif
-            
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
