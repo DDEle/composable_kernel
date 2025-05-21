@@ -1173,6 +1173,9 @@ struct GridwiseGemmMultiD_blockscale_xdl_cshuffle_v3_b_preshuffle
 
         const index_t block_m_id = __builtin_amdgcn_readfirstlane(block_work_idx[I0]);
         const index_t block_n_id = __builtin_amdgcn_readfirstlane(block_work_idx[I1]);
+        // if(get_thread_local_1d_id() == 0)
+        //     printf("block_1d_id %d block_m_id %d, block_n_id %d\n", get_block_1d_id(),
+        //     block_m_id, block_n_id);
 
         // HACK: this force m/n_block_data_idx_on_grid into SGPR
         const index_t m_block_data_idx_on_grid =
