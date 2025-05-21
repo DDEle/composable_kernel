@@ -243,14 +243,14 @@ struct DeviceGemmMultiD_BlockScale_Xdl_CShuffle_V3_BPreshuffle
                 {
                     if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
                     {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
-                                GridwiseGemm,
-                                true,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Odd>;
-                        Run(kernel);
+                        // const auto kernel =
+                        //     kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
+                        //         GridwiseGemm,
+                        //         true,
+                        //         InMemoryDataOperationEnum::Set,
+                        //         minimum_occupancy,
+                        //         TailNumber::Odd>;
+                        // Run(kernel);
                     }
                     else
                     {
@@ -266,58 +266,58 @@ struct DeviceGemmMultiD_BlockScale_Xdl_CShuffle_V3_BPreshuffle
                 }
                 else if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
                 {
-                    if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds<
-                                GridwiseGemm,
-                                true,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Odd>;
-                        Run(kernel);
-                    }
-                    else
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds<
-                                GridwiseGemm,
-                                true,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Even>;
-                        Run(kernel);
-                    }
+                    // if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
+                    // {
+                    //     const auto kernel =
+                    //         kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds<
+                    //             GridwiseGemm,
+                    //             true,
+                    //             InMemoryDataOperationEnum::Set,
+                    //             minimum_occupancy,
+                    //             TailNumber::Odd>;
+                    //     Run(kernel);
+                    // }
+                    // else
+                    // {
+                    //     const auto kernel =
+                    //         kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle_2lds<
+                    //             GridwiseGemm,
+                    //             true,
+                    //             InMemoryDataOperationEnum::Set,
+                    //             minimum_occupancy,
+                    //             TailNumber::Even>;
+                    //     Run(kernel);
+                    // }
                 }
             }
             else
             {
-                // Tail number always 1
-                if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
-                {
-                    if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
-                                GridwiseGemm,
-                                false,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Odd>;
-                        Run(kernel);
-                    }
-                    else
-                    {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
-                                GridwiseGemm,
-                                false,
-                                InMemoryDataOperationEnum::Set,
-                                minimum_occupancy,
-                                TailNumber::Even>;
-                        Run(kernel);
-                    }
-                }
+                // // Tail number always 1
+                // if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1)
+                // {
+                //     if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
+                //     {
+                //         const auto kernel =
+                //             kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
+                //                 GridwiseGemm,
+                //                 false,
+                //                 InMemoryDataOperationEnum::Set,
+                //                 minimum_occupancy,
+                //                 TailNumber::Odd>;
+                //         Run(kernel);
+                //     }
+                //     else
+                //     {
+                //         const auto kernel =
+                //             kernel_gemm_xdl_cshuffle_v3_multi_d_blockscale_b_preshuffle<
+                //                 GridwiseGemm,
+                //                 false,
+                //                 InMemoryDataOperationEnum::Set,
+                //                 minimum_occupancy,
+                //                 TailNumber::Even>;
+                //         Run(kernel);
+                //     }
+                // }
             }
             return ave_time;
         }

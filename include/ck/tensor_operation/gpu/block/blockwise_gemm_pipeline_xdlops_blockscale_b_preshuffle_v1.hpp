@@ -445,6 +445,7 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
             do
             {
                 auto LoopFunc = [&](auto mfma_reg_buf, auto local_read_buf) {
+                                    __builtin_amdgcn_sched_barrier(0);
                     block_sync_lds();
                     b_blockwise_copy.Run(b_grid_desc,
                                          b_grid_buf,
@@ -453,12 +454,16 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                                          b_thread_bufs(local_read_buf));
                     b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
 
+                                    __builtin_amdgcn_sched_barrier(0);
                     block_sync_lds();
                     a_blockwise_copy.RunWrite(a_block_desc, a_block_buf, mfma_reg_buf);
+                                    __builtin_amdgcn_sched_barrier(0);
                     block_sync_lds();
                     a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf, local_read_buf);
+                                    __builtin_amdgcn_sched_barrier(0);
                     block_sync_lds();
                     a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                                    __builtin_amdgcn_sched_barrier(0);
                     block_sync_lds();
 
                     static_for<0, MRepeat, 1>{}([&](auto m0) {
@@ -507,12 +512,14 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
 
                                     __builtin_amdgcn_sched_barrier(0);
                                     block_sync_lds();
+                                    __builtin_amdgcn_sched_barrier(0);
                                     xdlops_gemm.template Run<>(
                                         a_thread_vec.template AsType<mfma_input_type>(),
                                         b_thread_vec.template AsType<mfma_input_type>(),
                                         c_thread_buf_per_scale.GetVectorTypeReference(Number<0>{}));
                                     __builtin_amdgcn_sched_barrier(0);
                                     block_sync_lds();
+                                    __builtin_amdgcn_sched_barrier(0);
                                 });
 
                                 __builtin_amdgcn_sched_barrier(0);
@@ -572,6 +579,7 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v1<BlockGemmPipelineS
                             });
                         });
                     });
+                                    __builtin_amdgcn_sched_barrier(0);
                     block_sync_lds();
 
                     // HotLoopScheduler();
