@@ -200,7 +200,8 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
                                NPerXdl,
                                ComputeTypeB,
                                is_single_rate_mfma,
-                               is_scale_mfma>::selected_mfma.k_per_blk/APackedSize);
+                               is_scale_mfma>::selected_mfma.k_per_blk /
+                      APackedSize);
 
     using ThisThreadBlock = ThisThreadBlock<BlockSize>;
 
@@ -270,13 +271,13 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
         constexpr index_t MN = TileDesc_K0_MN_K1{}.GetLength(Number<1>{});
         constexpr index_t K1 = TileDesc_K0_MN_K1{}.GetLength(Number<2>{});
 
-        constexpr auto permuted_desc =  transform_tensor_descriptor(
+        constexpr auto permuted_desc = transform_tensor_descriptor(
             TileDesc_K0_MN_K1{},
             make_tuple(make_xor_with_modulo_transform(make_tuple(Number<MN>{}, Number<K0>{})),
-                           make_pass_through_transform(Number<K1>{})),
+                       make_pass_through_transform(Number<K1>{})),
             make_tuple(Sequence<1, 0>{}, Sequence<2>{}),
             make_tuple(Sequence<1, 0>{}, Sequence<2>{}));
-            
+
         return transform_tensor_descriptor(
             permuted_desc,
             make_tuple(make_merge_transform_v3_division_mod(make_tuple(Number<K0>{}, Number<K1>{})),
@@ -361,24 +362,25 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
             // not pad M or K
             const auto a_grid_desc_ak0_m_ak1 = transform_tensor_descriptor(
                 a_grid_desc_mraw_kraw,
-                make_tuple(make_unmerge_transform(make_tuple(K/KPerBlock, AK0Number, AK1Value)),
+                make_tuple(make_unmerge_transform(make_tuple(K / KPerBlock, AK0Number, AK1Value)),
                            make_pass_through_transform(M)),
                 make_tuple(Sequence<1>{}, Sequence<0>{}),
                 make_tuple(Sequence<0, 1, 3>{}, Sequence<2>{}));
-            
+
             const auto a_grid_desc_permuted = transform_tensor_descriptor(
                 a_grid_desc_ak0_m_ak1,
-                make_tuple(make_pass_through_transform(K/KPerBlock),
+                make_tuple(make_pass_through_transform(K / KPerBlock),
                            make_xor_with_modulo_transform(make_tuple(M, AK0Number)),
                            make_pass_through_transform(AK1Value)),
                 make_tuple(Sequence<0>{}, Sequence<2, 1>{}, Sequence<3>{}),
                 make_tuple(Sequence<0>{}, Sequence<2, 1>{}, Sequence<3>{}));
-            
+
             const auto a_grid_desc = transform_tensor_descriptor(
                 a_grid_desc_permuted,
-                make_tuple(make_merge_transform_v3_division_mod(make_tuple(K/KPerBlock, AK0Number)),
-                           make_pass_through_transform(M),
-                           make_pass_through_transform(AK1Value)),
+                make_tuple(
+                    make_merge_transform_v3_division_mod(make_tuple(K / KPerBlock, AK0Number)),
+                    make_pass_through_transform(M),
+                    make_pass_through_transform(AK1Value)),
                 make_tuple(Sequence<0, 1>{}, Sequence<2>{}, Sequence<3>{}),
                 make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
 
@@ -467,25 +469,27 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
             {
                 // not pad N or K
                 const auto b_grid_desc_bk0_n_bk1 = transform_tensor_descriptor(
-                b_grid_desc_nraw_kraw,
-                make_tuple(make_unmerge_transform(make_tuple(K/KPerBlock, BK0Number, BK1Value)),
-                           make_pass_through_transform(N)),
-                make_tuple(Sequence<1>{}, Sequence<0>{}),
-                make_tuple(Sequence<0, 1, 3>{}, Sequence<2>{}));
-            
+                    b_grid_desc_nraw_kraw,
+                    make_tuple(
+                        make_unmerge_transform(make_tuple(K / KPerBlock, BK0Number, BK1Value)),
+                        make_pass_through_transform(N)),
+                    make_tuple(Sequence<1>{}, Sequence<0>{}),
+                    make_tuple(Sequence<0, 1, 3>{}, Sequence<2>{}));
+
                 const auto b_grid_desc_permuted = transform_tensor_descriptor(
                     b_grid_desc_bk0_n_bk1,
-                    make_tuple(make_pass_through_transform(K/KPerBlock),
+                    make_tuple(make_pass_through_transform(K / KPerBlock),
                                make_xor_with_modulo_transform(make_tuple(N, BK0Number)),
                                make_pass_through_transform(BK1Value)),
                     make_tuple(Sequence<0>{}, Sequence<2, 1>{}, Sequence<3>{}),
                     make_tuple(Sequence<0>{}, Sequence<2, 1>{}, Sequence<3>{}));
-            
+
                 const auto b_grid_desc = transform_tensor_descriptor(
                     b_grid_desc_permuted,
-                    make_tuple(make_merge_transform_v3_division_mod(make_tuple(K/KPerBlock, BK0Number)),
-                               make_pass_through_transform(N),
-                               make_pass_through_transform(BK1Value)),
+                    make_tuple(
+                        make_merge_transform_v3_division_mod(make_tuple(K / KPerBlock, BK0Number)),
+                        make_pass_through_transform(N),
+                        make_pass_through_transform(BK1Value)),
                     make_tuple(Sequence<0, 1>{}, Sequence<2>{}, Sequence<3>{}),
                     make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
 
@@ -690,10 +694,10 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
                           bool is_reduce_ = false)
             : Problem{M_,
                       N_,
-                      K_/APackedSize,
-                      StrideA_/APackedSize,
+                      K_ / APackedSize,
+                      StrideA_ / APackedSize,
                       StrideScaleA_,
-                      StrideB_/BPackedSize,
+                      StrideB_ / BPackedSize,
                       StrideScaleB_,
                       StrideC_,
                       k_batch_},
@@ -765,21 +769,23 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
             // Calculate A scale offset
             if constexpr(is_same_v<tensor_layout::gemm::RowMajor, ALayout>)
             {
-                a_scale_k_split_offset = k_id * karg.KRead / (ScaleBlockSize/APackedSize);
+                a_scale_k_split_offset = k_id * karg.KRead / (ScaleBlockSize / APackedSize);
             }
             else if constexpr(is_same_v<tensor_layout::gemm::ColumnMajor, ALayout>)
             {
-                a_scale_k_split_offset = k_id * karg.KRead / (ScaleBlockSize/APackedSize) * karg.StrideScaleA;
+                a_scale_k_split_offset =
+                    k_id * karg.KRead / (ScaleBlockSize / APackedSize) * karg.StrideScaleA;
             }
 
             // Calculate B scale offset
             if constexpr(is_same_v<tensor_layout::gemm::RowMajor, BLayout>)
             {
-                b_scale_k_split_offset = k_id * (karg.KRead / (ScaleBlockSize/BPackedSize)) * karg.StrideScaleB;
+                b_scale_k_split_offset =
+                    k_id * (karg.KRead / (ScaleBlockSize / BPackedSize)) * karg.StrideScaleB;
             }
             else if constexpr(is_same_v<tensor_layout::gemm::ColumnMajor, BLayout>)
             {
-                b_scale_k_split_offset = k_id * karg.KRead / (ScaleBlockSize/BPackedSize);
+                b_scale_k_split_offset = k_id * karg.KRead / (ScaleBlockSize / BPackedSize);
             }
 
             if(k_id < (karg.KBatch - 1))
@@ -1118,7 +1124,7 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
                           (NPerBlock % (NXdlPerWave * NPerXdl)) == 0,
                       "Invalid tuning param!");
 
-        static_assert(KPerBlock % (ScaleBlockSize/BPackedSize) == 0,
+        static_assert(KPerBlock % (ScaleBlockSize / BPackedSize) == 0,
                       "KPerBlock should be multiple of ScaleBlockSize");
 
         if constexpr(!(GemmSpec == tensor_operation::device::GemmSpecialization::MPadding ||
@@ -1468,12 +1474,11 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
 
         // Cast after lds
         auto a_block_buf = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-            static_cast<ADataType*>(p_shared),
-            a_block_desc_ak0_m_ak1.GetElementSpaceSize());
+            static_cast<ADataType*>(p_shared), a_block_desc_ak0_m_ak1.GetElementSpaceSize());
 
         auto b_block_buf = make_dynamic_buffer<AddressSpaceEnum::Lds>(
-            reinterpret_cast<BDataType*>(static_cast<char*>(p_shared) + a_block_space_size_aligned *
-                                                                            sizeof(ADataType)),
+            reinterpret_cast<BDataType*>(static_cast<char*>(p_shared) +
+                                         a_block_space_size_aligned * sizeof(ADataType)),
             b_block_desc_bk0_n_bk1.GetElementSpaceSize());
 
         constexpr auto a_block_slice_copy_step = make_multi_index(KPerBlock / AK1Number, 0, 0);
@@ -1819,15 +1824,17 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
 
         // A/B shuffled scale for better 8-bit scale access pattern
         // MNRepeat -> KRepeat -> KThreadPerXdl -> MNThreadPerXdl -> KXdlPack -> MNXdlPack
-        const auto a_scale_grid_desc_am_ak = make_naive_tensor_descriptor_packed(make_tuple(
-            problem.M / (MXdlPack * MPerXdl),
-            math::integer_divide_ceil(problem.K, (ScaleBlockSize/APackedSize)) / (KXdlPack * 64 / MPerXdl),
-            64 * KXdlPack * MXdlPack / scale_pack_size_a));
+        const auto a_scale_grid_desc_am_ak = make_naive_tensor_descriptor_packed(
+            make_tuple(problem.M / (MXdlPack * MPerXdl),
+                       math::integer_divide_ceil(problem.K, (ScaleBlockSize / APackedSize)) /
+                           (KXdlPack * 64 / MPerXdl),
+                       64 * KXdlPack * MXdlPack / scale_pack_size_a));
 
-        const auto b_scale_grid_desc_bn_ak = make_naive_tensor_descriptor_packed(make_tuple(
-            problem.N / (NXdlPack * NPerXdl),
-            math::integer_divide_ceil(problem.K, (ScaleBlockSize/BPackedSize)) / (KXdlPack * 64 / NPerXdl),
-            64 * KXdlPack * NXdlPack / scale_pack_size_b));
+        const auto b_scale_grid_desc_bn_ak = make_naive_tensor_descriptor_packed(
+            make_tuple(problem.N / (NXdlPack * NPerXdl),
+                       math::integer_divide_ceil(problem.K, (ScaleBlockSize / BPackedSize)) /
+                           (KXdlPack * 64 / NPerXdl),
+                       64 * KXdlPack * NXdlPack / scale_pack_size_b));
 
         Run<decltype(a_grid_desc_ak0_m_ak1),
             decltype(a_scale_grid_desc_am_ak),
@@ -1888,8 +1895,8 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
         const auto b_scale_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_b_scale_grid, b_scale_grid_desc_bn_ak.GetElementSpaceSize());
 
-        const AElementwiseOperation a_element_op{};
-        const BElementwiseOperation b_element_op{};
+        // const AElementwiseOperation a_element_op{};
+        // const BElementwiseOperation b_element_op{};
         const CElementwiseOperation c_element_op{};
 
         // divide block work by [M, N]
@@ -2126,7 +2133,8 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
                 make_tuple(
                     make_freeze_transform(I0),
                     make_unmerge_transform(make_tuple(
-                        Number<CShuffleMXdlPerWavePerShuffle / MXdlPack>{}, // M0 (MXdlPerWave) per shuffle
+                        Number<CShuffleMXdlPerWavePerShuffle / MXdlPack>{}, // M0 (MXdlPerWave) per
+                                                                            // shuffle
                         M1,                                                 // M1 = MWave
                         M2,                                                 // M2 = MXdlPack
                         M3, // M3 * M4 * M5 = MPerXdl
@@ -2308,13 +2316,13 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
               InMemoryDataOperationEnum CGlobalMemoryDataOperation,
               TailNumber TailNum = TailNumber::Odd>
     __device__ static void Run_2Lds(const ADataType* p_a_grid,
-                               const AScaleDataType* p_a_scale_grid,
-                               const BDataType* p_b_grid,
-                               const BScaleDataType* p_b_scale_grid,
-                               CDataType* p_c_grid,
-                               void* p_shared_0,
-                               void* p_shared_1,
-                               const Problem& problem)
+                                    const AScaleDataType* p_a_scale_grid,
+                                    const BDataType* p_b_grid,
+                                    const BScaleDataType* p_b_scale_grid,
+                                    CDataType* p_c_grid,
+                                    void* p_shared_0,
+                                    void* p_shared_1,
+                                    const Problem& problem)
     {
         const auto a_grid_desc_ak0_m_ak1 = MakeAGridDescriptor_AK0_M_AK1(
             problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideA, problem.AK0);
@@ -2328,36 +2336,38 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
 
         // A/B shuffled scale for better 8-bit scale access pattern
         // MNRepeat -> KRepeat -> KThreadPerXdl -> MNThreadPerXdl -> KXdlPack -> MNXdlPack
-        const auto a_scale_grid_desc_am_ak = make_naive_tensor_descriptor_packed(make_tuple(
-            problem.M / (MXdlPack * MPerXdl),
-            math::integer_divide_ceil(problem.K, (ScaleBlockSize/APackedSize)) / (KXdlPack * 64 / MPerXdl),
-            64 * KXdlPack * MXdlPack / scale_pack_size_a));
+        const auto a_scale_grid_desc_am_ak = make_naive_tensor_descriptor_packed(
+            make_tuple(problem.M / (MXdlPack * MPerXdl),
+                       math::integer_divide_ceil(problem.K, (ScaleBlockSize / APackedSize)) /
+                           (KXdlPack * 64 / MPerXdl),
+                       64 * KXdlPack * MXdlPack / scale_pack_size_a));
 
-        const auto b_scale_grid_desc_bn_ak = make_naive_tensor_descriptor_packed(make_tuple(
-            problem.N / (NXdlPack * NPerXdl),
-            math::integer_divide_ceil(problem.K, (ScaleBlockSize/BPackedSize)) / (KXdlPack * 64 / NPerXdl),
-            64 * KXdlPack * NXdlPack / scale_pack_size_b));
+        const auto b_scale_grid_desc_bn_ak = make_naive_tensor_descriptor_packed(
+            make_tuple(problem.N / (NXdlPack * NPerXdl),
+                       math::integer_divide_ceil(problem.K, (ScaleBlockSize / BPackedSize)) /
+                           (KXdlPack * 64 / NPerXdl),
+                       64 * KXdlPack * NXdlPack / scale_pack_size_b));
 
         Run_2Lds<decltype(a_grid_desc_ak0_m_ak1),
-            decltype(a_scale_grid_desc_am_ak),
-            decltype(b_grid_desc_bk0_n_bk1),
-            decltype(b_scale_grid_desc_bn_ak),
-            decltype(c_grid_desc_mblock_mperblock_nblock_nperblock),
-            HasMainKBlockLoop,
-            CGlobalMemoryDataOperation,
-            TailNum>(p_a_grid,
-                     p_a_scale_grid,
-                     p_b_grid,
-                     p_b_scale_grid,
-                     p_c_grid,
-                     p_shared_0,
-                     p_shared_1,
-                     problem,
-                     a_grid_desc_ak0_m_ak1,
-                     a_scale_grid_desc_am_ak,
-                     b_grid_desc_bk0_n_bk1,
-                     b_scale_grid_desc_bn_ak,
-                     c_grid_desc_mblock_mperblock_nblock_nperblock);
+                 decltype(a_scale_grid_desc_am_ak),
+                 decltype(b_grid_desc_bk0_n_bk1),
+                 decltype(b_scale_grid_desc_bn_ak),
+                 decltype(c_grid_desc_mblock_mperblock_nblock_nperblock),
+                 HasMainKBlockLoop,
+                 CGlobalMemoryDataOperation,
+                 TailNum>(p_a_grid,
+                          p_a_scale_grid,
+                          p_b_grid,
+                          p_b_scale_grid,
+                          p_c_grid,
+                          p_shared_0,
+                          p_shared_1,
+                          problem,
+                          a_grid_desc_ak0_m_ak1,
+                          a_scale_grid_desc_am_ak,
+                          b_grid_desc_bk0_n_bk1,
+                          b_scale_grid_desc_bn_ak,
+                          c_grid_desc_mblock_mperblock_nblock_nperblock);
     }
 };
 
