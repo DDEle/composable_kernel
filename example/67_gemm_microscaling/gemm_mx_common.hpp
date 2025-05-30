@@ -303,6 +303,8 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
             return ck::type_convert<BDataType>(x);
     };
 
+    using int_distr   = std::uniform_int_distribution<int>;
+    using float_distr = std::uniform_real_distribution<float>;
     switch(config.init_method)
     {
     case 0: // Initializations for development and debugging
@@ -321,22 +323,19 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
         break;
 
     case 1:
-
-        a_m_k.GenerateTensorValue(GeneratorTensor_2<ADataType>{-5, 6});  // Z[-5,5]
-        b_k_n->GenerateTensorValue(GeneratorTensor_2<BDataType>{-5, 6}); // Z[-5,5]
+        a_m_k.GenerateTensorDistr(int_distr{-5, 6});  // Z[-5,5]
+        b_k_n->GenerateTensorDistr(int_distr{-5, 6}); // Z[-5,5]
         static_assert(ck::is_same_v<XDataType, ck::e8m0_bexp_t>);
-        a_m_k_scale.GenerateTensorValue(
-            GeneratorTensor_2<XDataType>{120, 129}); // scales: {0.25, 0.5, 1, 2}
-        b_k_n_scale.GenerateTensorValue(
-            GeneratorTensor_2<XDataType>{125, 129}); // scales: {0.25, 0.5, 1, 2}
+        a_m_k_scale.GenerateTensorDistr(int_distr{120, 129}); // scales: {0.25, 0.5, 1, 2}
+        b_k_n_scale.GenerateTensorDistr(int_distr{125, 129}); // scales: {0.25, 0.5, 1, 2}
         break;
 
     case 2:
-        a_m_k.GenerateTensorValue(GeneratorTensor_3<ADataType>{-2.0, 2.0});
-        a_m_k_scale.GenerateTensorValue(GeneratorTensor_3<XDataType>{powf(2.0f, -125.0f), 1.0f});
+        a_m_k.GenerateTensorDistr(float_distr{-2.0, 2.0});
+        a_m_k_scale.GenerateTensorDistr(float_distr{powf(2.0f, -125.0f), 1.0f});
 
-        b_k_n->GenerateTensorValue(GeneratorTensor_3<BDataType>{-2.0, 2.0});
-        b_k_n_scale.GenerateTensorValue(GeneratorTensor_3<XDataType>{powf(2.0f, -125.0f), 1.0f});
+        b_k_n->GenerateTensorDistr(float_distr{-2.0, 2.0});
+        b_k_n_scale.GenerateTensorDistr(float_distr{powf(2.0f, -125.0f), 1.0f});
         break;
 
     default:
@@ -400,6 +399,31 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
     //     if(i % 64 == 63)
     //         printf("\n");
     // }
+#if 0
+    printf("a_m_k:\n");
+    std::vector<int> a_m_k_hist(16, 0);
+    for(ck::index_t i = 0; i < M; i++)
+    {
+        for(ck::index_t j = 0; j < K; j += 2)
+        {
+            assert(a_m_k(i, j) == a_m_k(i, j + 1));
+            auto j01   = *reinterpret_cast<uint8_t*>(&a_m_k(i, j));
+            uint8_t j0 = j01 & 0x0f;
+            uint8_t j1 = (j01 >> 4) & 0x0f;
+            printf("%x %x ", j0, j1);
+            a_m_k_hist[j0]++;
+            a_m_k_hist[j1]++;
+        }
+        printf("\n");
+    }
+    printf("a_m_k_hist:\n");
+    for(int i = 0; i < 16; i++)
+        printf("%0.4f(%x): %d\n", //
+               ck::utils::to_float<ck::f4_t>(ck::e8m0_bexp_t{1.f}, ck::f4_t(i)),
+               static_cast<uint32_t>(i),
+               a_m_k_hist[i]);
+    printf("\n");
+#endif
 
     if(config.verbosity > 0)
         std::cout << "Device memory allocation..." << std::endl;
