@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -672,10 +672,12 @@ struct GridwiseGemm_xdlops_splitk_lds_direct_load
             ThreadGroupTensorSliceTransfer_DirectLoad<ThisThreadBlock,
                                                       Sequence<1, K0PerBlock, MPerBlock, K1>,
                                                       ABlockTransferThreadClusterLengths_K0_M_K1,
+                                                      Sequence<0, 1, 2>,
                                                       FloatA,
                                                       ComputeType,
                                                       decltype(a_b_k0_m_k1_grid_desc),
                                                       decltype(a_b_k0_m_k1_block_desc),
+                                                      Sequence<0, 1, 2, 3>,
                                                       ABlockTransferSrcVectorDim,
                                                       3,
                                                       ABlockTransferSrcScalarPerVector>(
@@ -688,10 +690,12 @@ struct GridwiseGemm_xdlops_splitk_lds_direct_load
             ThreadGroupTensorSliceTransfer_DirectLoad<ThisThreadBlock,
                                                       Sequence<1, K0PerBlock, NPerBlock, K1>,
                                                       BBlockTransferThreadClusterLengths_K0_N_K1,
+                                                      Sequence<0, 1, 2>,
                                                       FloatB,
                                                       ComputeType,
                                                       decltype(b_b_k0_n_k1_grid_desc),
                                                       decltype(b_b_k0_n_k1_block_desc),
+                                                      Sequence<0, 1, 2, 3>,
                                                       BBlockTransferSrcVectorDim,
                                                       3,
                                                       BBlockTransferSrcScalarPerVector>(

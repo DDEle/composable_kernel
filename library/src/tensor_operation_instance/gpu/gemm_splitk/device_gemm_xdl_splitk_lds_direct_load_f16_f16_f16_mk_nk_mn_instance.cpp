@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <cstdlib>
 
@@ -32,11 +32,12 @@ static constexpr auto GemmMNKPadding = ck::tensor_operation::device::GemmSpecial
 
 // Compilation parameters for a[m, k] * b[k, n] = c[m, n]
 using device_gemm_xdl_splitk_lds_direct_load_f16_f16_f16_mk_nk_mn_instances = std::tuple<
-    // clang-format off
+// clang-format off
         //#######################################|AData| BData| CData| AccData| ALayout| BLayout| CLayout|           A|           B|           C|          GEMM| NumGemmK| Block|  MPer|  NPer|  KPer|  K1| MPer| NPer| MXdl| NXdl|         ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|         BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle|     CBlockTransferClusterLengths|  CBlockTransfer|
         //#######################################| Type|  Type|  Type|    Type|        |        |        | Elementwise| Elementwise| Elementwise|Specialization| Prefetch|  Size| Block| Block| Block|    |  XDL|  XDL|  Per|  Per|          ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar| AddExtraM|          ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar| AddExtraN| MXdlPerWave| NXdlPerWave| _MBlock_MXdlPerWave_MWaveMPerXdl| ScalarPerVector|
         //#######################################|     |      |      |        |        |        |        |   Operation|   Operation|   Operation|              |    Stage|      |      |      |      |    |     |     | Wave| Wave| Lengths_KBatch_K0_M_K1|               |               |      PerVector|          | Lengths_KBatch_K0_N_K1|               |              |      PerVector|          |  PerShuffle|  PerShuffle| _NBlock_NXdlPerWave_NWaveNPerXdl|   _NWaveNPerXdl|
         //#######################################|     |      |      |        |        |        |        |            |            |            |              |         |      |      |      |      |    |     |     |     |     |                       |               |               |               |          |                       |               |              |               |          |            |            |                                 |                |
+#if 0
         DeviceGemmXdlSplitKCShuffle_LdsDirectLoad<  F16,   F16,   F16,     F32,     Row,     Col,     Row, PassThrough, PassThrough, PassThrough,    GemmDefault,       1,   256,    16,   128,     4,  16,   16,   16,    1,    2,          S<1, 4, 8, 8>,  S<0, 2, 1, 3>,              3,              2,         0,          S<1, 4, 8, 8>,  S<0, 2, 1, 3>,             3,              2,         0,           1,           1,                  S<1, 16, 1, 16>,               4>,
         DeviceGemmXdlSplitKCShuffle_LdsDirectLoad<  F16,   F16,   F16,     F32,     Row,     Col,     Row, PassThrough, PassThrough, PassThrough,    GemmDefault,       1,    64,    16,    16,     8,   8,   16,   16,    1,    1,         S<1, 1, 16, 4>,  S<0, 2, 1, 3>,              3,              2,         0,         S<1, 1, 16, 4>,  S<0, 2, 1, 3>,             3,              2,         0,           1,           1,                   S<1, 16, 1, 4>,               4>,
         DeviceGemmXdlSplitKCShuffle_LdsDirectLoad<  F16,   F16,   F16,     F32,     Row,     Col,     Row, PassThrough, PassThrough, PassThrough,    GemmDefault,       1,    64,    16,    16,     4,  16,   16,   16,    1,    1,          S<1, 1, 8, 8>,  S<0, 2, 1, 3>,              3,              2,         0,          S<1, 1, 8, 8>,  S<0, 2, 1, 3>,             3,              2,         0,           1,           1,                   S<1, 16, 1, 4>,               4>,
@@ -61,6 +62,7 @@ using device_gemm_xdl_splitk_lds_direct_load_f16_f16_f16_mk_nk_mn_instances = st
         DeviceGemmXdlSplitKCShuffle_LdsDirectLoad<  F16,   F16,   F16,     F32,     Row,     Col,     Row, PassThrough, PassThrough, PassThrough, GemmMNKPadding,       1,   128,    16,    32,     8,   8,   16,   16,    1,    1,         S<1, 2, 16, 4>,  S<0, 2, 1, 3>,              3,              2,         0,         S<1, 2, 16, 4>,  S<0, 2, 1, 3>,             3,              2,         0,           1,           1,                   S<1, 16, 1, 8>,               4>,
         DeviceGemmXdlSplitKCShuffle_LdsDirectLoad<  F16,   F16,   F16,     F32,     Row,     Col,     Row, PassThrough, PassThrough, PassThrough, GemmMNKPadding,       1,    64,    16,    16,     4,  32,   16,   16,    1,    1,         S<1, 1, 4, 16>,  S<0, 2, 1, 3>,              3,              2,         0,         S<1, 1, 4, 16>,  S<0, 2, 1, 3>,             3,              2,         0,           1,           1,                    S<1, 16, 1, 4>,              4>,
         DeviceGemmXdlSplitKCShuffle_LdsDirectLoad<  F16,   F16,   F16,     F32,     Row,     Col,     Row, PassThrough, PassThrough, PassThrough, GemmMNKPadding,       2,   256,    64,    16,     4,  16,   16,   16,    1,    1,          S<1, 4, 8, 8>,  S<0, 2, 1, 3>,              3,              2,         0,          S<1, 4, 8, 8>,  S<0, 2, 1, 3>,             3,              2,         0,           1,           1,                    S<1, 32, 1, 4>,              4>
+#endif
     // clang-format on
     >;
 

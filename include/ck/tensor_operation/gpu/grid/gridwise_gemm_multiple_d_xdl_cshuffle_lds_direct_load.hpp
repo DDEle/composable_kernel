@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2023-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -566,10 +566,12 @@ struct GridwiseGemmMultipleD_Xdl_CShuffle_LdsDirectLoad
             ThreadGroupTensorSliceTransfer_DirectLoad<ThisThreadBlock,
                                                       Sequence<AK0PerBlock, MPerBlock, AK1>,
                                                       ABlockTransferThreadClusterLengths_AK0_M_AK1,
+                                                      Sequence<0, 1, 2>,
                                                       ADataType,
                                                       AComputeDataType,
                                                       decltype(a_grid_desc_ak0_m_ak1),
                                                       decltype(a_block_desc_ak0_m_ak1),
+                                                      Sequence<0, 1, 2>,
                                                       ABlockTransferSrcVectorDim,
                                                       2,
                                                       ABlockTransferScalarPerVector>(
@@ -582,10 +584,12 @@ struct GridwiseGemmMultipleD_Xdl_CShuffle_LdsDirectLoad
             ThreadGroupTensorSliceTransfer_DirectLoad<ThisThreadBlock,
                                                       Sequence<BK0PerBlock, NPerBlock, BK1>,
                                                       BBlockTransferThreadClusterLengths_BK0_N_BK1,
+                                                      Sequence<0, 1, 2>,
                                                       BDataType,
                                                       BComputeDataType,
                                                       decltype(b_grid_desc_bk0_n_bk1),
                                                       decltype(b_block_desc_bk0_n_bk1),
+                                                      Sequence<0, 1, 2>,
                                                       BBlockTransferSrcVectorDim,
                                                       2,
                                                       BBlockTransferScalarPerVector>(
