@@ -147,6 +147,14 @@ struct TransposePolicy
                                        sequence<0, 0>>{};
         constexpr auto blk_distr_encode = detail::make_embed_tile_distribution_encoding(
             block_outer_dst_encoding, xdllevel_dstr_encoding);
+        CK_PRINT<decltype(blk_distr_encode)>();
+        using a = ck_tile::tile_distribution_encoding<
+            ck_tile::sequence<>,
+            ck_tile::tuple<ck_tile::sequence<1, 1, 4, 2, 4>, ck_tile::sequence<1, 1, 1, 1, 4, 4>>,
+            ck_tile::tuple<ck_tile::sequence<2, 1>, ck_tile::sequence<1, 2, 1, 2>>,
+            ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2, 4, 4>>,
+            ck_tile::sequence<2, 1, 2, 1, 2>,
+            ck_tile::sequence<0, 0, 3, 3, 5>>;
         constexpr auto block_dstr = make_static_tile_distribution(blk_distr_encode);
         return block_dstr;
     }

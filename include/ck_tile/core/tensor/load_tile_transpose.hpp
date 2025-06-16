@@ -314,6 +314,15 @@ load_tile_transpose(const tile_window_with_static_distribution<BottomTensorView_
     using OutTileDstrEncode =
         typename OutputTileDistributionTraits<TileDistribution_,
                                               typename BottomTensorView_::DataType>::OutDstrEncode;
+    CK_PRINT<OutTileDstrEncode>();
+
+    using a = ck_tile::tile_distribution_encoding<
+        ck_tile::sequence<>,
+        ck_tile::tuple<ck_tile::sequence<1, 1, 1, 1, 16>, ck_tile::sequence<1, 1, 4, 2, 4>>,
+        ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<2, 1, 1>>,
+        ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2, 4>>,
+        ck_tile::sequence<1, 2, 1, 2, 2>,
+        ck_tile::sequence<0, 0, 3, 3, 4>>;
     auto out_tensor = make_static_distributed_tensor<typename BottomTensorView_::DataType>(
         make_static_tile_distribution(OutTileDstrEncode{}));
     auto trans_tensor           = tile_window.template load_transpose<Policy>();
