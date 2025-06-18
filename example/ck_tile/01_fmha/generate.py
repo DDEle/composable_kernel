@@ -125,6 +125,7 @@ if __name__ == "__main__":
     filter_list = args.filter.split(',')
     filter_list.extend([''] * (len(api_list) - len(filter_list)))
     optdim_list = [int(hdim) for hdim in args.optdim.split(',')]
+    print(args)
 
     if len(api_list) > 1:
         assert optdim_list == [-1]

@@ -16,8 +16,9 @@ template <typename AType,
           index_t NPerWave,
           index_t KPerWave,
           bool TransposeC,
-          bool SwizzleA              = false,
-          bool UseStructuredSparsity = false>
+          bool SwizzleA                     = false,
+          bool UseStructuredSparsity        = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
 struct WarpGemmMfmaDispatcher;
 
 // clang-format off
@@ -49,6 +50,10 @@ template<> struct WarpGemmMfmaDispatcher<ck_tile::bf16_t, ck_tile::bf16_t, float
 template<> struct WarpGemmMfmaDispatcher<ck_tile::bf16_t, ck_tile::bf16_t, float, 16, 16, 16, true> { using Type = WarpGemmMfmaBf16Bf16F32M16N16K16TransposedCDistribution; };
 template<> struct WarpGemmMfmaDispatcher<ck_tile::bf16_t, ck_tile::bf16_t, float, 16, 16, 32, false> { using Type = WarpGemmMfmaBf16Bf16F32M16N16K32; };
 template<> struct WarpGemmMfmaDispatcher<ck_tile::bf16_t, ck_tile::bf16_t, float, 16, 16, 32, true> { using Type = WarpGemmMfmaBf16Bf16F32M16N16K32TransposedCDistribution; };
+template<> struct WarpGemmMfmaDispatcher<ck_tile::bf16_t, ck_tile::bf16_t, float, 16, 16, 32, false, false, false, WGAttrNumAccessEnum::Double> {
+    using Type = WarpGemmMfmaBf16Bf16F32M16N16K32DoubleAccess; };
+template<> struct WarpGemmMfmaDispatcher<ck_tile::bf16_t, ck_tile::bf16_t, float, 16, 16, 32, true, false, false, WGAttrNumAccessEnum::Double> {
+    using Type = WarpGemmMfmaBf16Bf16F32M16N16K32TransposedCDistributionDoubleAccess; };
 template<> struct WarpGemmMfmaDispatcher<ck_tile::bf16_t, ck_tile::bf16_t, float, 4, 64, 16, false> { using Type = WarpGemmMfmaBf16Bf16F32M4N64K16; };
 template<> struct WarpGemmMfmaDispatcher<ck_tile::bf16_t, ck_tile::bf16_t, float, 64, 4, 16, false> { using Type = WarpGemmMfmaBf16Bf16F32M64N4K16; };
 
@@ -91,8 +96,9 @@ template <typename AType,
           index_t NPerWave,
           index_t KPerWave,
           bool TransposeC,
-          bool SwizzleA              = false,
-          bool UseStructuredSparsity = false>
+          bool SwizzleA                     = false,
+          bool UseStructuredSparsity        = false,
+          WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
 using WarpGemmMfmaDispatcher = typename impl::WarpGemmMfmaDispatcher<AType,
                                                                      BType,
                                                                      CType,
@@ -101,6 +107,7 @@ using WarpGemmMfmaDispatcher = typename impl::WarpGemmMfmaDispatcher<AType,
                                                                      KPerWave,
                                                                      TransposeC,
                                                                      SwizzleA,
-                                                                     UseStructuredSparsity>::Type;
+                                                                     UseStructuredSparsity,
+                                                                     AttrNumAccess>::Type;
 
 } // namespace ck_tile

@@ -135,10 +135,15 @@ using WarpGemmMfmaBf16Bf16F32M32N32K16 = WarpGemmImpl<WarpGemmAtrributeMfmaItera
 #if defined(__gfx950__)
 using WarpGemmMfmaBf16Bf16F32M16N16K32 = WarpGemmImpl<
     WarpGemmAtrributeMfma<WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K32<WGAttrCtlEnum::Default_>>>;
+using WarpGemmMfmaBf16Bf16F32M16N16K32DoubleAccess = WarpGemmImpl<
+    WarpGemmAtrributeMfma<WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K32<WGAttrCtlEnum::Default_>,
+                          WGAttrNumAccessEnum::Double>>;
 #else
 using WarpGemmMfmaBf16Bf16F32M16N16K32 = WarpGemmImpl<WarpGemmAtrributeMfmaIterateK<
     WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<WGAttrCtlEnum::Default_>,
     2>>;
+using WarpGemmMfmaBf16Bf16F32M16N16K32DoubleAccess =
+    WarpGemmMfmaBf16Bf16F32M16N16K32; // Double access not useful for archs below gfx950
 #endif
 
 using WarpGemmMfmaBf16Bf16F32M32N32K8SwizzleA = WarpGemmImpl<WarpGemmAtrributeMfmaIterateK_SwizzleA<
@@ -173,11 +178,17 @@ using WarpGemmMfmaBf16Bf16F32M32N32K16TransposedCDistribution =
 using WarpGemmMfmaBf16Bf16F32M16N16K32TransposedCDistribution =
     WarpGemmImpl<WarpGemmAtrributeMfmaTransposedCDistribution<
         WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K32<WGAttrCtlEnum::Default_>>>;
+using WarpGemmMfmaBf16Bf16F32M16N16K32TransposedCDistributionDoubleAccess =
+    WarpGemmImpl<WarpGemmAtrributeMfmaTransposedCDistribution<
+        WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K32<WGAttrCtlEnum::Default_>,
+        WGAttrNumAccessEnum::Double>>;
 #else
 using WarpGemmMfmaBf16Bf16F32M16N16K32TransposedCDistribution =
     WarpGemmImpl<WarpGemmAtrributeMfmaIterateKAndTransposedCDistribution<
         WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<WGAttrCtlEnum::Default_>,
         2>>;
+using WarpGemmMfmaBf16Bf16F32M16N16K32TransposedCDistributionDoubleAccess =
+    WarpGemmMfmaBf16Bf16F32M16N16K32; // Double access not useful for archs below gfx950
 #endif
 
 #if defined(__gfx950__)

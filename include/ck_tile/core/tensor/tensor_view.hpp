@@ -537,21 +537,13 @@ pad_tensor_view(const TensorView& tensor_view, const TileLengths& tile_lengths, 
     // transforms
     const auto transforms = generate_tuple(
         [&](auto idim) {
-            const auto old_length = tensor_view.get_tensor_descriptor().get_length(idim);
-
+            const auto old_length  = tensor_view.get_tensor_descriptor().get_length(idim);
             const auto tile_length = tile_lengths[idim];
-
-            const auto new_length = integer_divide_ceil(old_length, tile_length) * tile_length;
-
-            const auto pad_length = new_length - old_length;
-
-            constexpr bool DoPad = DoPads::at(idim);
-
-            const auto transform =
-                conditional_expr<DoPad>(make_right_pad_transform(old_length, pad_length),
-                                        make_pass_through_transform(old_length));
-
-            return transform;
+            const auto new_length  = integer_divide_ceil(old_length, tile_length) * tile_length;
+            const auto pad_length  = new_length - old_length;
+            constexpr bool DoPad   = DoPads::at(idim);
+            return conditional_expr<DoPad>(make_right_pad_transform(old_length, pad_length),
+                                           make_pass_through_transform(old_length));
         },
         number<num_dim>{});
 
