@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -87,6 +87,19 @@ CK_TILE_DEVICE auto load_tile_raw(T& tile,
 {
     tile_window.load_raw(
         tile, number<i_access>{}, bool_constant<oob_conditional_check>{}, bool_constant<pre_nop>{});
+}
+
+template <typename LdsTileWindow_,
+          typename TileWindow_,
+          index_t i_access           = -1,
+          bool oob_conditional_check = true>
+CK_TILE_DEVICE auto async_load_tile(LdsTileWindow_&& lds_tile,
+                                    const TileWindow_& tile_window,
+                                    number<i_access>                     = {},
+                                    bool_constant<oob_conditional_check> = {})
+{
+    return tile_window.async_load(
+        lds_tile, number<i_access>{}, bool_constant<oob_conditional_check>{});
 }
 
 template <typename LdsTileWindow_,

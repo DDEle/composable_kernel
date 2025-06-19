@@ -186,7 +186,7 @@ struct tile_window_linear
         const typename Base::WindowLengths& window_lengths,
         const typename Base::BottomTensorIndex& window_origin,
         const typename Base::TileDstr& tile_distribution)
-        : cached_coords_{}, cached_flags_{}
+        : cached_coords_{}, cached_window_adaptor_coords_{}, cached_flags_{}
     {
         this->bottom_tensor_view_            = bottom_tensor_view;
         this->window_lengths_                = window_lengths;
@@ -214,7 +214,8 @@ struct tile_window_linear
 
             if constexpr(need_save_non_linear_coord)
             {
-                cached_coords_(non_linear_id) = bottom_tensor_thread_coord_tmp;
+                cached_coords_(non_linear_id)                = bottom_tensor_thread_coord_tmp;
+                cached_window_adaptor_coords_(non_linear_id) = window_adaptor_thread_coord_tmp;
             }
 
             // TODO: need pad_tensor_view to check which dim need use flag to check
@@ -554,6 +555,7 @@ struct tile_window_linear
     {
         using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
         using LdsDataType   = typename LdsTileWindow::DataType;
+        using vector_t      = typename traits::vector_t;
 
         // currently we only support everything is non linear dim
         // actually it's not performant if we have linear dim(e.g. fast changing)
@@ -561,6 +563,34 @@ struct tile_window_linear
         static_assert(Base::BottomTensorView::buffer_view::get_address_space() ==
                       address_space_enum::global);
 
+#if defined(__gfx950__)
+        // loop over thread tensor space [y0, y1, ...]
+        auto issue = [&](auto i_access_) {
+            constexpr auto IAccess          = number<i_access_>{};
+            constexpr auto non_linear_id    = number<AccessMap_NonLinear{}[IAccess]>{};
+            auto bottom_tensor_thread_coord = cached_coords_[non_linear_id];
+            auto window_adaptor_coord       = cached_window_adaptor_coords_[non_linear_id];
+            auto bottom_tensor_flag         = cached_flags_[IAccess];
+
+            auto lds_bottom_tensor_thread_idx =
+                lds_tile.get_window_origin() + window_adaptor_coord.get_bottom_index();
+
+            const auto lds_coord =
+                make_tensor_coordinate(lds_tile.get_bottom_tensor_view().get_tensor_descriptor(),
+                                       lds_bottom_tensor_thread_idx);
+            CK_TILE_LDS_ADDR LdsDataType* smem =
+                lds_tile.get_bottom_tensor_view().get_buffer_view().p_data_ +
+                lds_coord.get_offset();
+
+            // read from bottom tensor
+            this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
+                smem,
+                bottom_tensor_thread_coord,
+                0,
+                bottom_tensor_flag,
+                bool_constant<oob_conditional_check>{});
+        };
+#else
         // issues * warps * lanes
         static_assert(LdsTileWindow::get_num_of_dimension() == 3); // TODO: hard coded
 
@@ -610,7 +640,7 @@ struct tile_window_linear
                 smem += size_per_issue; // Note we manually increase the per-issue offset
             }
         };
-
+#endif
         WINDOW_DISPATCH_ISSUE();
     }
 
@@ -948,6 +978,9 @@ struct tile_window_linear
 
     // this contains:
     array<typename Base::BottomTensorCoord, traits::NumAccess_NonLinear> cached_coords_;
+    // added for gfx950
+    array<typename Base::WindowAdaptorCoord, traits::NumAccess_NonLinear>
+        cached_window_adaptor_coords_;
     array<bool, Base::Traits::NumAccess> cached_flags_;
 };
 
