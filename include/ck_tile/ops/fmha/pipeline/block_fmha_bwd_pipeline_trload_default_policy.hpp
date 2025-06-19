@@ -132,7 +132,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentBias()
     {
-        return GetAlignmentX<Problem, typename Problem::BiasData>();
+        return GetAlignmentX<Problem, typename Problem::BiasDataType>();
     }
 
     template <typename Problem>
@@ -209,10 +209,18 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     template <typename T, typename TensorView>
     CK_TILE_HOST_DEVICE static constexpr auto TransformXDramTensorView(const TensorView& naive_view)
     {
-        auto transformed_desc = TransformXDramDescriptor<T>(naive_view.get_tensor_descriptor());
-        return tensor_view<typename TensorView::buffer_view,
-                           remove_cvref_t<decltype(transformed_desc)>,
-                           TensorView::DstInMemOp>{naive_view.buf_, transformed_desc};
+        if constexpr(std::is_same_v<TensorView, ck_tile::null_tensor_view>)
+        {
+            return naive_view;
+        }
+        else
+        {
+            const auto transformed_desc =
+                TransformXDramDescriptor<T>(naive_view.get_tensor_descriptor());
+            return tensor_view<typename TensorView::buffer_view,
+                               remove_cvref_t<decltype(transformed_desc)>,
+                               TensorView::DstInMemOp>{naive_view.buf_, transformed_desc};
+        }
     }
     template <typename T, typename... TD_TS>
     CK_TILE_HOST_DEVICE static constexpr auto
@@ -277,10 +285,10 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<>,
                                        tuple<sequence<N0, N1, N2>, sequence<K0, K1, K2>>,
-                                       tuple<sequence<1, 2>, sequence<1, 2>>, // K0 N1, N2 K1
-                                       tuple<sequence<0, 0>, sequence<2, 1>>,
+                                       tuple<sequence<2, 1>, sequence<1, 2>>, // K0 N1, N2 K1
+                                       tuple<sequence<0, 1>, sequence<2, 1>>,
                                        sequence<1, 2>, // N0 K2
-                                       sequence<2, 1>>{});
+                                       sequence<0, 2>>{});
     }
 
     template <typename Problem>
@@ -456,19 +464,19 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             tuple<sequence<0, 1>>,
             sequence<1, 2>,
             sequence<0, 0>>{};
-        CK_PRINT<decltype(kt_block_outer_dstr_encoding)>();
-        using a = ck_tile::tile_distribution_encoding<
-            ck_tile::sequence<1>,
-            ck_tile::tuple<ck_tile::sequence<2, 4>, ck_tile::sequence<4>>,
-            ck_tile::tuple<ck_tile::sequence<0, 1>>,
-            ck_tile::tuple<ck_tile::sequence<0, 1>>,
-            ck_tile::sequence<1, 2>,
-            ck_tile::sequence<0, 0>>;
+        // CK_PRINT<decltype(kt_block_outer_dstr_encoding)>();
+        // using a = ck_tile::tile_distribution_encoding<
+        //     ck_tile::sequence<1>,
+        //     ck_tile::tuple<ck_tile::sequence<2, 4>, ck_tile::sequence<4>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>>,
+        //     ck_tile::sequence<1, 2>,
+        //     ck_tile::sequence<0, 0>>;
 
         constexpr auto kt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             kt_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
 
-        CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
+        // CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
 
         CK_PRINT<decltype(kt_block_dstr_encode)>();
         using b = ck_tile::tile_distribution_encoding<
@@ -646,6 +654,13 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         return MakeXLdsReadBlockDescriptor<typename Problem::KDataType,
                                            Problem::BlockFmhaShape::kN0,
                                            Problem::BlockFmhaShape::kQKHeaddim>();
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsReadBlockDescriptor()
+    {
+        return MakeXLdsReadBlockDescriptor<typename Problem::VDataType,
+                                           Problem::BlockFmhaShape::kN0,
+                                           Problem::BlockFmhaShape::kVHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsReadBlockDescriptor()
@@ -926,7 +941,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         using c_block_tensor_type = decltype(BlockGemm{}.MakeCBlockTile());
         return make_static_tile_distribution(
             typename InputTileDistributionTraits<
-                typename c_block_tensor_type::StaticTileDistribution,
+                typename c_block_tensor_type::StaticTileDistribution::DstrEncode,
                 typename c_block_tensor_type::DataType>::TransposedDstrEncode{});
     }
 

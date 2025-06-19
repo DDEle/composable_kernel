@@ -149,6 +149,33 @@ struct tile_window_with_tile_dstr_base
         static constexpr index_t PackedSize =
             ck_tile::numeric_traits<remove_cvref_t<typename TileWindowBase::DataType>>::PackedSize;
 
+        // // static constexpr auto a0 =
+        // // tile_window_with_tile_dstr_base::get_window_adaptor_ys_safe_vector_length_strides()
+        // //         .template at<0>();
+        // // static constexpr auto a1 =
+        // // tile_window_with_tile_dstr_base::get_window_adaptor_ys_safe_vector_length_strides()
+        // //         .template at<1>();
+
+        // static constexpr auto a0 =
+        //     TileWindowBase::BottomTensorDesc::template
+        //     get_top_dimension_safe_vector_length_strides<
+        //         0>()
+        //         .template at<0>();
+        // static constexpr auto a1 =
+        //     TileWindowBase::BottomTensorDesc::template
+        //     get_top_dimension_safe_vector_length_strides<
+        //         0>()
+        //         .template at<1>();
+
+        // static constexpr auto aa = []() {
+        //     constexpr auto b0 = a0;
+        //     constexpr auto b1 = a1;
+        //     constexpr auto s0 = TO_SEQUENCE(b0, b0.N);
+        //     constexpr auto s1 = TO_SEQUENCE(b1, b1.N);
+        //     return make_tuple(s0, s1);
+        // }();
+        // using aaa = decltype((CK_PRINT<decltype(aa)>()));
+
         static constexpr auto get_vector_dim_y_scalar_per_vector()
         {
             const auto [ys_vector_lengths, ys_vector_strides] =
@@ -172,8 +199,10 @@ struct tile_window_with_tile_dstr_base
         static constexpr index_t VectorDimY = get_vector_dim_y_scalar_per_vector().template at<0>();
         static constexpr index_t ScalarPerVector =
             get_vector_dim_y_scalar_per_vector().template at<1>();
+        // using bbb = decltype(CK_PRINT<ScalarPerVector>());
         using vector_t =
             thread_buffer<typename TileWindowBase::DataType, ScalarPerVector / PackedSize>;
+        // using vector_taaa = decltype((CK_PRINT<vector_t>()));
 
         static constexpr auto scalars_per_access_ = [] {
             constexpr auto scalars_per_access_arr = generate_array(
@@ -236,6 +265,8 @@ struct tile_window_with_tile_dstr_base
         const auto [window_adaptor_ps_ys_vector_lengths, window_adaptor_ps_ys_vector_strides] =
             WindowAdaptor{}.get_top_dimension_safe_vector_length_strides(
                 window_adaptor_vector_lengths, window_adaptor_vector_strides);
+        // CK_PRINT<WindowAdaptor>();
+        // using a = ck_tile::tensor_adaptor
 
         // [y0, y1, ...]
         constexpr auto y_dims = typename arithmetic_sequence_gen<TileDstr::get_num_of_dimension_p(),

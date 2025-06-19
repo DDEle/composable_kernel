@@ -2815,6 +2815,7 @@ __device__ auto amd_transpose_load_to_vgpr(const T* in_ptr)
         __attribute__((address_space(3))) llvm_bf16x4_t* lds_ptr =
             reinterpret_cast<__attribute__((address_space(3))) llvm_bf16x4_t*>(
                 reinterpret_cast<uintptr_t>(in_ptr));
+        // CK_PRINT<N>();
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr16_b64_v4bf16(lds_ptr));
     }
     else if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::fp8_t>)

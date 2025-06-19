@@ -335,9 +335,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                              make_tuple(number<kM0>{}, number<kK0>{}),
                              q_lds_write_window.get_window_origin(),
                              Policy::template MakeQRegSliceBlockDescriptor<Problem>());
-
-        auto qt_lds_read = make_tensor_view<address_space_enum::lds>(
-            q_lds_ptr, Policy::template MakeQTLdsReadBlockDescriptor<Problem>());
         auto qt_lds_read_window =
             make_tile_window(q_lds_read,
                              make_tuple(number<kM0>{}, number<kQKHeaddim>{}),
@@ -353,17 +350,19 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                              Policy::template MakeOGradDramTileDistribution<Problem>());
 
         auto do_lds = make_tensor_view<address_space_enum::lds>(
-            do_lds_ptr, Policy::template MakeOGradLdsBlockDescriptor<Problem>());
+            do_lds_ptr, Policy::template MakeOGradLdsWriteBlockDescriptor<Problem>());
         auto do_lds_write_window =
             make_tile_window(do_lds, make_tuple(number<kM0>{}, number<kVHeaddim>{}), {0, 0});
 
+        auto do_lds_read = make_tensor_view<address_space_enum::lds>(
+            do_lds_ptr, Policy::template MakeOGradLdsReadBlockDescriptor<Problem>());
         auto do_lds_read_window =
-            make_tile_window(do_lds_write_window.get_bottom_tensor_view(),
+            make_tile_window(do_lds_read,
                              make_tuple(number<kM0>{}, number<kK2>{}),
                              do_lds_write_window.get_window_origin(),
                              Policy::template MakeOGradRegSliceBlockDescriptor<Problem>());
         auto dot_lds_read_window =
-            make_tile_window(do_lds_ptr,
+            make_tile_window(do_lds_read,
                              make_tuple(number<kM0>{}, number<kK2>{}),
                              {0, 0},
                              Policy::template MakeOGradTRegSliceBlockDescriptor<Problem>());
@@ -376,7 +375,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             make_tile_window(ds_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
 
         auto ds_lds_read_window =
-            make_tile_window(ds_lds_window.get_bottom_tensor_view(),
+            make_tile_window(ds_lds,
                              make_tuple(number<kM0>{}, number<kK4>{}),
                              ds_lds_window.get_window_origin(),
                              Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
@@ -608,6 +607,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             store_tile(d_lds_write_window, d_block_tile);
 
             auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
+#if 0
             gemm_1(dv_acc, p_gemm, dot_reg_tensor);
 
             // STAGE 4, OGrad@V Gemm2
@@ -717,6 +717,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
             i_total_loops += 1;
             seqlen_q_step += kM0;
+#endif
         }
 
         // Results Scale

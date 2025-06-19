@@ -71,23 +71,23 @@ namespace impl {
 template <typename T>
 using has_is_static = decltype(T::is_static());
 
-template <typename T>
+template <typename T, bool explicit_ = false>
 struct is_static_impl
 {
     static constexpr bool value = []() {
         if constexpr(is_detected<has_is_static, T>{})
             return T::is_static();
         else
-            return std::is_arithmetic<T>::value;
+            return !explicit_ && std::is_arithmetic<T>::value;
     }();
 };
 } // namespace impl
 
-template <typename T>
-using is_static = impl::is_static_impl<remove_cvref_t<T>>;
+template <typename T, bool explicit_ = false>
+using is_static = impl::is_static_impl<remove_cvref_t<T>, explicit_>;
 
-template <typename T>
-inline constexpr bool is_static_v = is_static<T>::value;
+template <typename T, bool explicit_ = false>
+inline constexpr bool is_static_v = is_static<T, explicit_>::value;
 
 // TODO: deprecate this
 template <typename T>
