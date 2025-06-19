@@ -342,14 +342,54 @@ struct tile_window_with_static_distribution
                                    number<i_access_unsupport_>          = {},
                                    bool_constant<oob_conditional_check> = {}) const
     {
+#if defined(__HIP_DEVICE_COMPILE__)
         using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
         using LdsDataType   = typename LdsTileWindow::DataType;
+#if defined(__gfx950__)
+        using Traits   = typename Base::Traits;
+        using vector_t = typename Traits::vector_t;
+        using SFC_Ys   = typename Traits::SFC_Ys;
 
+        // loop over thread tensor space [y0, y1, ...]
+        static_for<0, NumCoord, 1>{}([&](auto iCoord) {
+            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+
+            static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
+                constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                auto lds_bottom_tensor_thread_idx =
+                    lds_tile.get_window_origin() + window_adaptor_thread_coord.get_bottom_index();
+
+                const auto lds_coord = make_tensor_coordinate(
+                    lds_tile.get_bottom_tensor_view().get_tensor_descriptor(),
+                    lds_bottom_tensor_thread_idx);
+                CK_TILE_LDS_ADDR LdsDataType* smem =
+                    lds_tile.get_bottom_tensor_view().get_buffer_view().p_data_ +
+                    lds_coord.get_offset();
+                // write into bottom tensor
+                this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
+                    smem, bottom_tensor_thread_coord, 0, bool_constant<oob_conditional_check>{});
+
+                // move thread coordinate
+                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
+                {
+                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
+
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                }
+            });
+        });
+#else
         // issues * warps * lanes
         static_assert(LdsTileWindow::get_num_of_dimension() == 3); // TODO: hard coded
 
         // TODO: LDS offset is not good for intrinsic based implementation(compiler can't figure out
-        // dependency) hence avoid use offset based solution. size_per_buf should be zero (how to
+        // dependency) hence avoid use offset based solution. size_per_buf should be zero how to
         // check?)
         constexpr index_t size_per_buf =
             lds_tile.get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
@@ -401,10 +441,15 @@ struct tile_window_with_static_distribution
                     Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
                         window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
 
-                    smem += size_per_issue; // Note we manually increase the per-issue offset
+                    smem += size_per_issue; // Note we manually increase the per-issue
+                    offset
                 }
             });
         });
+#endif
+#else
+        ignore = lds_tile;
+#endif
     }
 
     template <typename Policy, index_t i_access_unsupport_ = -1, bool oob_conditional_check = true>
