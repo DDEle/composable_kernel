@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -172,25 +172,19 @@ struct BlockGemmARegBRegCRegV1
                           std::is_same_v<CDataType, remove_cv_t<typename CBlockTensor::DataType>>,
                       "wrong!");
 
-        constexpr auto a_block_dstr_encode = MakeABlockDistributionEncode();
-
-        constexpr auto b_block_dstr_encode = MakeBBlockDistributionEncode();
-
-        constexpr auto c_block_dstr_encode = MakeCBlockDistributionEncode();
-
         // check ABC-block-distribution
         static_assert(
-            std::is_same_v<remove_cvref_t<decltype(a_block_dstr_encode)>,
+            std::is_same_v<remove_cvref_t<decltype(MakeABlockDistributionEncode())>,
                            remove_cvref_t<decltype(ABlockTensor::get_tile_distribution()
                                                        .get_static_tile_distribution_encoding())>>,
             "A distribution is wrong!");
         static_assert(
-            std::is_same_v<remove_cvref_t<decltype(b_block_dstr_encode)>,
+            std::is_same_v<remove_cvref_t<decltype(MakeBBlockDistributionEncode())>,
                            remove_cvref_t<decltype(BBlockTensor::get_tile_distribution()
                                                        .get_static_tile_distribution_encoding())>>,
             "B distribution is wrong!");
         static_assert(
-            std::is_same_v<remove_cvref_t<decltype(c_block_dstr_encode)>,
+            std::is_same_v<remove_cvref_t<decltype(MakeCBlockDistributionEncode())>,
                            remove_cvref_t<decltype(CBlockTensor::get_tile_distribution()
                                                        .get_static_tile_distribution_encoding())>>,
             "C distribution is wrong!");

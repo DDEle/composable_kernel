@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -57,7 +57,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetPTOGradTBlockGemm()
+    CK_TILE_DEVICE static constexpr auto GetPTOGradTBlockGemm()
     {
         using GemmProblem =
             BlockGemmProblem<typename Problem::GemmDataType,
@@ -77,7 +77,19 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                                    Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
                                    Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
                                    Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                                   true>;
+                                   true,
+                                   false, // SwizzleAccess
+                                   false, // UseStructuredSparsity
+                                   (Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32)
+                                       ? WGAttrNumAccessEnum ::Double
+                                       : WGAttrNumAccessEnum ::Single>;
+        // CK_PRINT<int(Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}))>();
+        // CK_PRINT<WarpGemm>();
+        // using a = ck_tile::WarpGemmImpl<ck_tile::WarpGemmAtrributeMfmaTransposedCDistribution<
+        //     ck_tile::WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<
+        //         ck_tile::WGAttrCtlEnum::Default_>,
+        //     ck_tile::WGAttrNumAccessEnum::Double>>;
+        // CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::GemmDataType,
@@ -144,7 +156,12 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                                    Problem::BlockFmhaShape::Gemm3WarpTile::at(number<0>{}),
                                    Problem::BlockFmhaShape::Gemm3WarpTile::at(number<1>{}),
                                    Problem::BlockFmhaShape::Gemm3WarpTile::at(number<2>{}),
-                                   true>;
+                                   true,
+                                   false, // SwizzleAccess
+                                   false, // UseStructuredSparsity
+                                   (Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32)
+                                       ? WGAttrNumAccessEnum ::Double
+                                       : WGAttrNumAccessEnum ::Single>;
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::GemmDataType,

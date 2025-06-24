@@ -478,29 +478,29 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
 
         // CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
 
-        CK_PRINT<decltype(kt_block_dstr_encode)>();
-        using b = ck_tile::tile_distribution_encoding<
-            ck_tile::sequence<1>,
-            ck_tile::tuple<ck_tile::sequence<2, 4, 16>, ck_tile::sequence<4, 2, 4, 4>>,
-            ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 1>>,
-            ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 2>>,
-            ck_tile::sequence<1, 2, 2, 2>,
-            ck_tile::sequence<0, 0, 1, 3>>;
+        // CK_PRINT<decltype(kt_block_dstr_encode)>();
+        // using b = ck_tile::tile_distribution_encoding<
+        //     ck_tile::sequence<1>,
+        //     ck_tile::tuple<ck_tile::sequence<2, 4, 16>, ck_tile::sequence<4, 2, 4, 4>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 1>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 2>>,
+        //     ck_tile::sequence<1, 2, 2, 2>,
+        //     ck_tile::sequence<0, 0, 1, 3>>;
 
         auto output =
             make_static_tile_distribution(typename InputTileDistributionTraits<
                                           decltype(kt_block_dstr_encode),
                                           typename Problem::KDataType>::TransposedDstrEncode{});
-        CK_PRINT<typename InputTileDistributionTraits<
-            decltype(kt_block_dstr_encode),
-            typename Problem::KDataType>::TransposedDstrEncode>();
-        using c = ck_tile::tile_distribution_encoding<
-            ck_tile::sequence<1>,
-            ck_tile::tuple<ck_tile::sequence<4, 2, 4, 4>, ck_tile::sequence<2, 4, 4, 4>>,
-            ck_tile::tuple<ck_tile::sequence<0, 2>, ck_tile::sequence<1, 1, 2>>,
-            ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 3, 2>>,
-            ck_tile::sequence<2, 1, 1, 2>,
-            ck_tile::sequence<0, 0, 1, 3>>;
+        // CK_PRINT<typename InputTileDistributionTraits<
+        //     decltype(kt_block_dstr_encode),
+        //     typename Problem::KDataType>::TransposedDstrEncode>();
+        // using c = ck_tile::tile_distribution_encoding<
+        //     ck_tile::sequence<1>,
+        //     ck_tile::tuple<ck_tile::sequence<4, 2, 4, 4>, ck_tile::sequence<2, 4, 4, 4>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 2>, ck_tile::sequence<1, 1, 2>>,
+        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 3, 2>>,
+        //     ck_tile::sequence<2, 1, 1, 2>,
+        //     ck_tile::sequence<0, 0, 1, 3>>;
         return output;
     }
 
@@ -556,7 +556,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
                                             Problem::BlockFmhaShape::kN0>();
     }
 
-    template <typename Problem>
+    template <typename Problem, bool Transposed = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeSGradLdsBlockDescriptor()
     {
         // SGrad should be of the same distr as Gemm2 OGradV's output (i.e. PGrad)
@@ -613,6 +613,12 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
                        sequence<5>{},
                        sequence<6>{}));
 
+        constexpr auto top_dims = []() {
+            if constexpr(Transposed)
+                return make_tuple(sequence<1>{}, sequence<0>{});
+            else
+                return make_tuple(sequence<0>{}, sequence<1>{});
+        }();
         return transform_tensor_descriptor(
             desc_2,
             make_tuple(make_merge_transform_v3_division_mod(
@@ -620,7 +626,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
                        make_merge_transform_v3_division_mod(
                            make_tuple(number<N0>{}, number<N1_0>{}, number<N1_1>{}))),
             make_tuple(sequence<0, 2, 3, 6>{}, sequence<1, 4, 5>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
+            top_dims);
     }
 
     template <typename T, index_t MNPerBlock, index_t KPerBlock>
@@ -748,6 +754,37 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     }
 
     template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeSGradTRegSliceBlockDescriptor()
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetSGradTQTBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+
+        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm3BlockWarps::at(number<0>{});
+        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm3BlockWarps::at(number<1>{});
+
+        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK3;
+
+        constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
+        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
+
+        constexpr auto dst_block_outer_dstr_encoding =
+            tile_distribution_encoding<sequence<NWarp>,
+                                       tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
+                                       tuple<sequence<1, 0>>,
+                                       tuple<sequence<1, 0>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 0>>{};
+
+        constexpr auto dst_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+            dst_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
+
+        constexpr auto dst_block_dstr = make_static_tile_distribution(dst_block_dstr_encode);
+
+        return dst_block_dstr;
+    }
+
+    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLSEDLdsWriteBlockDescriptor()
     {
         constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
@@ -849,7 +886,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeOGradTRegSliceBlockDescriptor()
+    CK_TILE_DEVICE static constexpr auto MakeOGradTRegSliceBlockDescriptor()
     {
         using BlockGemm = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
         using WarpGemm  = typename BlockGemm::WarpGemm;
@@ -874,11 +911,44 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
 
         constexpr auto dot_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             dot_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
+        // CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
+        // CK_PRINT<decltype(dot_block_dstr_encode)>();
 
         return make_static_tile_distribution(
             typename InputTileDistributionTraits<
                 decltype(dot_block_dstr_encode),
                 typename Problem::OGradDataType>::TransposedDstrEncode{});
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakePTRegSliceBlockDescriptor()
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+
+        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<0>{});
+        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<1>{});
+
+        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
+
+        constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
+        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
+
+        constexpr auto pt_block_outer_dstr_encoding =
+            tile_distribution_encoding<sequence<NWarp>,
+                                       tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
+                                       tuple<sequence<1, 0>>,
+                                       tuple<sequence<1, 0>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 0>>{};
+
+        constexpr auto pt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+            pt_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
+
+        constexpr auto pt_block_dstr = make_static_tile_distribution(pt_block_dstr_encode);
+
+        return pt_block_dstr;
     }
 
     template <typename Problem>

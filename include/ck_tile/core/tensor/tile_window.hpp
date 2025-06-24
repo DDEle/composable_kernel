@@ -349,7 +349,7 @@ struct tile_window_with_static_distribution
         using Traits   = typename Base::Traits;
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
-        CK_PRINT<vector_t>();
+        // CK_PRINT<vector_t>();
 
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
@@ -474,7 +474,7 @@ struct tile_window_with_static_distribution
         using Traits   = typename Base::Traits;
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
-        CK_PRINT<vector_t>();
+        // CK_PRINT<vector_t>();
 
         constexpr auto tile_dstr = typename Base::TileDstr{};
 

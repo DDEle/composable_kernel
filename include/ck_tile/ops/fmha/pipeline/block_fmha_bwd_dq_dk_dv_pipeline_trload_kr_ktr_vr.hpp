@@ -93,25 +93,25 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
               typename QGradDramBlockWindowTmp,
               typename BiasGradDramBlockWindowTmp,
               typename PositionEncoding>
-    CK_TILE_HOST_DEVICE auto
-    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
-               const KDramBlockWindowTmp& k_dram_block_window_tmp,
-               const VDramBlockWindowTmp& v_dram_block_window_tmp,
-               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
-               const RandValDramBlockWindowTmp& randval_dram_block_window_tmp,
-               const OGradDramBlockWindowTmp& do_dram_block_window_tmp,
-               const LSEDramBlockWindowTmp& lse_dram_block_window_tmp,
-               const DDramBlockWindowTmp& d_dram_block_window_tmp,
-               const QGradDramBlockWindowTmp& dq_dram_block_window_tmp,
-               const BiasGradDramBlockWindowTmp& dbias_dram_block_window_tmp,
-               FmhaMask mask,
-               PositionEncoding position_encoding,
-               float raw_scale,
-               float scale,
-               float rp_undrop,
-               float scale_rp_undrop,
-               void* smem_ptr,
-               FmhaDropout& dropout) const
+    CK_TILE_DEVICE auto operator()( //
+        const QDramBlockWindowTmp& q_dram_block_window_tmp,
+        const KDramBlockWindowTmp& k_dram_block_window_tmp,
+        const VDramBlockWindowTmp& v_dram_block_window_tmp,
+        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+        const RandValDramBlockWindowTmp& randval_dram_block_window_tmp,
+        const OGradDramBlockWindowTmp& do_dram_block_window_tmp,
+        const LSEDramBlockWindowTmp& lse_dram_block_window_tmp,
+        const DDramBlockWindowTmp& d_dram_block_window_tmp,
+        const QGradDramBlockWindowTmp& dq_dram_block_window_tmp,
+        const BiasGradDramBlockWindowTmp& dbias_dram_block_window_tmp,
+        FmhaMask mask,
+        PositionEncoding position_encoding,
+        float raw_scale,
+        float scale,
+        float rp_undrop,
+        float scale_rp_undrop,
+        void* smem_ptr,
+        FmhaDropout& dropout) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -239,10 +239,10 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                              {0, 0},
                              Policy::template MakeKTRegBlockDescriptor<Problem>());
 
-        auto a = TransposeTileDistrChecker< //
-            decltype(Policy::template MakeKTRegBlockDescriptor<Problem>()),
-            KDataType,
-            DefaultTranspose<KDataType>>::distr_encoding_valid;
+        // auto a = TransposeTileDistrChecker< //
+        //     decltype(Policy::template MakeKTRegBlockDescriptor<Problem>()),
+        //     KDataType,
+        //     DefaultTranspose<KDataType>>::distr_encoding_valid;
 
         // auto b = ck_tile::TransposeTileDistrChecker<
         //     ck_tile::tile_distribution<
@@ -374,10 +374,13 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         auto ds_lds_window =
             make_tile_window(ds_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
 
+        // transform it to make it from col-major to row-major; prepared for load_tile_transpose
+        auto ds_lds_t = make_tensor_view<address_space_enum::lds>(
+            ds_lds_ptr, Policy::template MakeSGradLdsBlockDescriptor<Problem, true>());
         auto ds_lds_read_window =
-            make_tile_window(ds_lds,
+            make_tile_window(ds_lds_t,
                              make_tuple(number<kM0>{}, number<kK4>{}),
-                             ds_lds_window.get_window_origin(),
+                             {0, 0},
                              Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
 
         // Bias: HBM ->Reg ->Reg ->LDS
@@ -607,8 +610,11 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             store_tile(d_lds_write_window, d_block_tile);
 
             auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
-#if 0
-            gemm_1(dv_acc, p_gemm, dot_reg_tensor);
+
+            auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
+                Policy::template MakePTRegSliceBlockDescriptor<Problem>());
+            pt_reg_tensor.get_thread_buffer() = p_gemm.get_thread_buffer();
+            gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
 
             // STAGE 4, OGrad@V Gemm2
             block_sync_lds();
@@ -661,11 +667,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             }
 
             // STAGE 6, SGrad^T@Q^T Gemm3
-            auto qt_reg_tensor = load_tile(qt_lds_read_window);
+            auto qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
             block_sync_lds();
 
-            const auto ds_gemm = cast_tile<GemmDataType>(ds);
-            gemm_3(dk_acc, ds_gemm, qt_reg_tensor);
+            const auto ds_gemm  = cast_tile<GemmDataType>(ds);
+            auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
+                Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
+            dst_reg_tensor.get_thread_buffer() = ds_gemm.get_thread_buffer();
+            gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 
             store_tile(ds_lds_window, ds_gemm);
             block_sync_lds();
@@ -681,7 +690,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             static_for<0, k4_loops, 1>{}([&](auto i_k4) {
                 if constexpr(i_k4 < k4_loops - 1)
                 {
-                    ds_reg_tensor_next = load_tile(ds_lds_read_window);
+                    ds_reg_tensor_next = load_tile_transpose(ds_lds_read_window);
                     move_tile_window(ds_lds_read_window, {kK4, 0});
                 }
                 auto kt_reg_tensor_slice = get_slice_tile(kt_reg_tensor,
@@ -717,7 +726,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
             i_total_loops += 1;
             seqlen_q_step += kM0;
-#endif
         }
 
         // Results Scale
