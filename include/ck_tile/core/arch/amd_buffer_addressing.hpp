@@ -2770,10 +2770,8 @@ CK_TILE_DEVICE void amd_direct_load_global_to_lds(const T* global_base_ptr,
     constexpr auto bytes_per_thread = sizeof(T) * NumElemsPerThread;
     static_assert(bytes_per_thread == dword_bytes);
 
-    const uint32_t* global_ptr =
-        reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(global_base_ptr));
     const int32x4_t src_resource =
-        make_wave_buffer_resource(global_ptr, src_element_space_size * sizeof(T));
+        make_wave_buffer_resource(global_base_ptr, src_element_space_size * sizeof(T));
     const index_t global_offset_bytes = is_valid ? global_offset * sizeof(T) : 0x80000000;
 
 #if CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM

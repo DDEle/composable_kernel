@@ -133,10 +133,7 @@ struct DefaultTranspose
 
         static constexpr bool ys_mapping_valid =
             (input_ys_to_rhs_major.back() == 2) &&
-            (input_ys_to_rhs_minor.back() == input_hs_lengthss[number<1>{}].size() - 1) &&
-            (input_ys_to_rhs_major[input_ys_to_rhs_major.size() - 2] == 1) &&
-            (input_ys_to_rhs_minor[input_ys_to_rhs_minor.size() - 2] ==
-             input_hs_lengthss[number<0>{}].size() - 2);
+            (input_ys_to_rhs_minor.back() == input_hs_lengthss[number<1>{}].size() - 1);
 
         static constexpr bool value = dims_valid && suffix_valid_dim0 && suffix_valid_dim1 &&
                                       ps_mapping_valid && ys_mapping_valid;
@@ -154,110 +151,142 @@ struct TransposeTileDistrChecker
 
 // this is used to generate the transposed output tile distribution encoding
 // based on the input tile distribution encoding
-template <typename TileDistribution_,
+template <typename TileDistributionEncoding_,
           typename DataType_,
-          typename Policy = DefaultTranspose<DataType_>>
-struct OutputTileDistributionTraits
+          typename Policy       = DefaultTranspose<DataType_>,
+          bool ReverseDirection = false>
+struct TransposeTileDistributionTraits
 {
-    using InDstrEncode = typename remove_cvref_t<TileDistribution_>::DstrEncode;
-    static constexpr auto input_hs_lengthss       = InDstrEncode::hs_lengthss_;
-    static constexpr auto quad_input_hs_lengthss  = Policy::QuadInputEncoding::hs_lengthss_;
-    static constexpr auto quad_output_hs_lengthss = Policy::QuadOutputEncoding::hs_lengthss_;
+    using InDstrEncode                      = remove_cvref_t<TileDistributionEncoding_>;
+    static constexpr auto input_hs_lengthss = InDstrEncode::hs_lengthss_;
+    using QuadInputEncoding                 = std::conditional_t<ReverseDirection,
+                                                 typename Policy::QuadOutputEncoding,
+                                                 typename Policy::QuadInputEncoding>;
+    using QuadOutputEncoding                = std::conditional_t<ReverseDirection,
+                                                  typename Policy::QuadInputEncoding,
+                                                  typename Policy::QuadOutputEncoding>;
+
+    static constexpr auto quad_input_hs_lengthss  = QuadInputEncoding::hs_lengthss_;
+    static constexpr auto quad_output_hs_lengthss = QuadOutputEncoding::hs_lengthss_;
 
     static constexpr auto input_ps_to_rhss_major = InDstrEncode::ps_to_rhss_major_;
     static constexpr auto input_ps_to_rhss_minor = InDstrEncode::ps_to_rhss_minor_;
     static constexpr auto input_ys_to_rhs_major  = InDstrEncode::ys_to_rhs_major_;
     static constexpr auto input_ys_to_rhs_minor  = InDstrEncode::ys_to_rhs_minor_;
 
-    static constexpr auto quad_ps_to_rhss_major = Policy::QuadInputEncoding::ps_to_rhss_major_;
-    static constexpr auto quad_ps_to_rhss_minor = Policy::QuadInputEncoding::ps_to_rhss_minor_;
+    static constexpr auto I0                            = number<0>{};
+    static constexpr auto quad_input_ps_to_rhss_major0  = QuadInputEncoding::ps_to_rhss_major_[I0];
+    static constexpr auto quad_input_ps_to_rhss_minor0  = QuadInputEncoding::ps_to_rhss_minor_[I0];
+    static constexpr auto quad_output_ps_to_rhss_major0 = QuadOutputEncoding::ps_to_rhss_major_[I0];
+    static constexpr auto quad_output_ps_to_rhss_minor0 = QuadOutputEncoding::ps_to_rhss_minor_[I0];
+    static constexpr auto quad_output_ys_to_rhs_major   = QuadOutputEncoding::ys_to_rhs_major_;
+    static constexpr auto quad_output_ys_to_rhs_minor   = QuadOutputEncoding::ys_to_rhs_minor_;
+
+    static constexpr index_t dim0 = Policy::transpose_dims[0];
+    static constexpr index_t dim1 = Policy::transpose_dims[1];
+
+    static constexpr auto swap_one_and_two = [](const index_t idx) {
+        return (idx == 1) ? 2 : (idx == 2) ? 1 : idx;
+    };
 
     // for transpose load
-    // append the reversed quad output hs lengths to the input hs lengthss after removing
-    // the quad_input_hs_lengthss
-    // then reverse the whole sequence to get the dst_out_hs_lengthss
-    static constexpr auto reversed_quad_output_hs_lengthss = tuple_reverse(quad_output_hs_lengthss);
-
-    static constexpr auto full_out_hs_lengthss = generate_tuple(
+    // remove the quad_input_hs_lengthss from the input_hs_lengthss for each dimension and reverse
+    // dims and append the quad_output_hs_lengthss to the end of each dimension
+    static constexpr auto outer_hs_lengthss = generate_tuple(
         [](auto i) {
-            return input_hs_lengthss[i]
-                .extract(typename arithmetic_sequence_gen<0,
-                                                          input_hs_lengthss[i].size() -
-                                                              quad_input_hs_lengthss[i].size(),
-                                                          1>::type{})
-                .push_back(reversed_quad_output_hs_lengthss[i]);
+            constexpr auto input_i   = input_hs_lengthss[i];
+            constexpr auto outer_len = input_i.size() - quad_input_hs_lengthss[i].size();
+            return typename sequence_split<decltype(input_i), outer_len>::left_type{};
+        },
+        number<InDstrEncode::NDimX>{});
+    static constexpr auto reversed_outer_hs_lengthss = tuple_reverse(outer_hs_lengthss);
+    static constexpr auto dst_out_hs_lengthss        = generate_tuple(
+        [](auto i) {
+            auto outer_i = reversed_outer_hs_lengthss[i];
+            // append the reversed quad output hs lengths to the outer hs lengths
+            return outer_i.push_back(quad_output_hs_lengthss[i]);
         },
         number<InDstrEncode::NDimX>{});
 
-    static constexpr auto dst_out_hs_lengthss = tuple_reverse(full_out_hs_lengthss);
-
-    // for PS→RHS mapping(both major and minor), we need to modify the last element of the major
-    // sequence
-    static constexpr auto modified_ps_to_rhss_major = generate_tuple(
+    // for PS→RHS mapping(both major and minor), we need to modify the last element (which is for
+    // thread distr) of the major sequence
+    static constexpr auto dst_ps_to_rhss_major = generate_tuple(
+        // for major because of dst_out_hs_lengthss is reversed, this index also need to be reversed
         [](auto i) {
             if constexpr(i == input_ps_to_rhss_major.size() - 1)
             {
                 constexpr auto current_size             = input_ps_to_rhss_major[i].size();
-                constexpr auto reduce_size              = quad_ps_to_rhss_major[number<0>{}].size();
+                constexpr auto reduce_size              = quad_input_ps_to_rhss_major0.size();
+                constexpr auto quad_out                 = quad_output_ps_to_rhss_major0;
                 constexpr auto reduced_ps_to_rhss_major = input_ps_to_rhss_major[i].extract(
                     typename arithmetic_sequence_gen<0, current_size - reduce_size, 1>::type{});
-                return reduced_ps_to_rhss_major.push_back(number<2>{});
+                return reduced_ps_to_rhss_major.transform(swap_one_and_two).push_back(quad_out);
             }
             else
             {
-                // For all other sequences, keep them unchanged
-                return input_ps_to_rhss_major[i];
+                // For all other sequences (i.e. warp), keep them unchanged
+                return input_ps_to_rhss_major[i].transform(swap_one_and_two);
             }
         },
         number<input_ps_to_rhss_major.size()>{});
 
-    static constexpr auto minor_last_index =
-        full_out_hs_lengthss[number<InDstrEncode::NDimX - 1>{}].size() - 1;
-    static constexpr auto major_last_index = full_out_hs_lengthss[number<0>{}].size() - 1;
+    static constexpr auto quad_idx_offset =
+        transform_tuples([](auto x) { return number<x.size()>{}; }, reversed_outer_hs_lengthss);
+
+    // minus 1 because RsLength is not counted
+    static constexpr auto quad_output_ps_minor_offset = to_sequence(generate_tuple_for(
+        [](auto x) { return quad_idx_offset[number<x - 1>{}]; }, quad_output_ps_to_rhss_major0));
+    static constexpr auto quad_output_ys_minor_offset = to_sequence(generate_tuple_for(
+        [](auto x) { return quad_idx_offset[number<x - 1>{}]; }, quad_output_ys_to_rhs_major));
 
     static constexpr auto dst_ps_to_rhss_minor = generate_tuple(
         [](auto i) {
+            constexpr auto input_i = input_ps_to_rhss_minor[i];
             if constexpr(i == input_ps_to_rhss_minor.size() - 1)
             {
-                constexpr auto current_size             = input_ps_to_rhss_minor[i].size();
-                constexpr auto reduce_size              = quad_ps_to_rhss_minor[number<0>{}].size();
-                constexpr auto reduced_ps_to_rhss_minor = input_ps_to_rhss_minor[i].extract(
-                    typename arithmetic_sequence_gen<0, current_size - reduce_size, 1>::type{});
-                return reduced_ps_to_rhss_minor.push_back(number<minor_last_index>{});
+                constexpr auto outer_len = input_i.size() - quad_input_ps_to_rhss_minor0.size();
+                constexpr auto outer_ps =
+                    typename sequence_split<decltype(input_i), outer_len>::left_type{};
+
+                return outer_ps.push_back(quad_output_ps_minor_offset +
+                                          quad_output_ps_to_rhss_minor0);
             }
             else
             {
                 // For all other sequences, keep them unchanged
-                return input_ps_to_rhss_minor[i];
+                return input_i;
             }
         },
         number<input_ps_to_rhss_minor.size()>{});
 
+    static constexpr auto outer_input_ys_to_rhs_major = input_ys_to_rhs_major.pop_back();
+
     // for major because of dst_out_hs_lengthss is reversed, this index also need to be reversed
-    static constexpr auto swap_one_and_two = [](const index_t idx) {
-        return (idx == 1) ? 2 : (idx == 2) ? 1 : idx;
-    };
-    static constexpr auto dst_ps_to_rhss_major = generate_tuple(
-        [](auto i) { return modified_ps_to_rhss_major[i].transform(swap_one_and_two); },
-        number<modified_ps_to_rhss_major.size()>{});
+    static constexpr auto dst_ys_to_rhs_major =
+        outer_input_ys_to_rhs_major.transform(swap_one_and_two).push_back(number<2>{});
 
-    static constexpr auto modified_input_ys_to_rhs_major =
-        input_ys_to_rhs_major.pop_back().push_back(number<1>{});
+    static constexpr auto dst_ys_to_rhs_minor = input_ys_to_rhs_minor.pop_back().push_back(
+        number<(quad_output_ys_minor_offset + quad_output_ys_to_rhs_minor)[I0]>{});
 
-    static constexpr auto dst_ys_to_rhs_major = generate_sequence_v2(
-        [](auto i) { return number<swap_one_and_two(modified_input_ys_to_rhs_major[i])>{}; },
-        number<modified_input_ys_to_rhs_major.size()>{});
-
-    static constexpr auto dst_ys_to_rhs_minor =
-        input_ys_to_rhs_minor.pop_back().push_back(number<major_last_index>{});
-
-    using OutDstrEncode = tile_distribution_encoding<typename InDstrEncode::RsLengths,
-                                                     remove_cvref_t<decltype(dst_out_hs_lengthss)>,
-                                                     remove_cvref_t<decltype(dst_ps_to_rhss_major)>,
-                                                     remove_cvref_t<decltype(dst_ps_to_rhss_minor)>,
-                                                     remove_cvref_t<decltype(dst_ys_to_rhs_major)>,
-                                                     remove_cvref_t<decltype(dst_ys_to_rhs_minor)>>;
+    using TransposedDstrEncode =
+        tile_distribution_encoding<typename InDstrEncode::RsLengths,
+                                   remove_cvref_t<decltype(dst_out_hs_lengthss)>,
+                                   remove_cvref_t<decltype(dst_ps_to_rhss_major)>,
+                                   remove_cvref_t<decltype(dst_ps_to_rhss_minor)>,
+                                   remove_cvref_t<decltype(dst_ys_to_rhs_major)>,
+                                   remove_cvref_t<decltype(dst_ys_to_rhs_minor)>>;
 };
+
+template <typename TileDistributionEncoding_,
+          typename DataType_,
+          typename Policy = DefaultTranspose<DataType_>>
+using OutputTileDistributionTraits =
+    TransposeTileDistributionTraits<TileDistributionEncoding_, DataType_, Policy, false>;
+template <typename TileDistributionEncoding_,
+          typename DataType_,
+          typename Policy = DefaultTranspose<DataType_>>
+using InputTileDistributionTraits =
+    TransposeTileDistributionTraits<TileDistributionEncoding_, DataType_, Policy, true>;
 
 template <typename InnerEncode,
           index_t kLeadIterPerWarp,
@@ -321,9 +350,9 @@ load_tile_transpose(const tile_window_with_static_distribution<BottomTensorView_
                                                                TileDistribution_,
                                                                NumCoord>& tile_window)
 {
-    using OutTileDstrEncode =
-        typename OutputTileDistributionTraits<TileDistribution_,
-                                              typename BottomTensorView_::DataType>::OutDstrEncode;
+    using OutTileDstrEncode = typename OutputTileDistributionTraits<
+        typename TileDistribution_::DstrEncode,
+        typename BottomTensorView_::DataType>::TransposedDstrEncode;
     auto out_tensor = make_static_distributed_tensor<typename BottomTensorView_::DataType>(
         make_static_tile_distribution(OutTileDstrEncode{}));
     auto trans_tensor           = tile_window.template load_transpose<Policy>();

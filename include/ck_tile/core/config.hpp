@@ -2,6 +2,7 @@
 // Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
+#include "ck_tile/core/utility/debug.hpp"
 
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
 #define __gfx9__

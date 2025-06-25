@@ -47,9 +47,9 @@ struct TransposePolicy
     {
         constexpr auto input_dstr = MakeLdsLoadTileDistribution<Problem>();
 
-        using OutTileDstrEncode =
-            typename OutputTileDistributionTraits<remove_cvref_t<decltype(input_dstr)>,
-                                                  typename Problem::DataType>::OutDstrEncode;
+        using OutTileDstrEncode = typename OutputTileDistributionTraits<
+            typename remove_cvref_t<decltype(input_dstr)>::DstrEncode,
+            typename Problem::DataType>::TransposedDstrEncode;
         constexpr auto block_dstr = make_static_tile_distribution(OutTileDstrEncode{});
 
         return block_dstr;
