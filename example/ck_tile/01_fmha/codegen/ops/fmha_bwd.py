@@ -14,13 +14,11 @@ from codegen.cpp_symbol_map import *
 
 
 BWD_DQDKDV_PIPELINE_MAP = {
-    "kr_ktr_vr_iglp" : "ck_tile::BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP",
-    "kr_ktr_vr"      : "ck_tile::BlockFmhaBwdDQDKDVPipelineKRKTRVR",
+    "trload_kr_ktr_vr"      : "ck_tile::BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR",
 }
 
 BWD_DQDKDV_PIPELINE_ENUM_MAP = {
-    "kr_ktr_vr_iglp" : "ck_tile::BlockFmhaBwdPipelineEnum::KRKTRVR_IGLP",
-    "kr_ktr_vr"      : "ck_tile::BlockFmhaBwdPipelineEnum::KRKTRVR",
+    "trload_kr_ktr_vr"      : "ck_tile::BlockFmhaBwdPipelineEnum::KRKTRVR",
 }
 
 FMHA_BWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
@@ -352,13 +350,13 @@ def get_fmha_bwd_dq_dk_dv_tile_ppl_dict_from_dtype(dtype : str) -> Optional[dict
     if dtype == 'fp16' or dtype == 'bf16':
         return {
             '32'  : [FmhaBwdDQDKDVTileSize( 32, 128,  32, 32,  32, 32, 64,  32,  32, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1),
-                        "kr_ktr_vr_iglp", "kr_ktr_vr"],
+                        "trload_kr_ktr_vr", "trload_kr_ktr_vr"],
             '64'  : [FmhaBwdDQDKDVTileSize( 32, 128,  64, 32,  64, 32, 32,  64,  64, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
-                        "kr_ktr_vr_iglp", "kr_ktr_vr"],
-            '128' : [FmhaBwdDQDKDVTileSize( 16, 128, 128, 16, 128, 16, 32, 128, 128, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
-                        "kr_ktr_vr_iglp", "kr_ktr_vr"],
-            '256' : [FmhaBwdDQDKDVTileSize( 16,  64, 256, 16, 256, 16, 32, 256, 256, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
-                        "kr_ktr_vr_iglp", "kr_ktr_vr"]
+                        "trload_kr_ktr_vr", "trload_kr_ktr_vr"],
+            '128' : [FmhaBwdDQDKDVTileSize( 32, 128, 128, 32, 128, 32, 32, 128, 128, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 32, 1),
+                        "trload_kr_ktr_vr", "trload_kr_ktr_vr"],
+            '256' : [FmhaBwdDQDKDVTileSize( 16,  64, 256, 16, 256, 16, 32, 256, 256, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 32, 1),
+                        "trload_kr_ktr_vr", "trload_kr_ktr_vr"]
         }
     else:
         return None
@@ -611,6 +609,7 @@ class FmhaBwdApiTrait:
         return self.tile.F_bhdv
 
     def scheck(self, spad1 : str) -> str:
+        return 'true' if (self.spad == 'f' and spad1 == 'f') else 'false'
         if self.mode == 'group':
             return 'true' # always support
         elif self.spad == 't' and spad1 == 't':
@@ -622,6 +621,7 @@ class FmhaBwdApiTrait:
 
     @property
     def skcheck(self) -> str:
+        return 'true' if (self.skpad == 'f') else 'false'
         if self.mode == 'group':
             return 'true' # always support
         elif self.skpad == 't':
