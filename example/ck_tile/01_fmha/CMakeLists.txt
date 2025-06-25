@@ -31,6 +31,7 @@ endif()
 execute_process(
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --api bwd --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/bwd_blob_list.txt --receipt 3
+  --filter "*dot_do_o_d128_bf16_batch_o2_ps@fmha_bwd_convert_dq_d128_bf16_b64x128_batch_o2_ps_ndeterministic@*d128_bf16_batch_b32x128*_o1_kr_ktr_vr_iglp_pssk_nbias_ndbias_nmask_ndropout_ndeterministic*"
   RESULT_VARIABLE ret
 )
 if(ret AND NOT ret EQUAL 0)
@@ -52,6 +53,7 @@ add_custom_command(
   OUTPUT ${FMHA_BWD_GEN_BLOBS}
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --api bwd --output_dir ${CMAKE_CURRENT_BINARY_DIR} --receipt 3
+  --filter "*dot_do_o_d128_bf16_batch_o2_ps@fmha_bwd_convert_dq_d128_bf16_b64x128_batch_o2_ps_ndeterministic@*d128_bf16_batch_b32x128*_o1_kr_ktr_vr_iglp_pssk_nbias_ndbias_nmask_ndropout_ndeterministic*"
 )
 
 set(EXAMPLE_FMHA_FWD "tile_example_fmha_fwd")
