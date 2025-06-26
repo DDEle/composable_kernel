@@ -220,6 +220,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         // KT, HBM -> LDS --trload-->Reg
         async_load_tile(k_lds_write_window, k_dram_window);
         async_load_tile(v_lds_write_window, v_dram_window);
+        __builtin_amdgcn_s_waitcnt(3952);
         block_sync_lds();
 
         //------------------------------------------------------------------
@@ -239,69 +240,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                              {0, 0},
                              Policy::template MakeKTRegBlockDescriptor<Problem>());
 
-        // auto a = TransposeTileDistrChecker< //
-        //     decltype(Policy::template MakeKTRegBlockDescriptor<Problem>()),
-        //     KDataType,
-        //     DefaultTranspose<KDataType>>::distr_encoding_valid;
-
-        // auto b = ck_tile::TransposeTileDistrChecker<
-        //     ck_tile::tile_distribution<
-        //         ck_tile::tensor_adaptor<
-        //             ck_tile::tuple<ck_tile::replicate<ck_tile::tuple<ck_tile::constant<1>>>,
-        //                            ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<4>,
-        //                                                            ck_tile::constant<2>,
-        //                                                            ck_tile::constant<4>,
-        //                                                            ck_tile::constant<4>>,
-        //                                             false>,
-        //                            ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<2>,
-        //                                                            ck_tile::constant<4>,
-        //                                                            ck_tile::constant<4>,
-        //                                                            ck_tile::constant<4>>,
-        //                                             false>,
-        //                            ck_tile::merge_v2_magic_division<
-        //                                ck_tile::tuple<ck_tile::constant<1>,
-        //                                ck_tile::constant<4>>>,
-        //                            ck_tile::merge_v2_magic_division<
-        //                                ck_tile::tuple<ck_tile::constant<4>,
-        //                                ck_tile::constant<4>>>>,
-        //             ck_tile::tuple<ck_tile::sequence<>,
-        //                            ck_tile::sequence<0>,
-        //                            ck_tile::sequence<1>,
-        //                            ck_tile::sequence<2, 8>,
-        //                            ck_tile::sequence<5, 6>>,
-        //             ck_tile::tuple<ck_tile::sequence<2>,
-        //                            ck_tile::sequence<3, 4, 5, 6>,
-        //                            ck_tile::sequence<7, 8, 9, 10>,
-        //                            ck_tile::sequence<11>,
-        //                            ck_tile::sequence<12>>,
-        //             ck_tile::sequence<0, 1>,
-        //             ck_tile::sequence<11, 12, 7, 3, 4, 10>>,
-        //         ck_tile::tensor_descriptor<
-        //             ck_tile::tuple<ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<2>,
-        //                                                            ck_tile::constant<4>,
-        //                                                            ck_tile::constant<2>,
-        //                                                            ck_tile::constant<4>>,
-        //                                             false>>,
-        //             ck_tile::tuple<ck_tile::sequence<0>>,
-        //             ck_tile::tuple<ck_tile::sequence<1, 2, 3, 4>>,
-        //             ck_tile::sequence<1, 2, 3, 4>,
-        //             ck_tile::constant<64>,
-        //             ck_tile::sequence<-1, -1, -1, -1, -1>,
-        //             ck_tile::sequence<-1, -1, -1, -1, -1>>,
-        //         ck_tile::tile_distribution_encoding<
-        //             ck_tile::sequence<1>,
-        //             ck_tile::tuple<ck_tile::sequence<4, 2, 4, 4>, ck_tile::sequence<2, 4, 4, 4>>,
-        //             ck_tile::tuple<ck_tile::sequence<0, 2>, ck_tile::sequence<1, 1>>,
-        //             ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 3>>,
-        //             ck_tile::sequence<2, 1, 1, 2>,
-        //             ck_tile::sequence<0, 0, 1, 3>>,
-        //         ck_tile::detail::tile_distribution_detail<
-        //             ck_tile::tuple<ck_tile::sequence<2>,
-        //                            ck_tile::sequence<3, 4, 5, 6>,
-        //                            ck_tile::sequence<7, 8, 9, 10>>>>,
-        //     unsigned short,
-        //     ck_tile::DefaultTranspose<unsigned short>>::distr_encoding_valid;
-
         auto kt_reg_tensor = load_tile_transpose(kt_lds_read_window);
 
         auto v_lds_read = make_tensor_view<address_space_enum::lds>(
@@ -313,6 +251,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                              Policy::template MakeVRegBlockDescriptor<Problem>());
         auto v_reg_tensor = load_tile(v_lds_read_window);
 
+        __builtin_amdgcn_s_waitcnt(3952);
         block_sync_lds();
         //---------------------------- Loop Load in ----------------------------//
         // Q: HBM -->LDS
@@ -344,7 +283,8 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         // dO: HBM ->LDS ---load--> Reg
         // dOT:          \-loadtr-> Reg
         auto do_dram_window =
-            make_tile_window(do_dram_block_window_tmp.get_bottom_tensor_view(),
+            make_tile_window(Policy::template TransformXDramTensorView<OGradDataType>(
+                                 do_dram_block_window_tmp.get_bottom_tensor_view()),
                              do_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_q_start, 0},
                              Policy::template MakeOGradDramTileDistribution<Problem>());
@@ -482,6 +422,8 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         // Hot loop
         while(i_total_loops < num_total_loop)
         {
+            __builtin_amdgcn_s_waitcnt(3952);
+            block_sync_lds();
             async_load_tile(q_lds_write_window, q_dram_window);
             move_tile_window(q_dram_window, {kM0, 0});
 
@@ -489,11 +431,13 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             move_tile_window(lse_dram_window, {kM0});
             store_tile(lse_lds_write_window, lse_block_tile);
 
+            __builtin_amdgcn_s_waitcnt(3952);
             block_sync_lds();
 
             auto q_reg_tensor = load_tile(q_lds_read_window);
             auto lse          = load_tile(lse_lds_read_window);
 
+            __builtin_amdgcn_s_waitcnt(3952);
             block_sync_lds(); // TODO(Yi): is a wait enough?
 
             // STAGE 1, Q@K Gemm0
@@ -503,6 +447,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 async_load_tile(bias_lds_write_window, bias_dram_window);
+                __builtin_amdgcn_s_waitcnt(3952);
                 block_sync_lds();
                 auto bias_s_tile = load_tile(bias_s_lds_read_window);
                 tile_elementwise_inout(
@@ -603,6 +548,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             async_load_tile(do_lds_write_window, do_dram_window);
             move_tile_window(do_dram_window, {kM0, 0});
 
+            __builtin_amdgcn_s_waitcnt(3952);
             block_sync_lds();
 
             auto d_block_tile = load_tile(d_dram_window);
@@ -617,6 +563,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
 
             // STAGE 4, OGrad@V Gemm2
+            __builtin_amdgcn_s_waitcnt(3952);
             block_sync_lds();
             auto do_reg_tensor = load_tile(do_lds_read_window);
             auto d             = load_tile(d_lds_read_window);
@@ -656,6 +603,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                     }
                 }();
                 store_tile(bias_lds_write_window, dbias);
+                __builtin_amdgcn_s_waitcnt(3952);
                 block_sync_lds();
                 auto shuffled_dbias_tile = load_tile(dbias_lds_read_window);
                 auto dbias_tile          = make_static_distributed_tensor<BiasGradDataType>(
@@ -668,6 +616,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
             // STAGE 6, SGrad^T@Q^T Gemm3
             auto qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
+            __builtin_amdgcn_s_waitcnt(3952);
             block_sync_lds();
 
             const auto ds_gemm  = cast_tile<GemmDataType>(ds);
@@ -677,6 +626,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 
             store_tile(ds_lds_window, ds_gemm);
+            __builtin_amdgcn_s_waitcnt(3952);
             block_sync_lds();
 
             auto ds_reg_tensor      = load_tile_transpose(ds_lds_read_window);
@@ -703,7 +653,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                     ds_reg_tensor.get_thread_buffer() = ds_reg_tensor_next.get_thread_buffer();
                 }
             });
-            move_tile_window(ds_lds_read_window, {0, -kN0});
+            move_tile_window(ds_lds_read_window, {-kN0, 0});
             // QGrad Scale
             if constexpr(FmhaDropout::IsDropout)
             {

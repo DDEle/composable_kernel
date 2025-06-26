@@ -42,7 +42,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
                                                 typename Problem::BlockFmhaShape::Gemm0BlockWarps,
                                                 WarpGemm>;
 
-        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy, /* TransposeC */ true>{};
     }
 
     template <typename Problem>
@@ -54,7 +54,35 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetOGradVBlockGemm()
     {
-        return BlockFmhaBwdPipelineDefaultPolicy::GetOGradVBlockGemm<Problem>();
+        using GemmProblem =
+            BlockGemmProblem<typename Problem::OGradDataType,
+                             typename Problem::VDataType,
+                             typename Problem::AccDataType,
+                             Problem::kBlockSize,
+                             TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
+                                                    Problem::BlockFmhaShape::kN0,
+                                                    Problem::BlockFmhaShape::kK2>,
+                                           typename Problem::BlockFmhaShape::Gemm2BlockWarps,
+                                           typename Problem::BlockFmhaShape::Gemm2WarpTile>>;
+
+        using WarpGemm = WarpGemmMfmaDispatcher<
+            typename Problem::OGradDataType,
+            typename Problem::VDataType,
+            typename Problem::AccDataType,
+            Problem::BlockFmhaShape::Gemm2WarpTile::at(number<0>{}),
+            Problem::BlockFmhaShape::Gemm2WarpTile::at(number<1>{}),
+            Problem::BlockFmhaShape::Gemm2WarpTile::at(number<2>{}),
+            false,
+            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 16 ? false : true>;
+
+        using BlockGemmPolicy =
+            BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::OGradDataType,
+                                                typename Problem::VDataType,
+                                                typename Problem::AccDataType,
+                                                typename Problem::BlockFmhaShape::Gemm2BlockWarps,
+                                                WarpGemm>;
+
+        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy, /* TransposeC */ true>{};
     }
 
     template <typename Problem>

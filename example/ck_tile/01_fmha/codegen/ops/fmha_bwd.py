@@ -226,6 +226,7 @@ class FmhaBwdDQDKDVApiTrait:
     deterministic : str
 
     def scheck(self, spad1 : str) -> str:
+        return 'true'
         if self.mode == 'group':
             return 'true' # always support
         elif self.spad == 't' and spad1 == 't':
@@ -237,6 +238,7 @@ class FmhaBwdDQDKDVApiTrait:
 
     @property
     def skcheck(self) -> str:
+        return 'true'
         if self.mode == 'group':
             return 'true' # always support
         elif self.skpad == 't':
@@ -487,7 +489,7 @@ def get_bwd_dq_dk_dv_blobs(kernel_filter : Optional[str], receipt, mask_impl) ->
         d = get_fmha_bwd_dq_dk_dv_tile_ppl_dict_from_dtype(dtype)
         if d == None:
             continue
-        for hdim_str, mode, mask, bias, dbias, dropout, spad, skpad, dpad, dvpad, deterministic in itertools.product(d.keys(), MODE_MAP.keys(), get_mask_map(mask_impl).keys(), BIAS_MAP.keys(), ["t", "f"], DROPOUT_MAP.keys(), ["t", "f"], ["t", "f"], ["t", "f"], ["t", "f"], ["t", "f"]):
+        for hdim_str, mode, mask, bias, dbias, dropout, spad, skpad, dpad, dvpad, deterministic in itertools.product(d.keys(), MODE_MAP.keys(), get_mask_map(mask_impl).keys(), BIAS_MAP.keys(), ["t", "f"], DROPOUT_MAP.keys(), ["t"], ["t"], ["t", "f"], ["t", "f"], ["t", "f"]):
             tile = d[hdim_str][0]
             ppl = d[hdim_str][1]
             hdim = int(hdim_str)
