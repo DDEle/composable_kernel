@@ -254,7 +254,7 @@
 #endif
 
 #ifndef CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN
-#if __clang_major__ == 20
+#if __clang_major__ == 20 && 0
 #define CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN 1
 #else
 #define CK_TILE_USE_BUFFER_ADDRESSING_BUILTIN 0
