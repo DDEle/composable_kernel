@@ -436,6 +436,12 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         decltype(load_tile_transpose(ds_lds_read_window)) ds_reg_tensor_next;
 
         auto main_body = [&](auto is_prologue_, auto is_epilogue_) mutable {
+            decltype(load_tile(do_lds_read_window)) do_reg_tensor;
+            decltype(load_tile(d_lds_read_window)) d;
+            decltype(gemm_2.MakeCBlockTile()) dp_acc, ds;
+            decltype(load_tile_transpose(qt_lds_read_window)) qt_reg_tensor;
+            decltype(load_tile(lse_dram_window)) lse_block_tile;
+
             constexpr bool is_prologue = is_prologue_.value;
             constexpr bool is_epilogue = is_epilogue_.value;
             static_assert(is_prologue || is_epilogue, "is_prologue or is_epilogue should be true");
@@ -443,21 +449,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             {
                 __builtin_amdgcn_s_waitcnt(3952);
                 block_sync_lds();
-                async_load_tile(q_lds_write_window, q_dram_window);
-                move_tile_window(q_dram_window, {kM0, 0});
-
-                auto lse_block_tile = load_tile(lse_dram_window);
-                move_tile_window(lse_dram_window, {kM0});
-                store_tile(lse_lds_write_window, lse_block_tile);
-
-                __builtin_amdgcn_s_waitcnt(3952);
-                block_sync_lds();
 
                 q_reg_tensor = load_tile(q_lds_read_window);
                 lse          = load_tile(lse_lds_read_window);
 
-                __builtin_amdgcn_s_waitcnt(3952);
-                block_sync_lds(); // TODO(Yi): is a wait enough?
+                auto d_block_tile = load_tile(d_dram_window);
+                move_tile_window(d_dram_window, {kM0});
+                store_tile(d_lds_write_window, d_block_tile);
+                do_reg_tensor = load_tile(do_lds_read_window);
 
                 // STAGE 1, Q@K Gemm0
                 auto s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
@@ -536,7 +535,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                     dropout.template Run<decltype(gemm_0), RandValOutputDataType>(
                         seqlen_q_step, k_origin.at(number<0>{}), p, randval_dram_window);
                 }
-                const auto p_gemm = [&]() {
+                const auto p_gemm = [&]() { // dropout / type conversion
                     if constexpr(FmhaDropout::IsDropout)
                     {
                         return tile_elementwise_in(
@@ -552,18 +551,12 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 }();
 
                 // STAGE 3, P^T@OGrad^T Gemm1
-                async_load_tile(do_lds_write_window, do_dram_window);
-                move_tile_window(do_dram_window, {kM0, 0});
 
                 __builtin_amdgcn_s_waitcnt(3952);
                 block_sync_lds();
 
-                auto d_block_tile = load_tile(d_dram_window);
-                move_tile_window(d_dram_window, {kM0});
-                store_tile(d_lds_write_window, d_block_tile);
-
-                __builtin_amdgcn_s_barrier();
-                __builtin_amdgcn_sched_barrier(0);
+                // __builtin_amdgcn_s_barrier();
+                // __builtin_amdgcn_sched_barrier(0);
                 auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
 
                 auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
@@ -571,20 +564,16 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 pt_reg_tensor.get_thread_buffer() = p_gemm.get_thread_buffer();
                 gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
 
-                __builtin_amdgcn_s_barrier();
-                __builtin_amdgcn_sched_barrier(0);
+                // __builtin_amdgcn_s_barrier();
+                // __builtin_amdgcn_sched_barrier(0);
                 // STAGE 4, OGrad@V Gemm2
                 __builtin_amdgcn_s_waitcnt(3952);
                 block_sync_lds();
-                auto do_reg_tensor = load_tile(do_lds_read_window);
-                auto d             = load_tile(d_lds_read_window);
+                d = load_tile(d_lds_read_window);
 
-                auto dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
-                // TODO(Yi): assert dp_acc has the same type as p_gemm
-                // static_cast()
+                dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
                 // STAGE 5, P^T(PGrad^T - D)
-                auto ds                 = decltype(dp_acc){};
                 constexpr auto ds_spans = decltype(ds)::get_distributed_spans();
                 sweep_tile_span(ds_spans[number<0>{}], [&](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
@@ -626,10 +615,24 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 }
 
                 // STAGE 6, SGrad^T@Q^T Gemm3
-                auto qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
+                qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
                 __builtin_amdgcn_s_waitcnt(3952);
                 block_sync_lds();
+            }
+            if constexpr(is_prologue)
+            {
+                async_load_tile(q_lds_write_window, q_dram_window);
+                move_tile_window(q_dram_window, {kM0, 0});
 
+                lse_block_tile = load_tile(lse_dram_window);
+                move_tile_window(lse_dram_window, {kM0});
+                store_tile(lse_lds_write_window, lse_block_tile);
+
+                async_load_tile(do_lds_write_window, do_dram_window);
+                move_tile_window(do_dram_window, {kM0, 0});
+            }
+            if constexpr(is_epilogue)
+            {
                 const auto ds_gemm  = cast_tile<GemmDataType>(ds);
                 auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
                     Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());

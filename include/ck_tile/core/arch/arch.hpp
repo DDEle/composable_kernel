@@ -80,6 +80,15 @@ CK_TILE_DEVICE index_t get_thread_id() { return threadIdx.x; }
 
 CK_TILE_DEVICE index_t get_block_id() { return blockIdx.x; }
 
+#define CK_TILE_S_CNT_MAX 0b1100'1111'0111'1111
+#define CK_TILE_VMCNT(cnt)                                                 \
+    ([]() { static_assert((cnt) < 0b111111, "VMCNT only has 6 bits"); }(), \
+     ((cnt)&0b1111) | (((cnt)&0b110000) << 14))
+#define CK_TILE_EXPCNT(cnt) \
+    ([]() { static_assert((cnt) < 0b111, "EXP only has 3 bits"); }(), ((cnt) << 4))
+#define CK_TILE_LGKMCNT(cnt) \
+    ([]() { static_assert((cnt) < 0b1111, "LGKM only has 4 bits"); }(), ((cnt) << 8))
+
 CK_TILE_DEVICE void block_sync_lds()
 {
 #if CK_TILE_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM
@@ -88,6 +97,7 @@ CK_TILE_DEVICE void block_sync_lds()
     // s_barrier \
     // " ::);
 
+    // __builtin_amdgcn_s_waitcnt(CK_TILE_S_CNT_MAX & CK_TILE_LGKMCNT(0));
     __builtin_amdgcn_s_waitcnt(0xc07f);
     __builtin_amdgcn_s_barrier();
 #else
