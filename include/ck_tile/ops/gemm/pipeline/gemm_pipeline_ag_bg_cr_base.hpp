@@ -20,6 +20,13 @@ struct GemmPipelineAgBgCrImplBase
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
     static constexpr index_t NPerBlock = BlockGemmShape::kN;
     static constexpr index_t KPerBlock = BlockGemmShape::kK;
+#if defined(__gfx950__)
+    static constexpr bool is_a_load_tr = std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
+    static constexpr bool is_b_load_tr = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
+#else
+    static constexpr bool is_a_load_tr = false;
+    static constexpr bool is_b_load_tr = false;
+#endif
 
     CK_TILE_HOST_DEVICE static constexpr auto TransposeC() { return Problem::TransposeC; }
 
@@ -87,14 +94,25 @@ struct GemmPipelineAgBgCrImplBase
                              Policy::template MakeADramTileDistribution<Problem>());
 
         // A LDS tile window for store
-        auto a_copy_lds_window = make_tile_window(
-            a_lds_block_view, make_tuple(number<MPerBlock>{}, number<KPerBlock>{}), {0, 0});
+        auto a_lds_shape = []() {
+            if constexpr(is_a_load_tr)
+                return make_tuple(number<KPerBlock>{}, number<MPerBlock>{});
+            else
+                return make_tuple(number<MPerBlock>{}, number<KPerBlock>{});
+        }();
+        auto a_copy_lds_window = make_tile_window(a_lds_block_view, a_lds_shape, {0, 0});
 
+        auto a_lds_load_tile_distr = []() {
+            if constexpr(is_a_load_tr)
+                return make_static_tile_distribution(
+                    typename InputTileDistributionTraits<
+                        typename ALdsLoadTileDistr::DstrEncode,
+                        typename Problem::ADataType>::TransposedDstrEncode{});
+            else
+                return ALdsLoadTileDistr{};
+        }();
         auto a_lds_gemm_window =
-            make_tile_window(a_lds_block_view,
-                             make_tuple(number<MPerBlock>{}, number<KPerBlock>{}),
-                             {0, 0},
-                             ALdsLoadTileDistr{});
+            make_tile_window(a_lds_block_view, a_lds_shape, {0, 0}, a_lds_load_tile_distr);
 
         return make_tuple(std::move(a_copy_dram_window),
                           std::move(a_copy_lds_window),
@@ -121,14 +139,25 @@ struct GemmPipelineAgBgCrImplBase
         // TODO: Do we really need those two tile windows???
         // They're exactly same...
         // B LDS tile window for store
-        auto b_copy_lds_window = make_tile_window(
-            b_lds_block_view, make_tuple(number<NPerBlock>{}, number<KPerBlock>{}), {0, 0});
+        auto b_lds_shape = []() {
+            if constexpr(is_b_load_tr)
+                return make_tuple(number<NPerBlock>{}, number<KPerBlock>{});
+            else
+                return make_tuple(number<KPerBlock>{}, number<NPerBlock>{});
+        }();
+        auto b_copy_lds_window = make_tile_window(b_lds_block_view, b_lds_shape, {0, 0});
 
+        auto b_lds_load_tile_distr = []() {
+            if constexpr(is_b_load_tr)
+                return make_static_tile_distribution(
+                    typename InputTileDistributionTraits<
+                        typename BLdsLoadTileDistr::DstrEncode,
+                        typename Problem::BDataType>::TransposedDstrEncode{});
+            else
+                return BLdsLoadTileDistr{};
+        }();
         auto b_lds_gemm_window =
-            make_tile_window(b_lds_block_view,
-                             make_tuple(number<NPerBlock>{}, number<KPerBlock>{}),
-                             {0, 0},
-                             BLdsLoadTileDistr{});
+            make_tile_window(b_lds_block_view, b_lds_shape, {0, 0}, b_lds_load_tile_distr);
 
         return make_tuple(std::move(b_copy_dram_window),
                           std::move(b_copy_lds_window),
