@@ -221,6 +221,7 @@ int run_gemm_example_prec_type(std::string a_layout, std::string b_layout, int a
 
     if constexpr(std::is_same_v<BPrecType, ck_tile::pk_int4_t>)
     {
+#if 0
         if(a_layout == "R" && b_layout == "C")
         {
             return run_gemm_example_with_layouts<GemmConfig, APrecType, BPrecType, CPrecType>(
@@ -236,6 +237,7 @@ int run_gemm_example_prec_type(std::string a_layout, std::string b_layout, int a
             throw std::runtime_error("Unsupported memory layout for the input matrices when "
                                      "BPrecType is ck_tile::pk_int4_t!");
         }
+#endif
     }
     else
     {
@@ -244,6 +246,7 @@ int run_gemm_example_prec_type(std::string a_layout, std::string b_layout, int a
             return run_gemm_example_with_layouts<GemmConfig, APrecType, BPrecType, CPrecType>(
                 argc, argv, Row{}, Row{}, Row{});
         }
+#if 0
         else if(a_layout == "R" && b_layout == "C")
         {
             return run_gemm_example_with_layouts<GemmConfig, APrecType, BPrecType, CPrecType>(
@@ -259,6 +262,7 @@ int run_gemm_example_prec_type(std::string a_layout, std::string b_layout, int a
             return run_gemm_example_with_layouts<GemmConfig, APrecType, BPrecType, CPrecType>(
                 argc, argv, Col{}, Col{}, Row{});
         }
+#endif
         else
         {
             throw std::runtime_error("Unsupported memory layout for the input matrices!");

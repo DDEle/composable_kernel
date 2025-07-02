@@ -98,7 +98,7 @@ template <typename PrecType>
 struct GemmConfigComputeV3 : public GemmConfigBase
 {
     // Compute V3 only support Intrawave scheduler
-    static constexpr ck_tile::index_t M_Tile = 256;
+    static constexpr ck_tile::index_t M_Tile = 64;
     static constexpr ck_tile::index_t N_Tile = 256;
     static constexpr ck_tile::index_t K_Tile = 64 / sizeof(PrecType);
 
