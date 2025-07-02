@@ -66,6 +66,7 @@ struct BaseGemmPipelineAgBgCrCompV3
         }
         else
         {
+#if 0
             if(tail_number == TailNumber::Odd)
             {
                 return run_func(bool_constant<false>{},
@@ -76,6 +77,7 @@ struct BaseGemmPipelineAgBgCrCompV3
                 return run_func(bool_constant<false>{},
                                 integral_constant<TailNumber, TailNumber::Even>{});
             }
+#endif
         }
 #if defined(__HIP_DEVICE_COMPILE__)
         // This path should be unreachable in device code if tail_number is valid.
@@ -462,7 +464,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             tile_elementwise_inout([](auto& c) { c = 0; }, c_block_tile);
 
             // LDS write 0
-            if constexpr(is_a_col_major)
+            if constexpr(is_a_col_major && !PipelineImplBase::is_a_load_tr)
             {
                 auto a_shuffle_tmp = make_static_distributed_tensor<ADataType>(
                     Policy::template MakeShuffledARegTileDistribution<Problem>());
@@ -473,7 +475,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             {
                 Base::LocalPrefill(a_copy_lds_window, a_block_tile, a_element_func);
             }
-            if constexpr(is_b_row_major)
+            if constexpr(is_b_row_major && !PipelineImplBase::is_b_load_tr)
             {
                 auto b_shuffle_tmp = make_static_distributed_tensor<BDataType>(
                     Policy::template MakeShuffledBRegTileDistribution<Problem>());
@@ -489,7 +491,10 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
 
             block_sync_lds();
-            block_gemm.LocalPrefetch(a_lds_gemm_window, b_lds_gemm_window);
+            block_gemm.LocalPrefetch(a_lds_gemm_window,
+                                     b_lds_gemm_window,
+                                     bool_constant<PipelineImplBase::is_a_load_tr>{},
+                                     bool_constant<PipelineImplBase::is_b_load_tr>{});
 
             __builtin_amdgcn_sched_barrier(0);
 
@@ -501,7 +506,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                 {
                     block_sync_lds();
 
-                    if constexpr(is_a_col_major)
+                    if constexpr(is_a_col_major && !PipelineImplBase::is_a_load_tr)
                     {
                         auto a_shuffle_tmp = make_static_distributed_tensor<ADataType>(
                             Policy::template MakeShuffledARegTileDistribution<Problem>());
@@ -512,7 +517,7 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                     {
                         Base::LocalPrefill(a_copy_lds_window, a_block_tile, a_element_func);
                     }
-                    if constexpr(is_b_row_major)
+                    if constexpr(is_b_row_major && !PipelineImplBase::is_b_load_tr)
                     {
                         auto b_shuffle_tmp = make_static_distributed_tensor<BDataType>(
                             Policy::template MakeShuffledBRegTileDistribution<Problem>());
@@ -531,7 +536,10 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
 
                     block_sync_lds();
 
-                    block_gemm.LocalPrefetch(a_lds_gemm_window, b_lds_gemm_window);
+                    block_gemm.LocalPrefetch(a_lds_gemm_window,
+                                             b_lds_gemm_window,
+                                             bool_constant<PipelineImplBase::is_a_load_tr>{},
+                                             bool_constant<PipelineImplBase::is_b_load_tr>{});
                     HotLoopScheduler();
                     __builtin_amdgcn_sched_barrier(0);
 
@@ -573,7 +581,10 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
                     Base::LocalPrefill(b_copy_lds_window, b_block_tile, b_element_func);
                 }
                 block_sync_lds();
-                block_gemm.LocalPrefetch(a_lds_gemm_window, b_lds_gemm_window);
+                block_gemm.LocalPrefetch(a_lds_gemm_window,
+                                         b_lds_gemm_window,
+                                         bool_constant<PipelineImplBase::is_a_load_tr>{},
+                                         bool_constant<PipelineImplBase::is_b_load_tr>{});
                 block_gemm(c_block_tile, a_lds_gemm_window, b_lds_gemm_window);
             }
             // __builtin_amdgcn_sched_barrier(0);
