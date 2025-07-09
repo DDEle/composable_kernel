@@ -33,7 +33,7 @@ fi
 branch=$(git rev-parse --abbrev-ref HEAD)
 
 # Run the command
-python3 "$SCRIPT_DIR/dependency-parser/main.py" select "$JSON_FILE" origin/develop $branch
+python3 "$SCRIPT_DIR/dependency-parser/main.py" select "$JSON_FILE" origin/develop $branch --all
 
 # Path to tests_to_run.json in the same directory
 TEST_FILE="tests_to_run.json"
@@ -54,6 +54,6 @@ with open('$TEST_FILE', 'r') as f:
 
 echo "$command"
 
-eval "$command"
+# eval "$command"
 
 
