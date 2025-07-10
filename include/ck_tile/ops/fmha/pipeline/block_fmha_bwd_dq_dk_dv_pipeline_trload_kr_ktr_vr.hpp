@@ -439,6 +439,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             decltype(load_tile(do_lds_read_window)) do_reg_tensor;
             decltype(load_tile(d_lds_read_window)) d;
             decltype(gemm_2.MakeCBlockTile()) dp_acc, ds;
+            decltype(cast_tile<GemmDataType>(ds)) ds_gemm;
+            decltype(gemm_0(q_reg_tensor, k_reg_tensor)) s_acc, p;
+
             decltype(load_tile_transpose(qt_lds_read_window)) qt_reg_tensor;
             decltype(load_tile(lse_dram_window)) lse_block_tile;
 
@@ -447,7 +450,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             static_assert(is_prologue || is_epilogue, "is_prologue or is_epilogue should be true");
             if constexpr(is_epilogue)
             {
-                __builtin_amdgcn_s_waitcnt(3952);
+                __builtin_amdgcn_s_waitcnt(CK_TILE_S_CNT_MAX & CK_TILE_VMCNT(0));
                 block_sync_lds();
 
                 q_reg_tensor = load_tile(q_lds_read_window);
@@ -459,7 +462,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 do_reg_tensor = load_tile(do_lds_read_window);
 
                 // STAGE 1, Q@K Gemm0
-                auto s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
+                s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
+
+                auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
 
                 // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -509,7 +514,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                     }
                 }
 
-                auto p                 = decltype(s_acc){};
                 constexpr auto p_spans = decltype(p)::get_distributed_spans();
                 sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
@@ -552,26 +556,22 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
                 // STAGE 3, P^T@OGrad^T Gemm1
 
-                __builtin_amdgcn_s_waitcnt(3952);
-                block_sync_lds();
-
-                // __builtin_amdgcn_s_barrier();
-                // __builtin_amdgcn_sched_barrier(0);
-                auto dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
-
                 auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
                     Policy::template MakePTRegSliceBlockDescriptor<Problem>());
                 pt_reg_tensor.get_thread_buffer() = p_gemm.get_thread_buffer();
                 gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
-
-                // __builtin_amdgcn_s_barrier();
-                // __builtin_amdgcn_sched_barrier(0);
-                // STAGE 4, OGrad@V Gemm2
                 __builtin_amdgcn_s_waitcnt(3952);
                 block_sync_lds();
+            }
+
+            if constexpr(is_epilogue)
+            {
+                // STAGE 4, OGrad@V Gemm2
                 d = load_tile(d_lds_read_window);
 
                 dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
+
+                qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
 
                 // STAGE 5, P^T(PGrad^T - D)
                 constexpr auto ds_spans = decltype(ds)::get_distributed_spans();
@@ -613,39 +613,60 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                     move_tile_window(dbias_dram_window, {kM0, 0});
                     __builtin_amdgcn_sched_barrier(0);
                 }
+            }
 
-                // STAGE 6, SGrad^T@Q^T Gemm3
-                qt_reg_tensor = load_tile_transpose(qt_lds_read_window);
+            if constexpr(is_epilogue)
+            {
                 __builtin_amdgcn_s_waitcnt(3952);
                 block_sync_lds();
+            }
+
+            if constexpr(is_prologue)
+            {
+                async_load_tile(do_lds_write_window, do_dram_window);
+                move_tile_window(do_dram_window, {kM0, 0});
+            }
+
+            if constexpr(is_prologue)
+            {
+                lse_block_tile = load_tile(lse_dram_window);
+                move_tile_window(lse_dram_window, {kM0});
             }
             if constexpr(is_prologue)
             {
                 async_load_tile(q_lds_write_window, q_dram_window);
                 move_tile_window(q_dram_window, {kM0, 0});
-
-                lse_block_tile = load_tile(lse_dram_window);
-                move_tile_window(lse_dram_window, {kM0});
-                store_tile(lse_lds_write_window, lse_block_tile);
-
-                async_load_tile(do_lds_write_window, do_dram_window);
-                move_tile_window(do_dram_window, {kM0, 0});
             }
+            if constexpr(is_prologue)
+            {
+                store_tile(lse_lds_write_window, lse_block_tile);
+            }
+
             if constexpr(is_epilogue)
             {
-                const auto ds_gemm  = cast_tile<GemmDataType>(ds);
+                ds_gemm = cast_tile<GemmDataType>(ds);
+                store_tile(ds_lds_window, ds_gemm);
+            }
+
+            if constexpr(is_epilogue)
+            {
+                // STAGE 6, SGrad^T@Q^T Gemm3
                 auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
                     Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
                 dst_reg_tensor.get_thread_buffer() = ds_gemm.get_thread_buffer();
                 gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
+            }
 
-                store_tile(ds_lds_window, ds_gemm);
-                __builtin_amdgcn_s_waitcnt(3952);
+            if constexpr(is_epilogue)
+            {
                 block_sync_lds();
 
                 ds_reg_tensor = load_tile_transpose(ds_lds_read_window);
                 move_tile_window(ds_lds_read_window, {kK4, 0});
+            }
 
+            if constexpr(is_epilogue)
+            {
                 // STAGE7 SGrad@K^T Gemm4
                 auto dq_acc = decltype(gemm_4.MakeCBlockTile()){};
                 clear_tile(dq_acc);
@@ -670,22 +691,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 move_tile_window(ds_lds_read_window, {-kN0, 0});
                 // QGrad Scale
                 if constexpr(FmhaDropout::IsDropout)
-                {
                     tile_elementwise_inout([&scale_rp_undrop](auto& x) { x = x * scale_rp_undrop; },
                                            dq_acc);
-                }
                 else
-                {
                     tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
-                }
                 if constexpr(kIsDeterministic)
-                {
                     store_tile(dq_dram_window, dq_acc);
-                }
                 else
-                {
                     update_tile(dq_dram_window, dq_acc);
-                }
                 move_tile_window(dq_dram_window, {kM0, 0});
             }
         };
