@@ -51,6 +51,24 @@ class EnhancedNinjaDependencyParser:
         """Parse the ninja build file to extract executable -> object mappings."""
         print("Parsing ninja build file...")
         
+        targets = (
+            subprocess.run(
+                [self.ninja_executable, "-t", "targets", "all"],
+                cwd=self.build_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            .stdout.strip()
+            .split("\n")
+        )
+        targets = [{"target": t.split(": ")[0], "rule": t.split(": ")[1]} for t in targets]
+        objs = [t for t in targets if 'COMPILER' in t["rule"] and t["target"].endswith(('.cpp.o', '.cu.o', '.hip.o'))]
+        import pdb
+        pdb.set_trace()
+
+        
+        
         with open(self.build_file_path, 'r') as f:
             content = f.read()
           # Parse executable build rules
