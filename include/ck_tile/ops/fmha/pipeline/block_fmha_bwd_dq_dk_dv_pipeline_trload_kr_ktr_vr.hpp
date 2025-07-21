@@ -467,6 +467,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             constexpr bool is_prologue = is_prologue_.value;
             constexpr bool is_epilogue = is_epilogue_.value;
             static_assert(is_prologue || is_epilogue, "is_prologue or is_epilogue should be true");
+            constexpr bool is_main_body = is_prologue && is_epilogue;
 
             if constexpr(is_prologue)
             {
@@ -492,6 +493,8 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 dot_lds_read_window.set_bottom_tensor_view_data_ptr(do_lds_ptr_curr);
                 dot_reg_tensor = load_tile_transpose(dot_lds_read_window);
             }
+            if constexpr(is_main_body)
+                Policy::template HotLoopScheduler<Problem>::SchedulerGemm0();
             __builtin_amdgcn_sched_barrier(0);
             if constexpr(is_epilogue)
             {
