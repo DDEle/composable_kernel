@@ -1118,6 +1118,189 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
 
         return max(smem_size_stage0, smem_size_stage1);
     }
+
+    template <typename Problem>
+    class HotLoopScheduler
+    {
+        static constexpr index_t kBlockSize = Problem::kBlockSize;
+        static constexpr index_t kM0        = Problem::BlockFmhaShape::kM0;
+        static constexpr index_t kN0        = Problem::BlockFmhaShape::kN0;
+        static constexpr index_t kQKHeaddim = Problem::BlockFmhaShape::kQKHeaddim;
+        static constexpr index_t kVHeaddim  = Problem::BlockFmhaShape::kVHeaddim;
+        static constexpr index_t kK0        = Problem::BlockFmhaShape::kK0;
+        static constexpr index_t kK2        = Problem::BlockFmhaShape::kK2;
+        static constexpr index_t kK4        = Problem::BlockFmhaShape::kK4;
+
+        static constexpr index_t WarpGemmM =
+            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{});
+        static constexpr index_t WarpGemmN =
+            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{});
+        static constexpr index_t WarpGemmK =
+            Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{});
+        static constexpr index_t Gemm4MWarp =
+            Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<0>{});
+        static constexpr index_t Gemm4NWarp =
+            Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<1>{});
+
+        static constexpr index_t blockWarps = kBlockSize / get_warp_size();
+
+        // Compute
+        static constexpr index_t Gemm0MFMA =
+            kM0 * kN0 * kK0 / (blockWarps * WarpGemmM * WarpGemmN * WarpGemmK);
+        static constexpr index_t Gemm1MFMA =
+            kN0 * kVHeaddim * kM0 / (blockWarps * WarpGemmM * WarpGemmN * WarpGemmK);
+        static constexpr index_t Gemm2MFMA =
+            kM0 * kN0 * kK2 / (blockWarps * WarpGemmM * WarpGemmN * WarpGemmK);
+        static constexpr index_t Gemm3MFMA =
+            kN0 * kQKHeaddim * kM0 / (blockWarps * WarpGemmM * WarpGemmN * WarpGemmK);
+        static constexpr index_t Gemm4MFMA =
+            kM0 * kQKHeaddim * kN0 / (blockWarps * WarpGemmM * WarpGemmN * WarpGemmK);
+
+        // VMEM
+        static constexpr index_t Q_VMEM_READ =
+            kM0 * kQKHeaddim / kBlockSize / GetAlignmentQ<Problem>();
+        static constexpr index_t OGrad_VMEM_READ =
+            kM0 * kVHeaddim / kBlockSize / GetAlignmentOGrad<Problem>();
+        static constexpr index_t LSE_VMEM_READ = 1;
+        static constexpr index_t D_VMEM_READ   = 1;
+
+        // LDS Read
+        static constexpr index_t OGradT_LDS_READ =
+            kM0 * kVHeaddim / get_warp_size() / GetTransposedAlignmentOGrad<Problem>();
+        static constexpr index_t QT_LDS_READ =
+            kM0 * kQKHeaddim / get_warp_size() / GetTransposedAlignmentQ<Problem>();
+        // static constexpr index_t SGradT_LDS_READ_P1 =
+        //     kM0 * kK4 / (get_warp_size() * Gemm4MWarp) / GetSmemKPackSGrad<Problem>();
+        static constexpr index_t Q_LDS_READ   = kM0 * kK0 / kBlockSize / GetAlignmentQ<Problem>();
+        static constexpr index_t LSE_LDS_READ = WarpGemmM == 16 ? kM0 / (4 * 4) : kM0 / (2 * 4);
+        // static constexpr index_t SGradT_LDS_READ_P2 =
+        //     kM0 * (kN0 - kK4) / (get_warp_size() * Gemm4MWarp) / GetSmemKPackSGrad<Problem>();
+        static constexpr index_t OGrad_LDS_READ =
+            kM0 * kK2 / kBlockSize / GetAlignmentOGrad<Problem>();
+        static constexpr index_t D_LDS_READ = WarpGemmM == 16 ? kM0 / (4 * 4) : kM0 / (2 * 4);
+
+        // LDS Write
+        static constexpr index_t Q_LDS_WRITE =
+            kM0 * kQKHeaddim / Problem::kBlockSize / GetAlignmentQ<Problem>();
+        static constexpr index_t QT_LDS_WRITE =
+            kM0 * kQKHeaddim / kBlockSize / GetTransposedAlignmentQ<Problem>();
+        static constexpr index_t OGrad_LDS_WRITE =
+            kM0 * kVHeaddim / kBlockSize / GetAlignmentOGrad<Problem>();
+        static constexpr index_t OGradT_LDS_WRITE =
+            kM0 * kVHeaddim / kBlockSize / GetTransposedAlignmentOGrad<Problem>();
+        static constexpr index_t LSE_LDS_WRITE    = 1;
+        static constexpr index_t D_LDS_WRITE      = 1;
+        static constexpr index_t SGradT_LDS_WRITE = kM0 * kN0 / kBlockSize;
+
+        public:
+        static CK_TILE_DEVICE constexpr void SchedulerGemm0()
+        {
+
+            // Mem: Q, LSE, OGrad, D global load, OGrad^T LDS load
+            // Comp: Q x K
+            constexpr index_t VMEM_READ_INST =
+                Q_VMEM_READ + OGrad_VMEM_READ + LSE_VMEM_READ + D_VMEM_READ;
+            constexpr index_t MFMA_INST     = Gemm0MFMA;
+            constexpr index_t LDS_READ_INST = OGradT_LDS_READ;
+
+            constexpr index_t lcm_inst = lcm(VMEM_READ_INST, MFMA_INST, LDS_READ_INST);
+            CK_PRINT<VMEM_READ_INST, MFMA_INST, LDS_READ_INST, lcm_inst>();
+            static_for<0, lcm_inst, 1>{}([&](auto i) {
+                if constexpr(i % (lcm_inst / VMEM_READ_INST) == 0)
+                    __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                if constexpr(i % (lcm_inst / LDS_READ_INST) == 0)
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+            });
+        }
+
+        CK_TILE_DEVICE constexpr void SchedulerGemm1()
+        {
+            // Mem:  Q^T LDS load
+            // Comp: OGrad x V
+            constexpr index_t LDS_READ_INST = QT_LDS_READ;
+            constexpr index_t MFMA_INST     = Gemm1MFMA;
+
+            // To hide instruction issue latency
+            constexpr index_t LDS_READ_PER_MFMA = LDS_READ_INST / MFMA_INST;
+
+            static_for<0, MFMA_INST, 1>{}([&](auto i) {
+                ignore = i;
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS read
+            });
+        }
+
+        // CK_TILE_DEVICE constexpr void SchedulerGemm2()
+        // {
+        //     // Mem: Q, QT, LSE, OGrad, OGradT, D, LDS store
+        //     // Comp: PT x OGrad
+        //     constexpr index_t LDS_WRITE_INST = Q_LDS_WRITE + QT_LDS_WRITE + OGrad_LDS_WRITE +
+        //                                        OGradT_LDS_WRITE + LSE_LDS_WRITE + D_LDS_WRITE;
+        //     constexpr index_t MFMA_INST = Gemm2MFMA;
+
+        //     // To hide instruction issue latency
+        //     constexpr index_t LDS_WRITE_PER_MFMA = LDS_WRITE_INST / MFMA_INST;
+
+        //     static_for<0, MFMA_INST, 1>{}([&](auto i) {
+        //         ignore = i;
+        //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                  // MFMA
+        //         __builtin_amdgcn_sched_group_barrier(0x200, LDS_WRITE_PER_MFMA, 0); // DS write
+        //     });
+        // }
+
+        // CK_TILE_DEVICE constexpr void SchedulerGemm3()
+        // {
+        //     // Mem: SGradT LDS store, SGrad, Q, LSE LDS load.
+        //     // Comp: SGradT x QT
+        //     constexpr index_t LDS_WRITE_INST = SGradT_LDS_WRITE;
+        //     constexpr index_t LDS_READ_INST  = SGradT_LDS_READ_P1 + Q_LDS_READ + LSE_LDS_READ;
+        //     constexpr index_t MFMA_INST      = Gemm3MFMA;
+
+        //     // To hide instruction issue latency
+        //     constexpr index_t LDS_WRITE_PER_MFMA =
+        //         LDS_WRITE_INST / MFMA_INST >= 1 ? LDS_WRITE_INST / MFMA_INST : 1;
+        //     constexpr index_t MFMA_INST_LDS_WRITE = LDS_WRITE_INST / LDS_WRITE_PER_MFMA;
+
+        //     constexpr index_t LDS_READ_PER_MFMA =
+        //         (MFMA_INST - MFMA_INST_LDS_WRITE) > 0
+        //             ? LDS_READ_INST / (MFMA_INST - MFMA_INST_LDS_WRITE) > 0
+        //                   ? LDS_READ_INST / (MFMA_INST - MFMA_INST_LDS_WRITE)
+        //                   : 1
+        //             : 0;
+
+        //     static_for<0, MFMA_INST_LDS_WRITE, 1>{}([&](auto i) {
+        //         ignore = i;
+        //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                  // MFMA
+        //         __builtin_amdgcn_sched_group_barrier(0x200, LDS_WRITE_PER_MFMA, 0); // DS Write
+        //     });
+
+        //     static_for<0, MFMA_INST - MFMA_INST_LDS_WRITE, 1>{}([&](auto i) {
+        //         ignore = i;
+        //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA
+        //         __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS Read
+        //     });
+        // }
+
+        // CK_TILE_DEVICE constexpr void SchedulerGemm4()
+        // {
+        //     // Mem: SGrad, OGrad, D LDS load.
+        //     // Comp: SGrad x KT
+        //     constexpr index_t LDS_READ_INST = SGradT_LDS_READ_P2 + OGrad_LDS_READ + D_LDS_READ;
+        //     constexpr index_t MFMA_INST     = Gemm4MFMA;
+
+        //     // To hide instruction issue latency
+        //     constexpr index_t LDS_READ_PER_MFMA =
+        //         LDS_READ_INST / MFMA_INST > 0 ? LDS_READ_INST / MFMA_INST : 1;
+
+        //     static_for<0, MFMA_INST, 1>{}([&](auto i) {
+        //         ignore = i;
+        //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA
+        //         __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS Read
+        //     });
+        // }
+    };
 };
 
 } // namespace ck_tile
