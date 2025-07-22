@@ -1,2 +1,0 @@
-#!/bin/bash
-${CLANG_BIN_PATH} ${CLANG_FLAGS_EXTRA_BEFORE} $@

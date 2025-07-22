@@ -89,6 +89,70 @@ class EnhancedNinjaDependencyParser:
         # Parse executable build rules
         exe_pattern = r"^build (bin/[^:]+):\s+\S+\s+([^|]+)"
         obj_pattern = r"^build ([^:]+\.(?:cpp|cu|hip)\.o):\s+\S+\s+([^\s|]+)"
+        
+        targets = (
+            subprocess.run(
+                [self.ninja_executable, "-t", "targets", "all"],
+                cwd=self.build_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            .stdout.strip()
+            .split("\n")
+        )
+        targets = [{"target": t.split(": ")[0], "rule": t.split(": ")[1]} for t in targets]
+        exes = [t for t in targets if 'EXECUTABLE' in t["rule"]]
+        objs = [t for t in targets if 'COMPILER' in t["rule"] and t["target"].endswith(('.cpp.o', '.cu.o', '.hip.o'))]
+
+        import yaml
+
+        exes_query_resuts = ''
+        for i in range(0, len(exes), 100):
+            print(f"Querying executables {i} to {i+100} of {len(exes)}")
+            exes_query_resuts += "\n" + subprocess.run(
+                [self.ninja_executable, "-t", "query"] + [t["target"] for t in exes[i:i+100]],
+                cwd=self.build_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout
+        exes_query_resuts = yaml.safe_load(exes_query_resuts)
+        exes_inputs = {}  # without implicit dependencies and order-only dependencies
+        for t in exes_query_resuts:
+            inputs:str = exes_query_resuts[t]['input']
+            inputs = inputs.split('|')[0]  # remove implicit dependencies and later
+            inputs = inputs.strip().split()[1:] # remove rule name
+            exes_inputs[t] = inputs
+
+        objs_deps_results = ''
+        for i in range(0, len(objs), 100):
+            print(f"Querying object files {i} to {i+100} of {len(objs)}")
+            objs_deps_results += "\n" + subprocess.run(
+                [self.ninja_executable, "-t", "deps"] + [t["target"] for t in objs[i:i+100]],
+                cwd=self.build_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout
+        objs_deps_results = yaml.safe_load(objs_deps_results)
+        objs_deps = {}
+        for t in objs_deps_results:
+            objs_deps[t] = []
+
+            line = line.strip()
+            if line and not line.startswith('#'):
+                # Convert absolute paths to relative paths from workspace root
+                dep_file = line
+                ws_root: str = getattr(self, "workspace_root", "..")
+                ws_prefix = ws_root.rstrip("/") + "/"
+                if dep_file.startswith(ws_prefix):
+                    dep_file = dep_file[len(ws_prefix):]
+                dependencies.append(dep_file)
+
+
+        import pdb
+        pdb.set_trace()
 
         lines = content.split("\n")
 
