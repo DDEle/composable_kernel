@@ -175,20 +175,16 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         return GetAlignmentX<Problem, typename Problem::VGradDataType>();
     }
 
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetTransposedAlignmentQ()
+    // these are for load_tr_b64
+    template <typename T>
+    CK_TILE_HOST_DEVICE static constexpr auto GetTransposedAlignmentX() noexcept
     {
+        return 8 / sizeof(T);
     }
-
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetTransposedAlignmentK()
+    CK_TILE_HOST_DEVICE static constexpr auto GetTransposedAlignmentQ() noexcept
     {
-        constexpr index_t kBlockSize   = Problem::kBlockSize;
-        constexpr index_t kNPerBlock   = Problem::BlockFmhaShape::kN0;
-        constexpr index_t kKPerBlock   = Problem::BlockFmhaShape::kQKHeaddim;
-        constexpr index_t total_pixels = kNPerBlock * kKPerBlock / kBlockSize;
-
-        return total_pixels / GetAlignmentK<Problem>();
+        return GetTransposedAlignmentX<typename Problem::QDataType>();
     }
 
     template <typename Problem>
@@ -892,28 +888,6 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeShuffledOGradRegWriteBlockDescriptor()
-    {
-        constexpr index_t kBlockSize = Problem::kBlockSize;
-
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kVHeaddim;
-
-        constexpr index_t K1 = GetAlignmentOGrad<Problem>();
-        constexpr index_t K0 = kKPerBlock / K1;
-        constexpr index_t N2 = GetTransposedAlignmentOGrad<Problem>();
-        constexpr index_t N1 = get_warp_size() / K0;
-        constexpr index_t N0 = kBlockSize / get_warp_size();
-
-        return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<N0, N1, N2>, sequence<K0, K1>>,
-                                       tuple<sequence<1>, sequence<1, 2>>,
-                                       tuple<sequence<0>, sequence<1, 0>>,
-                                       sequence<2, 1>,
-                                       sequence<1, 2>>{});
-    }
-
-    template <typename Problem>
     CK_TILE_DEVICE static constexpr auto MakeOGradTRegSliceBlockDescriptor()
     {
         using BlockGemm = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
@@ -1143,6 +1117,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             Problem::BlockFmhaShape::Gemm4BlockWarps::at(number<1>{});
 
         static constexpr index_t blockWarps = kBlockSize / get_warp_size();
+        using GemmDataType                  = typename Problem::GemmDataType;
 
         // Compute
         static constexpr index_t Gemm0MFMA =
@@ -1169,15 +1144,17 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             kM0 * kVHeaddim / get_warp_size() / GetTransposedAlignmentOGrad<Problem>();
         static constexpr index_t QT_LDS_READ =
             kM0 * kQKHeaddim / get_warp_size() / GetTransposedAlignmentQ<Problem>();
-        // static constexpr index_t SGradT_LDS_READ_P1 =
-        //     kM0 * kK4 / (get_warp_size() * Gemm4MWarp) / GetSmemKPackSGrad<Problem>();
-        static constexpr index_t Q_LDS_READ   = kM0 * kK0 / kBlockSize / GetAlignmentQ<Problem>();
-        static constexpr index_t LSE_LDS_READ = WarpGemmM == 16 ? kM0 / (4 * 4) : kM0 / (2 * 4);
-        // static constexpr index_t SGradT_LDS_READ_P2 =
-        //     kM0 * (kN0 - kK4) / (get_warp_size() * Gemm4MWarp) / GetSmemKPackSGrad<Problem>();
+        static constexpr index_t SGradT_LDS_READ_P1 =
+            kM0 * kK4 / (get_warp_size() * Gemm4MWarp) / GetTransposedAlignmentX<GemmDataType>();
+        static constexpr index_t SGradT_LDS_READ_P2 =
+            kM0 * kN0 / (get_warp_size() * Gemm4MWarp) / GetTransposedAlignmentX<GemmDataType>() -
+            SGradT_LDS_READ_P1;
+        static constexpr index_t Q_LDS_READ =
+            kM0 * kK0 / get_warp_size() / GetAlignmentQ<Problem>();
+        static constexpr index_t LSE_LDS_READ = kM0 / (4 * 4);
+        static constexpr index_t D_LDS_READ   = LSE_LDS_READ;
         static constexpr index_t OGrad_LDS_READ =
             kM0 * kK2 / kBlockSize / GetAlignmentOGrad<Problem>();
-        static constexpr index_t D_LDS_READ = WarpGemmM == 16 ? kM0 / (4 * 4) : kM0 / (2 * 4);
 
         // LDS Write
         static constexpr index_t Q_LDS_WRITE =
@@ -1193,9 +1170,8 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         static constexpr index_t SGradT_LDS_WRITE = kM0 * kN0 / kBlockSize;
 
         public:
-        static CK_TILE_DEVICE constexpr void SchedulerGemm0()
+        CK_TILE_DEVICE static constexpr void SchedulerGemm0()
         {
-
             // Mem: Q, LSE, OGrad, D global load, OGrad^T LDS load
             // Comp: Q x K
             constexpr index_t VMEM_READ_INST =
@@ -1215,91 +1191,59 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             });
         }
 
-        CK_TILE_DEVICE constexpr void SchedulerGemm1()
+        CK_TILE_DEVICE static constexpr void SchedulerGemm12()
         {
             // Mem:  Q^T LDS load
-            // Comp: OGrad x V
+            // Comp: PT x OGrad
             constexpr index_t LDS_READ_INST = QT_LDS_READ;
-            constexpr index_t MFMA_INST     = Gemm1MFMA;
+            constexpr index_t MFMA_INST     = Gemm1MFMA + Gemm2MFMA;
 
-            // To hide instruction issue latency
-            constexpr index_t LDS_READ_PER_MFMA = LDS_READ_INST / MFMA_INST;
-
-            static_for<0, MFMA_INST, 1>{}([&](auto i) {
-                ignore = i;
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA
-                __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS read
+            constexpr index_t lcm_inst = lcm(MFMA_INST, LDS_READ_INST);
+            static_for<0, lcm_inst, 1>{}([&](auto i) {
+                if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                if constexpr(i % (lcm_inst / LDS_READ_INST) == 0)
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // VMEM read
             });
         }
 
-        // CK_TILE_DEVICE constexpr void SchedulerGemm2()
-        // {
-        //     // Mem: Q, QT, LSE, OGrad, OGradT, D, LDS store
-        //     // Comp: PT x OGrad
-        //     constexpr index_t LDS_WRITE_INST = Q_LDS_WRITE + QT_LDS_WRITE + OGrad_LDS_WRITE +
-        //                                        OGradT_LDS_WRITE + LSE_LDS_WRITE + D_LDS_WRITE;
-        //     constexpr index_t MFMA_INST = Gemm2MFMA;
+        CK_TILE_DEVICE static constexpr void SchedulerGemm3()
+        {
+            // Mem: LSE/D LDS store, SGradT LDS store, SGrad, Q, LSE LDS load.
+            // Comp: SGradT x QT
+            constexpr index_t LDS_WRITE_INST = LSE_LDS_WRITE + D_LDS_WRITE + SGradT_LDS_WRITE;
+            constexpr index_t LDS_READ_INST  = SGradT_LDS_READ_P1 + Q_LDS_READ + LSE_LDS_READ;
+            constexpr index_t MFMA_INST      = Gemm3MFMA;
 
-        //     // To hide instruction issue latency
-        //     constexpr index_t LDS_WRITE_PER_MFMA = LDS_WRITE_INST / MFMA_INST;
+            constexpr index_t lds_rw_inst = LDS_WRITE_INST + LDS_READ_INST;
+            constexpr index_t lcm_inst    = lcm(MFMA_INST, lds_rw_inst);
 
-        //     static_for<0, MFMA_INST, 1>{}([&](auto i) {
-        //         ignore = i;
-        //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                  // MFMA
-        //         __builtin_amdgcn_sched_group_barrier(0x200, LDS_WRITE_PER_MFMA, 0); // DS write
-        //     });
-        // }
+            static_for<0, lcm_inst, 1>{}([&](auto i) {
+                if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                if constexpr(i % (lcm_inst / lds_rw_inst) == 0)
+                    if constexpr(i / (lcm_inst / lds_rw_inst) < LDS_WRITE_INST)
+                        __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS Write
+                    else
+                        __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS Read
+            });
+        }
 
-        // CK_TILE_DEVICE constexpr void SchedulerGemm3()
-        // {
-        //     // Mem: SGradT LDS store, SGrad, Q, LSE LDS load.
-        //     // Comp: SGradT x QT
-        //     constexpr index_t LDS_WRITE_INST = SGradT_LDS_WRITE;
-        //     constexpr index_t LDS_READ_INST  = SGradT_LDS_READ_P1 + Q_LDS_READ + LSE_LDS_READ;
-        //     constexpr index_t MFMA_INST      = Gemm3MFMA;
+        CK_TILE_DEVICE static constexpr void SchedulerGemm4()
+        {
+            // Mem: SGrad, OGrad, D LDS load.
+            // Comp: SGrad x KT
+            constexpr index_t LDS_READ_INST = SGradT_LDS_READ_P2 + OGrad_LDS_READ + D_LDS_READ;
+            constexpr index_t MFMA_INST     = Gemm4MFMA;
 
-        //     // To hide instruction issue latency
-        //     constexpr index_t LDS_WRITE_PER_MFMA =
-        //         LDS_WRITE_INST / MFMA_INST >= 1 ? LDS_WRITE_INST / MFMA_INST : 1;
-        //     constexpr index_t MFMA_INST_LDS_WRITE = LDS_WRITE_INST / LDS_WRITE_PER_MFMA;
-
-        //     constexpr index_t LDS_READ_PER_MFMA =
-        //         (MFMA_INST - MFMA_INST_LDS_WRITE) > 0
-        //             ? LDS_READ_INST / (MFMA_INST - MFMA_INST_LDS_WRITE) > 0
-        //                   ? LDS_READ_INST / (MFMA_INST - MFMA_INST_LDS_WRITE)
-        //                   : 1
-        //             : 0;
-
-        //     static_for<0, MFMA_INST_LDS_WRITE, 1>{}([&](auto i) {
-        //         ignore = i;
-        //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                  // MFMA
-        //         __builtin_amdgcn_sched_group_barrier(0x200, LDS_WRITE_PER_MFMA, 0); // DS Write
-        //     });
-
-        //     static_for<0, MFMA_INST - MFMA_INST_LDS_WRITE, 1>{}([&](auto i) {
-        //         ignore = i;
-        //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA
-        //         __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS Read
-        //     });
-        // }
-
-        // CK_TILE_DEVICE constexpr void SchedulerGemm4()
-        // {
-        //     // Mem: SGrad, OGrad, D LDS load.
-        //     // Comp: SGrad x KT
-        //     constexpr index_t LDS_READ_INST = SGradT_LDS_READ_P2 + OGrad_LDS_READ + D_LDS_READ;
-        //     constexpr index_t MFMA_INST     = Gemm4MFMA;
-
-        //     // To hide instruction issue latency
-        //     constexpr index_t LDS_READ_PER_MFMA =
-        //         LDS_READ_INST / MFMA_INST > 0 ? LDS_READ_INST / MFMA_INST : 1;
-
-        //     static_for<0, MFMA_INST, 1>{}([&](auto i) {
-        //         ignore = i;
-        //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);                 // MFMA
-        //         __builtin_amdgcn_sched_group_barrier(0x100, LDS_READ_PER_MFMA, 0); // DS Read
-        //     });
-        // }
+            constexpr index_t lcm_inst = lcm(MFMA_INST, LDS_READ_INST);
+            static_for<0, lcm_inst, 1>{}([&](auto i) {
+                if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                if constexpr(i % (lcm_inst / LDS_READ_INST) == 0)
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+            });
+        }
     };
 };
 
