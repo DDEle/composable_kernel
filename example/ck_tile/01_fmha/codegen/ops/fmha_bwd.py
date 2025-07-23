@@ -592,6 +592,7 @@ class FmhaBwdApiTrait:
         return (self.bias == 'bias') or ('storerandval' in self.dropout)
 
     def scheck(self, spad1 : str) -> str:
+        return 'true' if (self.spad == 'f' and spad1 == 'f') else 'false'
         if self.mode == 'group':
             return 'true' # always support
         elif self.spad == 't' and spad1 == 't':
@@ -603,6 +604,7 @@ class FmhaBwdApiTrait:
 
     @property
     def skcheck(self) -> str:
+        return 'true' if (self.skpad == 'f') else 'false'
         if self.mode == 'group':
             return 'true' # always support
         elif not self.need_skpad:

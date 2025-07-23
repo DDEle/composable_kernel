@@ -660,9 +660,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             }();
 
             // STAGE 3, P^T@OGrad^T Gemm1
-            Policy::template PTFromGemm0CToGemm1A<Problem,
-                                                  decltype(pt_reg_tensor),
-                                                  decltype(p_gemm)>(pt_reg_tensor, p_gemm);
+            Policy::template PTFromGemm0CToGemm1A<Problem>(pt_reg_tensor, p_gemm);
             gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
 
             auto qt_reg_tensor = load_tile(qt_lds_read_window);
@@ -734,9 +732,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP
             // STAGE 6, SGrad^T@Q^T Gemm3
             const auto ds_gemm = cast_tile<GemmDataType>(ds);
 
-            Policy::template SGradTFromGemm2CToGemm3A<Problem,
-                                                      decltype(dst_reg_tensor),
-                                                      decltype(ds_gemm)>(dst_reg_tensor, ds_gemm);
+            Policy::template SGradTFromGemm2CToGemm3A<Problem>(dst_reg_tensor, ds_gemm);
 
             gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 
