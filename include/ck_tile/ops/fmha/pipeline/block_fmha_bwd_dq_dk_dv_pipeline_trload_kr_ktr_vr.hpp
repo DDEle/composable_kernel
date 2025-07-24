@@ -56,6 +56,11 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
     static constexpr auto BiasEnum         = Problem::BiasEnum;
     static constexpr bool kHasBiasGrad     = Problem::kHasBiasGrad;
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
+    static_assert(!kPadSeqLenK || (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                   FmhaDropout::IsStoreRandval),
+                  "kPadSeqLenK only used when BiasEnum is ELEMENTWISE_BIAS");
+    static constexpr bool kUseTrLoad = Problem::kUseTrLoad;
+    static_assert(kUseTrLoad, "This pipeline uses trload!");
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this

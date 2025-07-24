@@ -66,6 +66,7 @@ struct FmhaBwdDQDKDVKernel
     static_assert(!kPadSeqLenK ||
                       (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kIsStoreRandval),
                   "kPadSeqLenK only used when BiasEnum is ELEMENTWISE_BIAS");
+    static constexpr bool kUseTrLoad = FmhaPipeline::kUseTrLoad;
 
     // clang-format off
     template <typename T> struct t2s;
@@ -104,7 +105,7 @@ struct FmhaBwdDQDKDVKernel
             ("o" + _TS_(kBlockPerCu)) + (pn.empty() ? "_npad" : "_" + pn) +
             (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? _SS_("_nbias") : (_SS_("_") + BlockAttentionBiasEnumToStr<BiasEnum>::name)) +
             (kHasBiasGrad ? "_dbias" : "_ndbias") + (kHasMask ? "_" + _SS_(FmhaMask::name) : "_nmask") + (kHasDropout ? "_dropout" : "_ndropout" ) +
-            (kIsStoreRandval ? "_storerandval" : "" ) + (kIsDeterministic ? "_deterministic" : "_ndeterministic" );
+            (kIsStoreRandval ? "_storerandval" : "" ) + (kIsDeterministic ? "_deterministic" : "_ndeterministic" ) + (kUseTrLoad ? "_trload" : "_ntrload");
         #undef _SS_
         #undef _TS_
         // clang-format on

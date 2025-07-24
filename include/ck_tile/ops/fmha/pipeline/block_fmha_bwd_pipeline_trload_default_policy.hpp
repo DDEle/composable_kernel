@@ -1222,10 +1222,12 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
                 if constexpr(i % (lcm_inst / MFMA_INST) == 0)
                     __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
                 if constexpr(i % (lcm_inst / lds_rw_inst) == 0)
+                {
                     if constexpr(i / (lcm_inst / lds_rw_inst) < LDS_WRITE_INST)
                         __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS Write
                     else
                         __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS Read
+                }
             });
         }
 
