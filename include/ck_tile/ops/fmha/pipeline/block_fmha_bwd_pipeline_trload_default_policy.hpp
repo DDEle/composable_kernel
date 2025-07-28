@@ -467,7 +467,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeKTRegBlockDescriptor()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKTOutputRegBlockDescriptor()
     {
         using BlockGemm = remove_cvref_t<decltype(GetSGradKTBlockGemm<Problem>())>;
         using WarpGemm  = typename BlockGemm::WarpGemm;
@@ -488,43 +488,19 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             tuple<sequence<0, 1>>,
             sequence<1, 2>,
             sequence<0, 0>>{};
-        // CK_PRINT<decltype(kt_block_outer_dstr_encoding)>();
-        // using a = ck_tile::tile_distribution_encoding<
-        //     ck_tile::sequence<1>,
-        //     ck_tile::tuple<ck_tile::sequence<2, 4>, ck_tile::sequence<4>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>>,
-        //     ck_tile::sequence<1, 2>,
-        //     ck_tile::sequence<0, 0>>;
 
         constexpr auto kt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             kt_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
-
-        // CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
-
-        // CK_PRINT<decltype(kt_block_dstr_encode)>();
-        // using b = ck_tile::tile_distribution_encoding<
-        //     ck_tile::sequence<1>,
-        //     ck_tile::tuple<ck_tile::sequence<2, 4, 16>, ck_tile::sequence<4, 2, 4, 4>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 1>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 2>>,
-        //     ck_tile::sequence<1, 2, 2, 2>,
-        //     ck_tile::sequence<0, 0, 1, 3>>;
-
-        auto output =
-            make_static_tile_distribution(typename InputTileDistributionTraits<
-                                          decltype(kt_block_dstr_encode),
-                                          typename Problem::KDataType>::TransposedDstrEncode{});
-        // CK_PRINT<typename InputTileDistributionTraits<
-        //     decltype(kt_block_dstr_encode),
-        //     typename Problem::KDataType>::TransposedDstrEncode>();
-        // using c = ck_tile::tile_distribution_encoding<
-        //     ck_tile::sequence<1>,
-        //     ck_tile::tuple<ck_tile::sequence<4, 2, 4, 4>, ck_tile::sequence<2, 4, 4, 4>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 2>, ck_tile::sequence<1, 1, 2>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 3, 2>>,
-        //     ck_tile::sequence<2, 1, 1, 2>,
-        //     ck_tile::sequence<0, 0, 1, 3>>;
+        return make_static_tile_distribution(kt_block_dstr_encode);
+    }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKTRegBlockDescriptor()
+    {
+        using OutputEncoding =
+            typename decltype(MakeKTOutputRegBlockDescriptor<Problem>())::DstrEncode;
+        auto output = make_static_tile_distribution(
+            typename InputTileDistributionTraits<OutputEncoding, typename Problem::KDataType>::
+                TransposedDstrEncode{});
         return output;
     }
 

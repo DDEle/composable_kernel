@@ -125,7 +125,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         float scale,
         float rp_undrop,
         float scale_rp_undrop,
-        void* smem_ptr,
         FmhaDropout& dropout) const
     {
         static_assert(
@@ -190,95 +189,95 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             }
         }
 
+        decltype(make_static_distributed_tensor<KDataType>(
+            Policy::template MakeKRegBlockDescriptor<Problem>())) k_reg_tensor;
+        decltype(make_static_distributed_tensor<VDataType>(
+            Policy::template MakeVRegBlockDescriptor<Problem>())) v_reg_tensor;
+        decltype(make_static_distributed_tensor<KDataType>(
+            Policy::template MakeKTOutputRegBlockDescriptor<Problem>())) kt_reg_tensor;
+        {
+            __shared__ KDataType
+                k_lds_ptr[Policy::template GetSmemSizeK<Problem>() / sizeof(KDataType)];
+            __shared__ VDataType
+                v_lds_ptr[Policy::template GetSmemSizeV<Problem>() / sizeof(VDataType)];
+
+            auto k_lds = make_tensor_view<address_space_enum::lds>(
+                k_lds_ptr, Policy::template MakeKLdsWriteBlockDescriptor<Problem>());
+            auto k_lds_write_window =
+                make_tile_window(k_lds, make_tuple(number<kN0>{}, number<kQKHeaddim>{}), {0, 0});
+
+            //------------------------------------------------------------------
+            // V, HBM ->LDS ->Reg
+            auto v_dram_window =
+                make_tile_window(Policy::template TransformXDramTensorView<VDataType>(
+                                     v_dram_block_window_tmp.get_bottom_tensor_view()),
+                                 v_dram_block_window_tmp.get_window_lengths(),
+                                 v_dram_block_window_tmp.get_window_origin(),
+                                 Policy::template MakeVDramTileDistribution<Problem>());
+            auto v_lds = make_tensor_view<address_space_enum::lds>(
+                v_lds_ptr, Policy::template MakeVLdsWriteBlockDescriptor<Problem>());
+            auto v_lds_write_window =
+                make_tile_window(v_lds, make_tuple(number<kN0>{}, number<kVHeaddim>{}), {0, 0});
+
+            //------------------------------------------------------------------
+            // KT, HBM -> LDS --trload-->Reg
+            async_load_tile(k_lds_write_window, k_dram_window);
+            async_load_tile(v_lds_write_window, v_dram_window);
+            __builtin_amdgcn_s_waitcnt(3952);
+            block_sync_lds();
+
+            //------------------------------------------------------------------
+            // Pre-Load KV into Registers
+            auto k_lds_read = make_tensor_view<address_space_enum::lds>(
+                k_lds_ptr, Policy::template MakeKLdsReadBlockDescriptor<Problem>());
+            auto k_lds_read_window =
+                make_tile_window(k_lds_read,
+                                 make_tuple(number<kN0>{}, number<kK0>{}),
+                                 k_lds_write_window.get_window_origin(),
+                                 Policy::template MakeKRegBlockDescriptor<Problem>());
+            k_reg_tensor = load_tile(k_lds_read_window);
+
+            auto kt_lds_read_window =
+                make_tile_window(k_lds_read,
+                                 make_tuple(number<kN0>{}, number<kK0>{}),
+                                 {0, 0},
+                                 Policy::template MakeKTRegBlockDescriptor<Problem>());
+
+            kt_reg_tensor = load_tile_transpose(kt_lds_read_window);
+
+            auto v_lds_read = make_tensor_view<address_space_enum::lds>(
+                v_lds_ptr, Policy::template MakeVLdsReadBlockDescriptor<Problem>());
+            auto v_lds_read_window =
+                make_tile_window(v_lds_read,
+                                 make_tuple(number<kN0>{}, number<kK2>{}),
+                                 v_lds_write_window.get_window_origin(),
+                                 Policy::template MakeVRegBlockDescriptor<Problem>());
+            v_reg_tensor = load_tile(v_lds_read_window);
+
+            __builtin_amdgcn_s_waitcnt(3952);
+            block_sync_lds();
+        }
+
         // LDS allocation
-        const auto smem_ptr_ =
-            reinterpret_cast<char*>(smem_ptr); // cast to char* to do pointer arithmetic
-
-        const auto k_lds_ptr = reinterpret_cast<KDataType* __restrict__>(smem_ptr_);
-        const auto v_lds_ptr = reinterpret_cast<VDataType* __restrict__>(
-            smem_ptr_ + Policy::template GetSmemSizeK<Problem>());
-
-        const auto do_lds_ptr0 = reinterpret_cast<OGradDataType* __restrict__>(smem_ptr_);
-        const auto do_lds_ptr1 = reinterpret_cast<OGradDataType* __restrict__>(
-            smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>());
-        const auto q_lds_ptr0 = reinterpret_cast<QDataType* __restrict__>(
-            smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>());
-        const auto q_lds_ptr1 = reinterpret_cast<QDataType* __restrict__>(
-            smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>());
-        const auto lse_lds_ptr = reinterpret_cast<LSEDataType* __restrict__>(
-            smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeQ<Problem>());
-        const auto d_lds_ptr = reinterpret_cast<DDataType* __restrict__>(
-            smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeQ<Problem>() +
-            Policy::template GetSmemSizeLSE<Problem>());
-        const auto ds_lds_ptr = reinterpret_cast<GemmDataType* __restrict__>(
-            smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeQ<Problem>() +
-            Policy::template GetSmemSizeLSE<Problem>() + Policy::template GetSmemSizeD<Problem>());
+        __shared__ OGradDataType
+            do_lds_ptr0[Policy::template GetSmemSizeOGrad<Problem>() / sizeof(OGradDataType)];
+        __shared__ OGradDataType
+            do_lds_ptr1[Policy::template GetSmemSizeOGrad<Problem>() / sizeof(OGradDataType)];
+        __shared__ QDataType
+            q_lds_ptr0[Policy::template GetSmemSizeQ<Problem>() / sizeof(QDataType)];
+        __shared__ QDataType
+            q_lds_ptr1[Policy::template GetSmemSizeQ<Problem>() / sizeof(QDataType)];
+        __shared__ LSEDataType
+            lse_lds_ptr[Policy::template GetSmemSizeLSE<Problem>() / sizeof(LSEDataType)];
+        __shared__ DDataType
+            d_lds_ptr[Policy::template GetSmemSizeD<Problem>() / sizeof(DDataType)];
+        __shared__ GemmDataType ds_lds_ptr[max(Policy::template GetSmemSizeSGrad<Problem>(),
+                                               Policy::template GetSmemSizeBias<Problem>()) /
+                                           sizeof(GemmDataType)];
         const auto bias_lds_ptr = reinterpret_cast<BiasDataType* __restrict__>(ds_lds_ptr);
 
-        auto k_lds = make_tensor_view<address_space_enum::lds>(
-            k_lds_ptr, Policy::template MakeKLdsWriteBlockDescriptor<Problem>());
-        auto k_lds_write_window =
-            make_tile_window(k_lds, make_tuple(number<kN0>{}, number<kQKHeaddim>{}), {0, 0});
+        auto aaaa = Policy::template GetSmemSize<Problem>();
 
-        //------------------------------------------------------------------
-        // V, HBM ->LDS ->Reg
-        auto v_dram_window =
-            make_tile_window(Policy::template TransformXDramTensorView<VDataType>(
-                                 v_dram_block_window_tmp.get_bottom_tensor_view()),
-                             v_dram_block_window_tmp.get_window_lengths(),
-                             v_dram_block_window_tmp.get_window_origin(),
-                             Policy::template MakeVDramTileDistribution<Problem>());
-        auto v_lds = make_tensor_view<address_space_enum::lds>(
-            v_lds_ptr, Policy::template MakeVLdsWriteBlockDescriptor<Problem>());
-        auto v_lds_write_window =
-            make_tile_window(v_lds, make_tuple(number<kN0>{}, number<kVHeaddim>{}), {0, 0});
-
-        //------------------------------------------------------------------
-        // KT, HBM -> LDS --trload-->Reg
-        async_load_tile(k_lds_write_window, k_dram_window);
-        async_load_tile(v_lds_write_window, v_dram_window);
-        __builtin_amdgcn_s_waitcnt(3952);
-        block_sync_lds();
-
-        //------------------------------------------------------------------
-        // Pre-Load KV into Registers
-        auto k_lds_read = make_tensor_view<address_space_enum::lds>(
-            k_lds_ptr, Policy::template MakeKLdsReadBlockDescriptor<Problem>());
-        auto k_lds_read_window =
-            make_tile_window(k_lds_read,
-                             make_tuple(number<kN0>{}, number<kK0>{}),
-                             k_lds_write_window.get_window_origin(),
-                             Policy::template MakeKRegBlockDescriptor<Problem>());
-        auto k_reg_tensor = load_tile(k_lds_read_window);
-
-        auto kt_lds_read_window =
-            make_tile_window(k_lds_read,
-                             make_tuple(number<kN0>{}, number<kK0>{}),
-                             {0, 0},
-                             Policy::template MakeKTRegBlockDescriptor<Problem>());
-
-        auto kt_reg_tensor = load_tile_transpose(kt_lds_read_window);
-
-        auto v_lds_read = make_tensor_view<address_space_enum::lds>(
-            v_lds_ptr, Policy::template MakeVLdsReadBlockDescriptor<Problem>());
-        auto v_lds_read_window =
-            make_tile_window(v_lds_read,
-                             make_tuple(number<kN0>{}, number<kK2>{}),
-                             v_lds_write_window.get_window_origin(),
-                             Policy::template MakeVRegBlockDescriptor<Problem>());
-        auto v_reg_tensor = load_tile(v_lds_read_window);
-
-        __builtin_amdgcn_s_waitcnt(3952);
-        block_sync_lds();
         //---------------------------- Loop Load in ----------------------------//
         // Q: HBM -->LDS
         auto q_dram_window =
@@ -462,12 +461,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         decltype(load_tile(d_dram_window)) d_block_tile;
 
         index_t i_total_bodys = 0;
-        auto main_body        = [&](auto is_prologue_, auto is_epilogue_) mutable {
-            const bool is_even                                = (i_total_bodys % 2 == 0);
-            QDataType* const __restrict__ q_lds_ptr_curr      = is_even ? q_lds_ptr1 : q_lds_ptr0;
-            QDataType* const __restrict__ q_lds_ptr_next      = is_even ? q_lds_ptr0 : q_lds_ptr1;
-            OGradDataType* const __restrict__ do_lds_ptr_curr = is_even ? do_lds_ptr1 : do_lds_ptr0;
-            OGradDataType* const __restrict__ do_lds_ptr_next = is_even ? do_lds_ptr0 : do_lds_ptr1;
+        auto main_body        = [&](auto is_prologue_,
+                             auto is_epilogue_,
+                             auto is_even_ = std::true_type{}) mutable {
+            constexpr bool is_even                            = is_even_.value;
+            QDataType* const __restrict__ q_lds_ptr_curr      = q_lds_ptr1;
+            QDataType* const __restrict__ q_lds_ptr_next      = q_lds_ptr0;
+            OGradDataType* const __restrict__ do_lds_ptr_curr = do_lds_ptr1;
+            OGradDataType* const __restrict__ do_lds_ptr_next = do_lds_ptr0;
 
             constexpr bool is_prologue = is_prologue_.value;
             constexpr bool is_epilogue = is_epilogue_.value;
@@ -735,15 +736,25 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             i_total_bodys += 1;
         };
 
-        main_body(std::true_type{}, std::false_type{});
+        main_body(std::true_type{}, std::false_type{}, std::true_type{});
         // Hot loop
         do
         {
-            main_body(std::true_type{}, std::true_type{});
+            main_body(std::true_type{}, std::true_type{}, std::false_type{});
             i_total_loops += 1;
             seqlen_q_step += kM0;
-        } while(i_total_loops < num_total_loop - 1);
-        main_body(std::false_type{}, std::true_type{});
+            // main_body(std::true_type{}, std::true_type{}, std::true_type{});
+            // i_total_loops += 1;
+            // seqlen_q_step += kM0;
+        } while(i_total_loops < num_total_loop - 2);
+        // if (i_total_loops < num_total_loop - 1) {
+        //     main_body(std::true_type{}, std::true_type{}, std::false_type{});
+        //     i_total_loops += 1;
+        //     seqlen_q_step += kM0;
+        //     main_body(std::false_type{}, std::true_type{}, std::true_type{});
+        // } else{
+        main_body(std::false_type{}, std::true_type{}, std::false_type{});
+        // }
 
         // Results Scale
         if constexpr(FmhaDropout::IsDropout)
