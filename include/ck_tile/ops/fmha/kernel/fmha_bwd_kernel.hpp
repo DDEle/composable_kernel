@@ -658,9 +658,6 @@ struct FmhaBwdDQDKDVKernel
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
-        // allocate LDS
-        __shared__ char smem_ptr[GetSmemSize()];
-
         // divide problem
         const auto [i_tile_n, i_nhead, i_batch] = GetTileIndex();
 
@@ -1068,7 +1065,6 @@ struct FmhaBwdDQDKDVKernel
                                                          kargs.scale,
                                                          rp_undrop,
                                                          scale_rp_undrop,
-                                                         smem_ptr,
                                                          dropout);
 
         auto dk_dram = [&]() {
