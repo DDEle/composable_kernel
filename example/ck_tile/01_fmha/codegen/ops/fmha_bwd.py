@@ -335,6 +335,7 @@ def get_fmha_bwd_dq_dk_dv_tile_ppl_dict_from_dtype(dtype : str) -> Optional[dict
             '32'  : FmhaBwdDQDKDVTileSize( 32, 128,  32, 32,  32, 32, 64,  32,  32, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1),
             '64'  : FmhaBwdDQDKDVTileSize( 32, 128,  64, 32,  64, 32, 32,  64,  64, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
             '128' : FmhaBwdDQDKDVTileSize( 16, 128, 128, 16, 128, 16, 32, 128, 128, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
+            '160' : FmhaBwdDQDKDVTileSize( 32,  64, 160, 32, 160, 32, 32, 160, 160, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1),
             '256' : FmhaBwdDQDKDVTileSize( 16,  64, 256, 16, 256, 16, 32, 256, 256, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
         }
     else:
@@ -739,7 +740,6 @@ def get_bwd_blobs(filter_list: str, receipt, mask_impl, optdim_list) -> Tuple[Fm
                 cond &= bias in ['no', 'bias']
                 cond &= dropout in ['no', 'dropout_wg32',  'dropout_wg16']
                 cond &= dpad == dvpad
-                cond &= mode == 'batch'
                 cond &= deterministic == "f"
                 if not cond:
                     continue
@@ -770,6 +770,8 @@ def get_bwd_blobs(filter_list: str, receipt, mask_impl, optdim_list) -> Tuple[Fm
     return api_pool, list(gen_dot_do_o.keys()), list(gen_dq_dk_dv.keys()), list(gen_convert_dq.keys())
 
 def write_blobs(output_dir : Path, filter_list : str, receipt, optdim_list, mask_impl) -> None:
+    if optdim_list == [-1]:
+        optdim_list = [32, 64, 128, 256]
     api_pool, kernels_dot_do_o,  kernels_dq_dk_dv,  kernels_convert_dq = get_bwd_blobs(filter_list, receipt, mask_impl, optdim_list)
     update_file(output_dir / FMHA_BWD_API_FILENAME, api_pool.api)
     for k in kernels_dot_do_o:
@@ -781,6 +783,8 @@ def write_blobs(output_dir : Path, filter_list : str, receipt, optdim_list, mask
 
 
 def list_blobs(file_path: Path, filter_list: str, receipt, optdim_list, mask_impl) -> None:
+    if optdim_list == [-1]:
+        optdim_list = [32, 64, 128, 256]
     _, kernels_dot_do_o, kernels_dq_dk_dv, kernels_convert_dq = get_bwd_blobs(
         filter_list, receipt, mask_impl, optdim_list
     )
