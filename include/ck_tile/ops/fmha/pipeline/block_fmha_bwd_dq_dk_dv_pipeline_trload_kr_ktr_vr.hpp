@@ -470,19 +470,19 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
             if constexpr(is_prologue)
             {
+                lse_block_tile = load_tile(lse_dram_window);
+                move_tile_window(lse_dram_window, {kM0});
+
+                d_block_tile = load_tile(d_dram_window);
+                move_tile_window(d_dram_window, {kM0});
+
                 q_lds_write_window.set_bottom_tensor_view_data_ptr(q_lds_ptr_next);
                 async_load_tile(q_lds_write_window, q_dram_window);
                 move_tile_window(q_dram_window, {kM0, 0});
 
-                lse_block_tile = load_tile(lse_dram_window);
-                move_tile_window(lse_dram_window, {kM0});
-
                 do_lds_write_window.set_bottom_tensor_view_data_ptr(do_lds_ptr_next);
                 async_load_tile(do_lds_write_window, do_dram_window);
                 move_tile_window(do_dram_window, {kM0, 0});
-
-                d_block_tile = load_tile(d_dram_window);
-                move_tile_window(d_dram_window, {kM0});
             }
             if constexpr(is_epilogue)
             {
@@ -531,6 +531,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                     });
                 }
 
+                // if constexpr(0)
                 {
                     bool need_perpixel_check = mask.IsEdgeTile(
                         seqlen_q_step, k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
