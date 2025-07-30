@@ -2583,7 +2583,16 @@ __device__ auto amd_transpose_load_to_vgpr(const T* in_ptr)
         __attribute__((address_space(3))) llvm_bf16x4_t* lds_ptr =
             reinterpret_cast<__attribute__((address_space(3))) llvm_bf16x4_t*>(
                 reinterpret_cast<uintptr_t>(in_ptr));
+
+#if 1
+        static_assert(N == 4, "N must be 4 for bf16 transpose load");
+        bf16x4_t out;
+        asm volatile("ds_read_b64_tr_b16 %0, %1" : "=v"(out) : "v"(lds_ptr) : "memory");
+        return bit_cast<thread_buffer<T, N>>(out);
+
+#else
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr16_b64_v4bf16(lds_ptr));
+#endif
     }
     else if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::fp8_t> ||
                       std::is_same_v<remove_cvref_t<T>, ck_tile::bf8_t> ||
