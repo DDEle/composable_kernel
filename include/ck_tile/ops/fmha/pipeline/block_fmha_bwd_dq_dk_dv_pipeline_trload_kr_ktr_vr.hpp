@@ -591,17 +591,13 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
                     Policy::template MakePTRegSliceBlockDescriptor<Problem>());
                 pt_reg_tensor.get_thread_buffer() = p_gemm.get_thread_buffer();
+                d                                 = load_tile(d_lds_read_window);
                 gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
             }
             block_sync_lds();
             if constexpr(is_main_body)
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm12();
             __builtin_amdgcn_sched_barrier(0);
-            if constexpr(is_prologue)
-            {
-                store_tile(lse_lds_write_window, lse_block_tile);
-                store_tile(d_lds_write_window, d_block_tile);
-            }
             if constexpr(is_epilogue)
             {
                 // STAGE 5, P^T(PGrad^T - D)
@@ -662,7 +658,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
             {
                 q_lds_read_window.set_bottom_tensor_view_data_ptr(q_lds_ptr_next);
                 q_reg_tensor = load_tile(q_lds_read_window);
-                lse          = load_tile(lse_lds_read_window);
             }
             if constexpr(is_epilogue)
             {
@@ -695,12 +690,17 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 });
                 move_tile_window(ds_lds_read_window, {-kN0, 0});
             }
+            if constexpr(is_prologue)
+            {
+                store_tile(lse_lds_write_window, lse_block_tile);
+                store_tile(d_lds_write_window, d_block_tile);
+            }
             block_sync_lds();
             if constexpr(is_prologue)
             {
                 do_lds_read_window.set_bottom_tensor_view_data_ptr(do_lds_ptr_next);
                 do_reg_tensor = load_tile(do_lds_read_window);
-                d             = load_tile(d_lds_read_window);
+                lse           = load_tile(lse_lds_read_window);
             }
             if constexpr(is_main_body)
                 Policy::template HotLoopScheduler<Problem>::SchedulerGemm4();
