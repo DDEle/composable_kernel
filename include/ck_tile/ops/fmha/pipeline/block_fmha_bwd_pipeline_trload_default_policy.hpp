@@ -352,11 +352,30 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
                                          Problem::BlockFmhaShape::kVHeaddim>();
     }
 
-    template <typename Problem, typename BlockGemm>
+    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLSEDDramTileDistribution()
     {
-        return BlockFmhaBwdPipelineDefaultPolicy::MakeLSEDDramTileDistribution<Problem,
-                                                                               BlockGemm>();
+        using BlockGemm         = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+        constexpr auto config   = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
+        constexpr index_t MWarp = config.template at<1>();
+        constexpr index_t NWarp = config.template at<2>();
+
+        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
+
+        constexpr index_t N0 = MWarp * NWarp;
+
+        constexpr index_t M1 = kMPerBlock;
+        constexpr index_t M0 = get_warp_size() / M1;
+        static_assert(M1 <= get_warp_size() && get_warp_size() % M1 == 0,
+                      "M1 must be a factor of warp size");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<N0, M0>,
+                                       tuple<sequence<M1, 1>>,
+                                       tuple<sequence<0>, sequence<0, 1>>,
+                                       tuple<sequence<0>, sequence<1, 0>>,
+                                       sequence<1>,
+                                       sequence<1>>{});
     }
 
     template <typename Problem>
@@ -796,9 +815,10 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         return lsed_lds_block_desc;
     }
 
-    template <typename Problem, typename BlockGemm>
+    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLSEDLdsReadBlockDescriptor()
     {
+        using BlockGemm         = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
         constexpr auto config   = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
         using WG                = remove_cvref_t<decltype(config.template at<0>())>;
         constexpr index_t MWarp = config.template at<1>();
@@ -1004,14 +1024,15 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeLSE()
     {
         return sizeof(typename Problem::LSEDataType) *
-               MakeLSEDLdsWriteBlockDescriptor<Problem>().get_element_space_size();
+               max(static_cast<index_t>(
+                       MakeLSEDLdsWriteBlockDescriptor<Problem>().get_element_space_size()),
+                   get_warp_size());
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeD()
     {
-        return sizeof(typename Problem::DDataType) *
-               MakeLSEDLdsWriteBlockDescriptor<Problem>().get_element_space_size();
+        return GetSmemSizeLSE<Problem>();
     }
 
     template <typename Problem>
@@ -1058,8 +1079,9 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         constexpr index_t smem_size_bias = GetSmemSizeBias<Problem>();
 
         constexpr index_t smem_size_stage0 = smem_size_k + smem_size_v;
-        constexpr index_t smem_size_stage1 = smem_size_q * 2 + smem_size_do * 2 + smem_size_lse +
-                                             smem_size_d + max(smem_size_bias, smem_size_ds);
+        constexpr index_t smem_size_stage1 = smem_size_q * 2 + smem_size_do * 2 +
+                                             smem_size_lse * 2 + smem_size_d * 2 +
+                                             max(smem_size_bias, smem_size_ds);
         CK_PRINT<smem_size_stage0, smem_size_stage1>();
 
         return max(smem_size_stage0, smem_size_stage1);
@@ -1137,8 +1159,6 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             kM0 * kVHeaddim / kBlockSize / GetAlignmentOGrad<Problem>();
         static constexpr index_t OGradT_LDS_WRITE =
             kM0 * kVHeaddim / kBlockSize / GetTransposedAlignmentOGrad<Problem>();
-        static constexpr index_t LSE_LDS_WRITE    = 1;
-        static constexpr index_t D_LDS_WRITE      = 1;
         static constexpr index_t SGradT_LDS_WRITE = kM0 * kN0 / kBlockSize;
 
         public:
@@ -1149,7 +1169,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             constexpr index_t VMEM_READ_INST =
                 Q_VMEM_READ + OGrad_VMEM_READ + LSE_VMEM_READ + D_VMEM_READ;
             constexpr index_t MFMA_INST     = Gemm0MFMA;
-            constexpr index_t LDS_READ_INST = OGradT_LDS_READ;
+            constexpr index_t LDS_READ_INST = OGradT_LDS_READ + LSE_LDS_READ + D_LDS_READ;
 
             constexpr index_t lcm_inst = lcm(VMEM_READ_INST, MFMA_INST, LDS_READ_INST);
             CK_PRINT<VMEM_READ_INST, MFMA_INST, LDS_READ_INST, lcm_inst>();
@@ -1183,8 +1203,8 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         {
             // Mem: LSE/D LDS store, SGradT LDS store, SGrad, Q, LSE LDS load.
             // Comp: SGradT x QT
-            constexpr index_t LDS_WRITE_INST = LSE_LDS_WRITE + D_LDS_WRITE + SGradT_LDS_WRITE;
-            constexpr index_t LDS_READ_INST  = SGradT_LDS_READ_P1 + Q_LDS_READ + LSE_LDS_READ;
+            constexpr index_t LDS_WRITE_INST = SGradT_LDS_WRITE;
+            constexpr index_t LDS_READ_INST  = SGradT_LDS_READ_P1 + Q_LDS_READ;
             constexpr index_t MFMA_INST      = Gemm3MFMA;
 
             constexpr index_t lds_rw_inst = LDS_WRITE_INST + LDS_READ_INST;
@@ -1207,7 +1227,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         {
             // Mem: SGrad, OGrad, D LDS load.
             // Comp: SGrad x KT
-            constexpr index_t LDS_READ_INST = SGradT_LDS_READ_P2 + OGrad_LDS_READ + D_LDS_READ;
+            constexpr index_t LDS_READ_INST = SGradT_LDS_READ_P2 + OGrad_LDS_READ;
             constexpr index_t MFMA_INST     = Gemm4MFMA;
 
             constexpr index_t lcm_inst = lcm(MFMA_INST, LDS_READ_INST);
