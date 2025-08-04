@@ -2584,7 +2584,7 @@ __device__ auto amd_transpose_load_to_vgpr(const T* in_ptr)
             reinterpret_cast<__attribute__((address_space(3))) llvm_bf16x4_t*>(
                 reinterpret_cast<uintptr_t>(in_ptr));
 
-#if 1
+#if 0
         static_assert(N == 4, "N must be 4 for bf16 transpose load");
         bf16x4_t out;
         asm volatile("ds_read_b64_tr_b16 %0, %1" : "=v"(out) : "v"(lds_ptr) : "memory");
