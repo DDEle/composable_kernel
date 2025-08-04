@@ -188,35 +188,35 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         const auto smem_ptr_ =
             reinterpret_cast<char*>(smem_ptr); // cast to char* to do pointer arithmetic
 
-        const auto k_lds_ptr = reinterpret_cast<KDataType* __restrict__>(smem_ptr_);
-        const auto v_lds_ptr = reinterpret_cast<VDataType* __restrict__>(
+        const auto k_lds_ptr = reinterpret_cast<KDataType*>(smem_ptr_);
+        const auto v_lds_ptr = reinterpret_cast<VDataType*>( //
             smem_ptr_ + Policy::template GetSmemSizeK<Problem>());
 
-        const auto do_lds_ptr0 = reinterpret_cast<OGradDataType* __restrict__>(smem_ptr_);
-        const auto do_lds_ptr1 = reinterpret_cast<OGradDataType* __restrict__>(
+        const auto do_lds_ptr0 = reinterpret_cast<OGradDataType*>(smem_ptr_);
+        const auto do_lds_ptr1 = reinterpret_cast<OGradDataType*>(
             smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>());
-        const auto q_lds_ptr0 = reinterpret_cast<QDataType* __restrict__>(
+        const auto q_lds_ptr0  = reinterpret_cast<QDataType*>( //
             smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeOGrad<Problem>());
-        const auto q_lds_ptr1 = reinterpret_cast<QDataType* __restrict__>(
+        const auto q_lds_ptr1  = reinterpret_cast<QDataType*>( //
             smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeQ<Problem>());
-        const auto lse_lds_ptr = reinterpret_cast<LSEDataType* __restrict__>(
+        const auto lse_lds_ptr = reinterpret_cast<LSEDataType*>(
             smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeQ<Problem>());
-        const auto d_lds_ptr = reinterpret_cast<DDataType* __restrict__>(
+        const auto d_lds_ptr = reinterpret_cast<DDataType*>(
             smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeQ<Problem>() +
             Policy::template GetSmemSizeLSE<Problem>());
-        const auto ds_lds_ptr = reinterpret_cast<GemmDataType* __restrict__>(
+        const auto ds_lds_ptr = reinterpret_cast<GemmDataType*>(
             smem_ptr_ + Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeQ<Problem>() +
             Policy::template GetSmemSizeLSE<Problem>() + Policy::template GetSmemSizeD<Problem>());
-        const auto bias_lds_ptr = reinterpret_cast<BiasDataType* __restrict__>(ds_lds_ptr);
+        const auto bias_lds_ptr = reinterpret_cast<BiasDataType*>(ds_lds_ptr);
 
         auto k_lds = make_tensor_view<address_space_enum::lds>(
             k_lds_ptr, Policy::template MakeKLdsWriteBlockDescriptor<Problem>());
@@ -457,11 +457,11 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
         index_t i_total_bodys = 0;
         auto main_body        = [&](auto is_prologue_, auto is_epilogue_) mutable {
-            const bool is_even                                = (i_total_bodys % 2 == 0);
-            QDataType* const __restrict__ q_lds_ptr_curr      = is_even ? q_lds_ptr1 : q_lds_ptr0;
-            QDataType* const __restrict__ q_lds_ptr_next      = is_even ? q_lds_ptr0 : q_lds_ptr1;
-            OGradDataType* const __restrict__ do_lds_ptr_curr = is_even ? do_lds_ptr1 : do_lds_ptr0;
-            OGradDataType* const __restrict__ do_lds_ptr_next = is_even ? do_lds_ptr0 : do_lds_ptr1;
+            const bool is_even                   = (i_total_bodys % 2 == 0);
+            QDataType* const q_lds_ptr_curr      = is_even ? q_lds_ptr1 : q_lds_ptr0;
+            QDataType* const q_lds_ptr_next      = is_even ? q_lds_ptr0 : q_lds_ptr1;
+            OGradDataType* const do_lds_ptr_curr = is_even ? do_lds_ptr1 : do_lds_ptr0;
+            OGradDataType* const do_lds_ptr_next = is_even ? do_lds_ptr0 : do_lds_ptr1;
 
             constexpr bool is_prologue = is_prologue_.value;
             constexpr bool is_epilogue = is_epilogue_.value;
