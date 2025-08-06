@@ -114,6 +114,35 @@ list(APPEND EXAMPLE_FMHA_BWD_COMPILE_OPTIONS -Wno-float-equal)
 target_compile_options(${EXAMPLE_FMHA_FWD} PRIVATE ${EXAMPLE_FMHA_FWD_COMPILE_OPTIONS})
 target_compile_options(${EXAMPLE_FMHA_BWD} PRIVATE ${EXAMPLE_FMHA_BWD_COMPILE_OPTIONS})
 
+set(EXAMPLE_TIDY_CHECKS
+  -misc-include-cleaner  #IWYU
+  -readability-identifier-length # e.g. f(ck::engine e)
+  -misc-const-correctness
+  -cert-err34-c # atoi
+  -readability-avoid-unconditional-preprocessor-if
+  -performance-enum-size
+  -performance-faster-string-find # v.find(",") => v.find(',')
+  -bugprone-easily-swappable-parameters
+  -modernize-use-nodiscard
+  -modernize-type-traits
+  -readability-static-accessed-through-instance
+  -cppcoreguidelines-avoid-do-while
+  -readability-implicit-bool-conversion
+  -bugprone-reserved-identifier
+  -cppcoreguidelines-macro-to-enum -modernize-macro-to-enum #replace macro with enum
+  -readability-make-member-function-const
+  -performance-no-int-to-ptr
+  -cppcoreguidelines-avoid-const-or-ref-data-members
+  -modernize-unary-static-assert
+  -misc-non-private-member-variables-in-classes
+  -readability-function-cognitive-complexity
+  -readability-named-parameter
+  -modernize-use-auto
+)
+clang_tidy_check(${EXAMPLE_FMHA_FWD} CHECKS ${EXAMPLE_TIDY_CHECKS})
+clang_tidy_check(${EXAMPLE_FMHA_BWD} CHECKS ${EXAMPLE_TIDY_CHECKS})
+
+
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
 # by cmake will print too many files, execvp: /bin/sh: Argument list too long
 # however, this property may affect global

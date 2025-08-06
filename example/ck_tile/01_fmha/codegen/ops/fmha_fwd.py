@@ -61,7 +61,7 @@ using fmha_trait_{F_idx} = ck_tile::TileFmhaTraits<{F_spad},
                                                     {F_occupancy},
                                                     {F_skip}>;
 
-using fmha_variant_{F_idx} = ck_tile::ComposedAttention<{F_logits} * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
+using fmha_variant_{F_idx} = ck_tile::ComposedAttention<static_cast<int>({F_logits}) * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
 
 using fmha_mask_{F_idx} = {F_mask};
 

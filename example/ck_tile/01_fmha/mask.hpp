@@ -37,7 +37,7 @@ struct mask_info
             os << "g(" << y << ":" << x << ")";
         }
     }
-    static mask_info decode(std::string str, ck_tile::index_t seqlen_q, ck_tile::index_t seqlen_k)
+    static mask_info decode(const std::string& str, ck_tile::index_t seqlen_q, ck_tile::index_t seqlen_k)
     {
         ck_tile::index_t x_total = seqlen_k;
         ck_tile::index_t y_total = seqlen_q;

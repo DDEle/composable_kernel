@@ -1,3 +1,31 @@
+Checks: >
+  -*,
+  bugprone-reserved-identifier,
+  cppcoreguidelines-pro-type-cstyle-cast,
+#  bugprone-*,
+#  misc-*,
+#  modernize-*,
+#  performance-*,
+#  portability-*,
+#  readability-*,
+#  cppcoreguidelines-*,
+#  -fuchsia-trailing-return,
+#  -modernize-use-trailing-return-type,
+#  -modernize-concat-nested-namespaces,
+#  -modernize-use-nodiscard,
+#  -modernize-use-using,
+#  -performance-enum-size,
+#  -readability-magic-numbers,
+#  -readability-identifier-length,
+#  -readability-qualified-auto,
+#  -readability-uppercase-literal-suffix,
+#  -readability-avoid-unconditional-preprocessor-if,
+
+WarningsAsErrors: "*"
+HeaderFileExtensions: ['h','hpp']
+
 CheckOptions:
   - key: bugprone-reserved-identifier.AllowedIdentifiers
     value: '__HIP_PLATFORM_HCC__;__HIP_PLATFORM_AMD__;__HIP_ROCclr__'
+  - key: readability-braces-around-statements.ShortStatementLines
+    value: '3'

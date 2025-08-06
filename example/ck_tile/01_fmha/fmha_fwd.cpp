@@ -648,6 +648,7 @@ bool run(const ck_tile::ArgParser& arg_parser)
                                                           ? std::array<ck_tile::index_t, 1>{batch}
                                                           : std::array<ck_tile::index_t, 1>{1});
 
+    // NOLINTBEGIN(clang-analyzer-core.BitwiseShift)
     if(init_method == "ui" || init_method == "0")
     {
         ck_tile::FillUniformDistributionIntegerValue<QDataType>{-3.f, 3.f, seed}(q_host);
@@ -707,6 +708,7 @@ bool run(const ck_tile::ArgParser& arg_parser)
         // Assume bias is in [-1.f, 1.f] in original fp32
         ck_tile::FillUniformDistribution<BiasDataType>{-qscale_bias, qscale_bias, seed}(bias_host);
     }
+    // NOLINTEND(clang-analyzer-core.BitwiseShift)
     if(bias.type == bias_enum::alibi)
     {
         auto slopes = ck_tile::get_alibi_slopes<SaccDataType>(nhead);
@@ -940,6 +942,7 @@ bool run(const ck_tile::ArgParser& arg_parser)
         args.batch_stride_q = batch_stride_q;
         args.batch_stride_k = batch_stride_k;
         args.batch_stride_v = batch_stride_v;
+        args.min_seqlen_q   = 0;
 
         if constexpr(std::is_same_v<fmha_fwd_appendkv_args, std::decay_t<decltype(args)>>)
         {

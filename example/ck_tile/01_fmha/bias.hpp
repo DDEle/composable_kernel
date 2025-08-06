@@ -9,7 +9,7 @@
 #include "ck_tile/ops/fmha.hpp"
 
 // keep sync with BlockAttentionBiasEnum
-enum class bias_enum
+enum class bias_enum: uint8_t
 {
     no_bias          = 0,
     elementwise_bias = 1,
@@ -60,7 +60,7 @@ struct bias_info
         }
     }
 
-    static bias_info decode(std::string str)
+    static bias_info decode(const std::string& str)
     {
         bias_info info{bias_enum::no_bias, 0};
         if(str == "0" || str == "n")

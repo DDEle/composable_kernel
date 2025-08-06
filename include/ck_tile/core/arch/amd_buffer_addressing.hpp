@@ -117,16 +117,20 @@ struct buffer_load<16, pre_nop>
             cast_to_amdgpu_buffer_rsrc_t(res), v_offset, s_offset, 0);
 #else
         if constexpr(pre_nop)
+        {
             asm volatile("s_nop 4\n"
                          "buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
         else
+        {
             asm volatile("buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
                          : "v"(v_offset), "s"(res), "n"(i_offset)
                          : "memory");
+        }
 #endif
     }
 };
