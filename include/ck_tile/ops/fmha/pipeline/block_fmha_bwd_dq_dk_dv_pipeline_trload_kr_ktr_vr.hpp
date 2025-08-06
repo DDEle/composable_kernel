@@ -456,13 +456,12 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         decltype(load_tile(d_dram_window)) d_block_tile;
 
         index_t i_total_bodys = 0;
-        auto main_body        = [&](auto is_prologue_, auto is_epilogue_) mutable {
-            const bool is_even                                = (i_total_bodys % 2 == 0);
-            QDataType* const __restrict__ q_lds_ptr_curr      = is_even ? q_lds_ptr1 : q_lds_ptr0;
-            QDataType* const __restrict__ q_lds_ptr_next      = is_even ? q_lds_ptr0 : q_lds_ptr1;
-            OGradDataType* const __restrict__ do_lds_ptr_curr = is_even ? do_lds_ptr1 : do_lds_ptr0;
-            OGradDataType* const __restrict__ do_lds_ptr_next = is_even ? do_lds_ptr0 : do_lds_ptr1;
-
+        auto main_body_impl   = [&](auto is_prologue_,
+                                  auto is_epilogue_,
+                                  QDataType* const __restrict__ q_lds_ptr_curr,
+                                  QDataType* const __restrict__ q_lds_ptr_next,
+                                  OGradDataType* const __restrict__ do_lds_ptr_curr,
+                                  OGradDataType* const __restrict__ do_lds_ptr_next) mutable {
             constexpr bool is_prologue = is_prologue_.value;
             constexpr bool is_epilogue = is_epilogue_.value;
             static_assert(is_prologue || is_epilogue, "is_prologue or is_epilogue should be true");
@@ -611,8 +610,8 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                         constexpr auto i_j_idx = make_tuple(idx0, idx1);
                         bool undrop_flag       = p[i_j_idx] >= 0;
                         ds(i_j_idx) = p[i_j_idx] * (!FmhaDropout::IsDropout || undrop_flag
-                                                               ? (dp_acc[i_j_idx] - d[i_idx])
-                                                               : d[i_idx]);
+                                                          ? (dp_acc[i_j_idx] - d[i_idx])
+                                                          : d[i_idx]);
                     });
                 });
 
@@ -725,6 +724,20 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 }
                 move_tile_window(dq_dram_window, {kM0, 0});
             }
+        };
+
+        auto main_body = [&](auto is_prologue_, auto is_epilogue_) mutable {
+            const bool is_even         = (i_total_bodys % 2 == 0);
+            const auto q_lds_ptr_curr  = is_even ? q_lds_ptr1 : q_lds_ptr0;
+            const auto q_lds_ptr_next  = is_even ? q_lds_ptr0 : q_lds_ptr1;
+            const auto do_lds_ptr_curr = is_even ? do_lds_ptr1 : do_lds_ptr0;
+            const auto do_lds_ptr_next = is_even ? do_lds_ptr0 : do_lds_ptr1;
+            main_body_impl(is_prologue_,
+                           is_epilogue_,
+                           q_lds_ptr_curr,
+                           q_lds_ptr_next,
+                           do_lds_ptr_curr,
+                           do_lds_ptr_next);
             i_total_bodys += 1;
         };
 
