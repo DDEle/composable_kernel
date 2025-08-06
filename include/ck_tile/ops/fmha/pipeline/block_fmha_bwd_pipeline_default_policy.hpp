@@ -90,13 +90,6 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                                    (Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32)
                                        ? WGAttrNumAccessEnum ::Double
                                        : WGAttrNumAccessEnum ::Single>;
-        // CK_PRINT<int(Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}))>();
-        // CK_PRINT<WarpGemm>();
-        // using a = ck_tile::WarpGemmImpl<ck_tile::WarpGemmAtrributeMfmaTransposedCDistribution<
-        //     ck_tile::WarpGemmAttributeMfmaImplBf16Bf16F32M16N16K16<
-        //         ck_tile::WGAttrCtlEnum::Default_>,
-        //     ck_tile::WGAttrNumAccessEnum::Double>>;
-        // CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::GemmDataType,

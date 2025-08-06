@@ -733,7 +733,7 @@ def get_bwd_blobs(filter_list: str, receipt, mask_impl, optdim_list) -> Tuple[Fm
             if tr_load == "t" and (dpad == "t" or dvpad == "t"):
                 continue  # tr_load cannot work with dpad or dvpad
             t = FmhaBwdApiTrait(idx=0, hdim=hdim, dtype=dtype, mode=mode,tile=tile,mask=mask, bias=bias, dbias=dbias, dropout=dropout, spad=spad, spad1=spad1, dpad=dpad, dvpad=dvpad, deterministic=deterministic, mask_impl=mask_impl, tr_load=tr_load)
-            
+
             if not fnmatch.fnmatch(t.dot_do_o_kernel.name, filter_dot_do_o):
                 continue
             if not fnmatch.fnmatch(t.dq_dk_dv_kernel.name, filter_dq_dk_dv):

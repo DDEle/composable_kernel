@@ -335,10 +335,6 @@ bool run(const ck_tile::ArgParser& arg_parser)
         ck_tile::FillUniformDistributionIntegerValue<VDataType>{-2.f, 2.f, seed}(v_host);
         ck_tile::FillUniformDistributionIntegerValue<BiasDataType>{-2.f, 2.f, seed}(bias_host);
         ck_tile::FillUniformDistributionIntegerValue<OGradDataType>{-2.f, 2.f, seed}(do_host);
-        // do_host.ForEach([](auto& self, auto i /*bhsd*/) {
-        //     if (i[2] >= 32)
-        //         self(i) = self(std::vector<size_t>{i[0], i[1], i[2] - 32, i[3]});
-        // });
     }
     else if(init_method == 1)
     {

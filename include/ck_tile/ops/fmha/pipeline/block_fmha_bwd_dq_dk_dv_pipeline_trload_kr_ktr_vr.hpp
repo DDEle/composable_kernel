@@ -730,12 +730,15 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
         main_body(std::true_type{}, std::false_type{});
         // Hot loop
-        do
+        if(num_total_loop > 1)
         {
-            main_body(std::true_type{}, std::true_type{});
-            i_total_loops += 1;
-            seqlen_q_step += kM0;
-        } while(i_total_loops < num_total_loop - 1);
+            do
+            {
+                main_body(std::true_type{}, std::true_type{});
+                i_total_loops += 1;
+                seqlen_q_step += kM0;
+            } while(i_total_loops < num_total_loop - 1);
+        }
         main_body(std::false_type{}, std::true_type{});
 
         // Results Scale

@@ -488,43 +488,14 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             tuple<sequence<0, 1>>,
             sequence<1, 2>,
             sequence<0, 0>>{};
-        // CK_PRINT<decltype(kt_block_outer_dstr_encoding)>();
-        // using a = ck_tile::tile_distribution_encoding<
-        //     ck_tile::sequence<1>,
-        //     ck_tile::tuple<ck_tile::sequence<2, 4>, ck_tile::sequence<4>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>>,
-        //     ck_tile::sequence<1, 2>,
-        //     ck_tile::sequence<0, 0>>;
 
         constexpr auto kt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             kt_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
-
-        // CK_PRINT<typename WarpGemm::BWarpDstrEncoding>();
-
-        // CK_PRINT<decltype(kt_block_dstr_encode)>();
-        // using b = ck_tile::tile_distribution_encoding<
-        //     ck_tile::sequence<1>,
-        //     ck_tile::tuple<ck_tile::sequence<2, 4, 16>, ck_tile::sequence<4, 2, 4, 4>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 1>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 2>>,
-        //     ck_tile::sequence<1, 2, 2, 2>,
-        //     ck_tile::sequence<0, 0, 1, 3>>;
 
         auto output =
             make_static_tile_distribution(typename InputTileDistributionTraits<
                                           decltype(kt_block_dstr_encode),
                                           typename Problem::KDataType>::TransposedDstrEncode{});
-        // CK_PRINT<typename InputTileDistributionTraits<
-        //     decltype(kt_block_dstr_encode),
-        //     typename Problem::KDataType>::TransposedDstrEncode>();
-        // using c = ck_tile::tile_distribution_encoding<
-        //     ck_tile::sequence<1>,
-        //     ck_tile::tuple<ck_tile::sequence<4, 2, 4, 4>, ck_tile::sequence<2, 4, 4, 4>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 2>, ck_tile::sequence<1, 1, 2>>,
-        //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 3, 2>>,
-        //     ck_tile::sequence<2, 1, 1, 2>,
-        //     ck_tile::sequence<0, 0, 1, 3>>;
         return output;
     }
 
@@ -1088,8 +1059,6 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
         constexpr index_t smem_size_stage0 = smem_size_k + smem_size_v;
         constexpr index_t smem_size_stage1 = smem_size_q * 2 + smem_size_do * 2 + smem_size_lse +
                                              smem_size_d + max(smem_size_bias, smem_size_ds);
-        CK_PRINT<smem_size_stage0, smem_size_stage1>();
-
         return max(smem_size_stage0, smem_size_stage1);
     }
 
@@ -1180,7 +1149,6 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             constexpr index_t LDS_READ_INST = OGradT_LDS_READ;
 
             constexpr index_t lcm_inst = lcm(VMEM_READ_INST, MFMA_INST, LDS_READ_INST);
-            CK_PRINT<VMEM_READ_INST, MFMA_INST, LDS_READ_INST, lcm_inst>();
             static_for<0, lcm_inst, 1>{}([&](auto i) {
                 if constexpr(i % (lcm_inst / VMEM_READ_INST) == 0)
                     __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
