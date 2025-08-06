@@ -285,14 +285,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         auto q_lds = make_tensor_view<address_space_enum::lds>(
             q_lds_ptr0, Policy::template MakeQLdsWriteBlockDescriptor<Problem>());
         auto q_lds_write_window =
-            make_tile_window(q_lds, make_tuple(number<kM0>{}, number<kQKHeaddim>{}), {0, 0});
+            make_tile_window(q_lds, q_lds.get_tensor_descriptor().get_lengths(), {0, 0, 0});
 
         auto q_lds_read = make_tensor_view<address_space_enum::lds>(
             q_lds_ptr0, Policy::template MakeQLdsReadBlockDescriptor<Problem>());
         auto q_lds_read_window =
             make_tile_window(q_lds_read,
                              make_tuple(number<kM0>{}, number<kK0>{}),
-                             q_lds_write_window.get_window_origin(),
+                             {0, 0},
                              Policy::template MakeQRegSliceBlockDescriptor<Problem>());
         auto qt_lds_read_window =
             make_tile_window(q_lds_read,
@@ -476,8 +476,24 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 d_block_tile = load_tile(d_dram_window);
                 move_tile_window(d_dram_window, {kM0});
 
+                __builtin_amdgcn_sched_barrier(0);
+                q_dram_window.init_raw();
+                __builtin_amdgcn_sched_barrier(0);
                 q_lds_write_window.set_bottom_tensor_view_data_ptr(q_lds_ptr_next);
-                async_load_tile(q_lds_write_window, q_dram_window);
+                async_load_tile_raw(q_lds_write_window,
+                                    q_dram_window,
+                                    number<-1>{},
+                                    bool_constant<true>{},
+                                    bool_constant<false>{});
+                __builtin_amdgcn_sched_barrier(0);
+                __builtin_amdgcn_s_waitcnt(0);
+                __builtin_amdgcn_sched_barrier(0);
+
+                // q_lds_read_window.set_bottom_tensor_view_data_ptr(q_lds_ptr_next);
+                // auto tmp = load_tile(q_lds_read_window);
+                // CK_PRINTF<float>{}(tmp);
+                // __builtin_amdgcn_sched_barrier(0);
+
                 move_tile_window(q_dram_window, {kM0, 0});
 
                 do_lds_write_window.set_bottom_tensor_view_data_ptr(do_lds_ptr_next);
@@ -652,6 +668,7 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
                     Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
                 dst_reg_tensor.get_thread_buffer() = ds_gemm.get_thread_buffer();
+                // CK_PRINTF<float>{}(qt_reg_tensor);
                 gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 
                 store_tile(ds_lds_window, ds_gemm);
@@ -731,12 +748,15 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
         main_body(std::true_type{}, std::false_type{});
         // Hot loop
-        do
+        if(num_total_loop > 1)
         {
-            main_body(std::true_type{}, std::true_type{});
-            i_total_loops += 1;
-            seqlen_q_step += kM0;
-        } while(i_total_loops < num_total_loop - 1);
+            do
+            {
+                main_body(std::true_type{}, std::true_type{});
+                i_total_loops += 1;
+                seqlen_q_step += kM0;
+            } while(i_total_loops < num_total_loop - 1);
+        }
         main_body(std::false_type{}, std::true_type{});
 
         // Results Scale

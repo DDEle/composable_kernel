@@ -16,6 +16,7 @@
 #include "ck_tile/core/tensor/tile_window_base.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/core/utility/debug.hpp"
 
 namespace ck_tile {
 
@@ -288,15 +289,25 @@ struct tile_window_with_static_distribution
                 sizeof(LdsDataType) -
             size_per_buf;
 
-        const index_t m0_init_value = size_per_buf + size_per_wave * get_warp_id();
+        // static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
+        //     if(get_thread_id() % 64 == 0)
+        //         printf("tid: %03d; size_per_wave: %d; size_per_issue: %d; m0: %d\n",
+        //                get_thread_id(),
+        //                size_per_wave,
+        //                size_per_issue,
+        //                size_per_buf + size_per_wave * get_warp_id() +
+        //                    iCoordAccess * size_per_issue);
+        // });
+
+        LdsDataType* smem        = lds_tile.get_bottom_tensor_view().get_buffer_view().p_data_;
+        const auto m0_init_value = __builtin_amdgcn_readfirstlane(
+            (reinterpret_cast<uintptr_t>(smem)) + size_per_buf + size_per_wave * get_warp_id());
         m0_set_with_memory(m0_init_value); // This should be wave independent
 
         using Traits = typename Base::Traits;
 
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
-
-        LdsDataType* smem = lds_tile.get_bottom_tensor_view().get_buffer_view().p_data_;
 
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
@@ -312,6 +323,34 @@ struct tile_window_with_static_distribution
                     else
                         return bool_constant<false>{};
                 }();
+
+                // auto x = bottom_tensor_thread_coord.get_hidden_index();
+                // CK_PRINT<decltype(bottom_tensor_thread_coord), decltype(x)>();
+                // printf("tid: %03d; offset %6d;"
+                //        "%3d %3d %3d %3d"
+                //        "%3d %3d %3d %3d"
+                //        "%3d %3d %3d %3d"
+                //        "%3d %3d %3d"
+                //        " \n",
+                //        get_thread_id(),
+                //        bottom_tensor_thread_coord.get_offset(),
+                //        x[0],
+                //        x[1],
+                //        x[2],
+                //        x[3],
+                //        x[4],
+                //        x[5],
+                //        x[6],
+                //        x[7],
+                //        x[8],
+                //        x[9],
+                //        x[10],
+                //        x[11],
+                //        x[12],
+                //        x[13],
+                //        x[14]);
+
+                // ck_tile::tensor_coordinate<15, ck_tile::sequence<13, 14>> a;
 
                 // read from bottom tensor
                 this->get_bottom_tensor_view().template async_get_vectorized_elements_raw<vector_t>(

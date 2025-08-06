@@ -347,6 +347,22 @@ bool run(const ck_tile::ArgParser& arg_parser)
         ck_tile::FillUniformDistribution<VDataType>{0.f, 1.f, seed}(v_host);
         ck_tile::FillUniformDistribution<BiasDataType>{0.f, 1.f, seed}(bias_host);
         ck_tile::FillUniformDistribution<OGradDataType>{0.f, 1.f, seed}(do_host);
+
+        // ck_tile::FillUniformDistribution<QDataType>{1.f / 128, 1.f / 128, seed}(q_host);
+        // ck_tile::FillUniformDistribution<KDataType>{1.f / 128, 1.f / 128, seed}(k_host);
+        // ck_tile::FillUniformDistribution<VDataType>{-2.f, 2.f, seed}(v_host);
+        // ck_tile::FillUniformDistribution<BiasDataType>{-2.f, 2.f, seed}(bias_host);
+        // ck_tile::FillUniformDistribution<OGradDataType>{1, 1, seed}(do_host);
+        // q_host.ForEach(
+        //     [](auto& self, auto i /*bhsd*/) { self(i) = ck_tile::type_convert<QDataType>(i[2]
+        //     * 1.f);
+        //     });
+        // k_host.ForEach(
+        //     [](auto& self, auto i /*bhsd*/) { self(i) = ck_tile::type_convert<QDataType>(2.f);
+        //     });
+        // v_host.ForEach(
+        //     [](auto& self, auto i /*bhsd*/) { self(i) = ck_tile::type_convert<QDataType>(3.f);
+        //     });
     }
     else if(init_method == 2)
     {

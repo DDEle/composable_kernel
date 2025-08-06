@@ -1148,26 +1148,60 @@ llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
                                 index_t offset,
                                 index_t aux) __asm("llvm.amdgcn.raw.buffer.load.lds");
 
-template <bool pre_nop = false>
-CK_TILE_DEVICE void async_buffer_load_dword_v(void* smem,
-                                              int32x4_t rsrc,
-                                              index_t voffset,
-                                              index_t /*soffset*/,
-                                              index_t ioffset /*max 0xFFF*/,
-                                              index_t /*flag*/       = 0,
-                                              bool_constant<pre_nop> = {})
+template <unsigned num_dwords, bool pre_nop = false>
+CK_TILE_DEVICE void async_buffer_load_dwordxn_v(void* smem,
+                                                int32x4_t rsrc,
+                                                index_t voffset,
+                                                index_t /*soffset*/,
+                                                index_t ioffset /*max 0xFFF*/,
+                                                index_t /*flag*/       = 0,
+                                                bool_constant<pre_nop> = {})
 {
-    if constexpr(pre_nop)
-        asm volatile("s_nop 4\n"
-                     "buffer_load_dword %1, %2, 0 offen offset:%3 lds"
-                     : "=r"(smem) /*dummy dependency for smem*/
-                     : "v"(voffset), "s"(rsrc), "n"(ioffset)
+    // union
+    // {
+    //     int32x4_t res;
+    //     struct
+    //     {
+    //         void* p;
+    //         int32_t size;
+    //         int32_t last;
+    //     } ptrs;
+    // } u = {rsrc};
+    // printf("tid %03d async_buffer_load_dwordxn_v: %p-%d-%d, %d, %d\n",
+    //        get_thread_id(),
+    //        u.ptrs.p,
+    //        u.ptrs.size,
+    //        u.ptrs.last,
+    //        voffset,
+    //        ioffset);
+
+#define CK_TILE_ASYNC_LOAD_WITH_INSTR(instr)                            \
+    if constexpr(pre_nop)                                               \
+        asm volatile("s_nop 4\n" instr " %1, %2, 0 offen offset:%3 lds" \
+                     : "=r"(smem) /*dummy dependency for smem*/         \
+                     : "v"(voffset), "s"(rsrc), "n"(ioffset)            \
+                     : "memory");                                       \
+    else                                                                \
+        asm volatile(instr " %1, %2, 0 offen offset:%3 lds"             \
+                     : "=r"(smem) /*dummy dependency for smem*/         \
+                     : "v"(voffset), "s"(rsrc), "n"(ioffset)            \
                      : "memory");
+
+    if constexpr(num_dwords == 1)
+    {
+        CK_TILE_ASYNC_LOAD_WITH_INSTR("buffer_load_dword");
+    }
+#if defined(__gfx950__)
+    else if constexpr(num_dwords == 4)
+    {
+        CK_TILE_ASYNC_LOAD_WITH_INSTR("buffer_load_dwordx4");
+    }
+#endif
     else
-        asm volatile("buffer_load_dword %1, %2, 0 offen offset:%3 lds"
-                     : "=r"(smem) /*dummy dependency for smem*/
-                     : "v"(voffset), "s"(rsrc), "n"(ioffset)
-                     : "memory");
+    {
+        static_assert(false, "wrong! not implemented data width");
+    }
+#undef CK_TILE_ASYNC_LOAD_WITH_INSTR
 }
 
 CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
@@ -1529,15 +1563,18 @@ CK_TILE_DEVICE void amd_async_buffer_load_impl(T* smem,
                                                index_t src_immediate_addr_offset = 0,
                                                bool_constant<pre_nop>            = {})
 {
-    static_assert(sizeof(T) * N == 4, "wrong! not implemented vector size");
+    constexpr index_t num_bytes = sizeof(T) * N;
+    static_assert(num_bytes == 4 || num_bytes == (4 * 3) || num_bytes == (4 * 4),
+                  "wrong! only support in dword, dwordx3, dwordx4");
 
-    async_buffer_load_dword_v(smem,
-                              src_wave_buffer_resource,
-                              src_thread_addr_offset,
-                              src_wave_addr_offset,
-                              src_immediate_addr_offset,
-                              0,
-                              bool_constant<pre_nop>{});
+    constexpr index_t num_words = num_bytes / 4;
+    async_buffer_load_dwordxn_v<num_words>(smem,
+                                           src_wave_buffer_resource,
+                                           src_thread_addr_offset,
+                                           src_wave_addr_offset,
+                                           src_immediate_addr_offset,
+                                           0,
+                                           bool_constant<pre_nop>{});
 }
 
 template <typename T,
@@ -2300,6 +2337,10 @@ CK_TILE_DEVICE void amd_async_buffer_load_with_oob_raw(T* smem,
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
     index_t src_linear_addr_offset = src_linear_element_offset * sizeof(T);
+    // printf("amd_async_buffer_load_with_oob_raw: %p, %d, %d\n",
+    //        p_src_wave,
+    //        src_thread_element_offset,
+    //        src_linear_element_offset);
 
     amd_async_buffer_load_impl<T, N, coherence>(smem,
                                                 src_wave_buffer_resource,
@@ -2322,6 +2363,23 @@ CK_TILE_DEVICE void amd_async_buffer_load_with_oob_raw(T* smem,
 {
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
     index_t src_linear_addr_offset = src_linear_element_offset * sizeof(T);
+    // union
+    // {
+    //     int32x4_t res;
+    //     struct
+    //     {
+    //         void* p;
+    //         int32_t size;
+    //         int32_t last;
+    //     } ptrs;
+    // } u = {src_wave_buffer_resource};
+    // printf("tid %03d amd_async_buffer_load_with_oob_raw: %p-%d-%d, %d, %d\n",
+    //        get_thread_id(),
+    //        u.ptrs.p,
+    //        u.ptrs.size,
+    //        u.ptrs.last,
+    //        src_thread_addr_offset,
+    //        src_linear_addr_offset);
 
     amd_async_buffer_load_impl<T, N, coherence>(smem,
                                                 src_wave_buffer_resource,
@@ -2584,7 +2642,7 @@ __device__ auto amd_transpose_load_to_vgpr(const T* in_ptr)
             reinterpret_cast<__attribute__((address_space(3))) llvm_bf16x4_t*>(
                 reinterpret_cast<uintptr_t>(in_ptr));
 
-#if 1
+#if 0
         static_assert(N == 4, "N must be 4 for bf16 transpose load");
         bf16x4_t out;
         asm volatile("ds_read_b64_tr_b16 %0, %1" : "=v"(out) : "v"(lds_ptr) : "memory");

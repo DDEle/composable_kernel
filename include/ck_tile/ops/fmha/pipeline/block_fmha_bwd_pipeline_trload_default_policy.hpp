@@ -336,10 +336,33 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQDramTileDistribution()
     {
-        return MakeXDramTileDistribution<Problem,
-                                         typename Problem::QDataType,
-                                         Problem::BlockFmhaShape::kM0,
-                                         Problem::BlockFmhaShape::kQKHeaddim>();
+        using T                        = typename Problem::QDataType;
+        constexpr index_t RowsPerBlock = Problem::BlockFmhaShape::kM0;
+        constexpr index_t ColsPerBlock = Problem::BlockFmhaShape::kQKHeaddim;
+
+        constexpr index_t kBlockSize = Problem::kBlockSize;
+        constexpr index_t kWarps     = kBlockSize / get_warp_size();
+
+        constexpr index_t K2 = GetAlignmentK<Problem>();
+        constexpr index_t K1 = WarpAlignmentBytes / sizeof(T) / K2;
+        constexpr index_t K0 = ColsPerBlock / K1 / K2;
+        static_assert((K0 * K1 * K2 == ColsPerBlock) && K1 * K2 * sizeof(T) == WarpAlignmentBytes,
+                      "ColsPerBlock notdivisible");
+
+        constexpr index_t N2 = get_warp_size() / K1;
+        constexpr index_t N1 = kWarps / K0;
+        constexpr index_t N0 = RowsPerBlock / N1 / N2;
+        static_assert((N0 * N1 * N2 == RowsPerBlock) && (K0 * N1 == kWarps) &&
+                          (K1 * N2 == get_warp_size()),
+                      "RowsPerBlock not divisible");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<N0, N1, N2>, sequence<K0, K1, K2>>,
+                                       tuple<sequence<2, 1>, sequence<1, 2>>, // K0 N0, N2 K1
+                                       tuple<sequence<0, 0>, sequence<2, 1>>,
+                                       sequence<1, 2>, // N1 K2
+                                       sequence<1, 2>>{});
     }
 
     template <typename Problem>
@@ -561,9 +584,39 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsWriteBlockDescriptor()
     {
-        return MakeXLdsWriteBlockDescriptor<typename Problem::QDataType,
-                                            Problem::BlockFmhaShape::kM0,
-                                            Problem::BlockFmhaShape::kQKHeaddim>();
+        using T                   = typename Problem::QDataType;
+        constexpr auto MNPerBlock = Problem::BlockFmhaShape::kM0;
+        constexpr auto KPerBlock  = Problem::BlockFmhaShape::kQKHeaddim;
+
+        constexpr index_t VecSize   = 16 / sizeof(T);
+        constexpr index_t WarpSize  = ck_tile::get_warp_size();
+        constexpr index_t NumWarps  = Problem::BlockFmhaShape::NumWarps;
+        constexpr index_t NumIssues = MNPerBlock * KPerBlock / VecSize / WarpSize / NumWarps;
+
+        constexpr index_t KPack = WarpAlignmentBytes / sizeof(T);
+        // CK_PRINT<VecSize, WarpSize, NumWarps, NumIssues, KPack, MNPerBlock, KPerBlock>();
+
+        constexpr auto desc_0 = make_naive_tensor_descriptor_packed(
+            make_tuple(number<KPerBlock / KPack>{}, number<MNPerBlock>{}, number<KPack>{}));
+        constexpr auto desc_1 = transform_tensor_descriptor( //
+            desc_0,
+            make_tuple(make_merge_transform_v3_division_mod(
+                make_tuple(number<KPerBlock / KPack>{}, number<MNPerBlock>{}, number<KPack>{}))),
+            make_tuple(sequence<0, 1, 2>{}),
+            make_tuple(sequence<0>{}));
+        constexpr auto desc_2 = transform_tensor_descriptor(
+            desc_1,
+            make_tuple(make_unmerge_transform(
+                make_tuple(number<NumWarps>{}, number<NumIssues>{}, number<WarpSize * VecSize>{}))),
+            make_tuple(sequence<0>{}),
+            make_tuple(sequence<0, 1, 2>{}));
+        return transform_tensor_descriptor(
+            desc_2,
+            make_tuple(make_pass_through_transform(number<NumWarps>{}),
+                       make_pass_through_transform(number<NumIssues>{}),
+                       make_pass_through_transform(number<WarpSize * VecSize>{})),
+            make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+            make_tuple(sequence<1>{}, sequence<0>{}, sequence<2>{}));
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeOGradLdsWriteBlockDescriptor()
