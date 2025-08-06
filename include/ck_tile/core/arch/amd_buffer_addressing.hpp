@@ -2756,7 +2756,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_max(const thread_buffer<T, N>& src_thread_
 
 #if defined(__gfx950__)
 template <typename T, index_t N, address_space_enum BufferAddressSpace>
-__device__ auto amd_transpose_load_to_vgpr(const T* in_ptr)
+__device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
 {
 
     static_assert(__has_builtin(__builtin_amdgcn_raw_buffer_load_b32),
