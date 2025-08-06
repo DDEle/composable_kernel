@@ -177,7 +177,7 @@ float fmha_bwd<2>(fmha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_conf
 }}
 """
 
-FMHA_BWD_API_PER_TRLOAD="""    {F_if}({F_trload} == has_load_tr){{
+FMHA_BWD_API_PER_TRLOAD="""    {F_if}({F_trload_cond}){{
 {F_body}
     }}
 """
@@ -333,7 +333,7 @@ class FmhaBwdDQDKDVKernel:
         else: n += '_ndeterministic'
 
         if self.F_trload == 't' : n += '_trload'
-        else: n += '_ntr_load'
+        else: n += '_ntrload'
         return n
 
     @property
@@ -604,7 +604,6 @@ class FmhaBwdApiTrait:
         return self.tile.F_bhdv
 
     def scheck(self, spad1 : str) -> str:
-        return 'true' if (self.spad == 'f' and spad1 == 'f') else 'false'
         if self.mode == 'group':
             return 'true' # always support
         elif self.spad == 't' and spad1 == 't':
@@ -684,6 +683,10 @@ class FmhaBwdApiPool:
 
     @property
     def api(self) -> str:
+        tr_load_cond_map = {
+            "t": "has_load_tr",
+            "f": "true"
+        }
         per_tr_load = ''
         for tr_load in ["t", "f"]:
             per_dtypes = ''
@@ -694,7 +697,7 @@ class FmhaBwdApiPool:
                     inners = self._api_innders(traits)
                     per_hdim_case = per_hdim_case + FMHA_BWD_API_PER_HDIM_CASE.format(F_if=self.if_(k), F_hdim=hdim, F_body=inners)
                 per_dtypes += FMHA_BWD_API_PER_DTYPE.format(F_if=self.if_(j), F_dtype=dtype, F_body=per_hdim_case)
-            per_tr_load += FMHA_BWD_API_PER_TRLOAD.format(F_if='if', F_trload=BOOL_MAP[tr_load], F_body=per_dtypes)
+            per_tr_load += FMHA_BWD_API_PER_TRLOAD.format(F_if='if', F_trload_cond=tr_load_cond_map[tr_load], F_body=per_dtypes)
         if not per_tr_load:
             # empty string we add some ignore to suppress warning in api
             per_tr_load += '    (void)t ; (void)s ; (void)a;'

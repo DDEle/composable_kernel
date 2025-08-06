@@ -63,6 +63,11 @@ struct FmhaBwdDQDKDVKernel
     static constexpr bool kIsStoreRandval  = FmhaDropout::IsStoreRandval;
     static constexpr bool kIsDeterministic = FmhaPipeline::kIsDeterministic;
     static constexpr bool kUseTrLoad       = FmhaPipeline::kUseTrLoad;
+#if defined(__gfx950__)
+    static constexpr bool kIsAvialable = true;
+#else
+    static constexpr bool kIsAvialable = !kUseTrLoad;
+#endif
 
     // clang-format off
     template <typename T> struct t2s;
@@ -657,6 +662,12 @@ struct FmhaBwdDQDKDVKernel
     }
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
+    {
+        if constexpr(kIsAvialable)
+            run_(std::move(kargs));
+    }
+
+    CK_TILE_DEVICE void run_(Kargs kargs) const
     {
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
