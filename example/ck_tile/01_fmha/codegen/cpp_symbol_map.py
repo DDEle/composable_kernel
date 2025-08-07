@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 # generate kernel instances to speed up compilation
+from enum import Enum, auto
 
 FWD_DTYPE_MAP = {
     "fp16"   : "FmhaFwdFp16",
@@ -129,3 +130,13 @@ BOOL_MAP = {
     "t" : "true",
     "f" : "false"
 }
+
+class CppEnum(Enum):
+    def __str__(self):
+        return f"ck_tile::{self.__class__.__name__}::{self.name}"
+
+
+class fmha_bwd_kernel_kind(CppEnum):
+    dot_do_o = (auto(),)
+    dq_dk_dv = (auto(),)
+    convert_dq = (auto(),)

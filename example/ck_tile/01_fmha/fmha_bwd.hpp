@@ -368,6 +368,8 @@ template <ck_tile::index_t HDim_,
           bool kUseTrLoad_>
 struct fmha_bwd_dq_dk_dv_traits_
 {
+    static constexpr bool is_fmha_bwd_dq_dk_dv_traits_ = true;
+
     static constexpr ck_tile::index_t HDim = HDim_;
     using DataType                         = ck_tile::remove_cvref_t<DataType_>;
     static constexpr bool kIsGroupMode     = kIsGroupMode_;
@@ -380,6 +382,8 @@ struct fmha_bwd_dq_dk_dv_traits_
     static constexpr bool kIsDeterministic = kIsDeterministic_;
     static constexpr bool kUseTrLoad       = kUseTrLoad_;
 };
+template <class T>
+concept fmha_bwd_dq_dk_dv_traits_c = requires { static_assert(T::is_fmha_bwd_dq_dk_dv_traits_); };
 
 template <typename Traits_>
 float fmha_bwd_dq_dk_dv_(const ck_tile::stream_config&, fmha_bwd_args);
@@ -393,12 +397,16 @@ std::string fmha_bwd_dq_dk_dv_get_name_();
 template <ck_tile::index_t HDim_, typename DataType_, bool kIsGroupMode_, bool kPadS_, bool kPadDv_>
 struct fmha_bwd_dot_do_o_traits_
 {
+    static constexpr bool is_fmha_bwd_dot_do_o_traits_ = true;
+
     static constexpr ck_tile::index_t HDim = HDim_;
     using DataType                         = ck_tile::remove_cvref_t<DataType_>;
     static constexpr bool kIsGroupMode     = kIsGroupMode_;
     static constexpr bool kPadS            = kPadS_;
     static constexpr bool kPadDv           = kPadDv_;
 };
+template <class T>
+concept fmha_bwd_dot_do_o_traits_c = requires { static_assert(T::is_fmha_bwd_dot_do_o_traits_); };
 
 template <typename Traits_>
 float fmha_bwd_dot_do_o_(const ck_tile::stream_config&, fmha_bwd_args);
@@ -417,6 +425,8 @@ template <ck_tile::index_t HDim_,
           bool kIsDeterministic_>
 struct fmha_bwd_convert_dq_traits_
 {
+    static constexpr bool is_fmha_bwd_convert_dq_traits_ = true;
+
     static constexpr ck_tile::index_t HDim = HDim_;
     using DataType                         = ck_tile::remove_cvref_t<DataType_>;
     static constexpr bool kIsGroupMode     = kIsGroupMode_;
@@ -424,6 +434,9 @@ struct fmha_bwd_convert_dq_traits_
     static constexpr bool kPadD            = kPadD_;
     static constexpr bool kIsDeterministic = kIsDeterministic_;
 };
+template <class T>
+concept fmha_bwd_convert_dq_traits_c =
+    requires { static_assert(T::is_fmha_bwd_convert_dq_traits_); };
 
 template <typename Traits_>
 float fmha_bwd_convert_dq_(const ck_tile::stream_config&, fmha_bwd_args);
@@ -451,3 +464,179 @@ struct fmha_bwd_traits
 };
 template <int Version = 2>
 float fmha_bwd(fmha_bwd_traits, fmha_bwd_args, const ck_tile::stream_config&);
+
+struct FmhaBwdTileSize
+{
+    index_t kBM0;      // tile size along q seqlen (block size)
+    index_t kBN0;      // tile size along k seqlen
+    index_t kBK0;      // tile size along gemm0 unroll(F_bhdq)
+    index_t kBK1;      // tile size along gemm1 unroll(F_bm0)
+    index_t kBK2;      // tile size along gemm2 unroll(F_bhdv)
+    index_t kBK3;      // tile size along gemm3 unroll(F_bm0)
+    index_t kBK4;      // tile size along gemm4 unroll(F_bn0)
+    index_t kBHDQ;     // q head_dim
+    index_t kBHDV;     // v head_dim
+    index_t kRM0;      // number of warps along q seqlen (block warps) in gemm0/gemm2
+    index_t kRN0;      // number of warps along k seqlen (block warps) in gemm0/gemm2
+    index_t kRK0;      // number of warps along headdim_qk/v (not used) in gemm0/gemm2
+    index_t kRM1;      // number of warps along k seqlen (block warps) in gemm1/gemm3
+    index_t kRN1;      // number of warps along headdim_qk/v (block warps) in gemm1/gemm3
+    index_t kRK1;      // number of warps along q seqlen (not used) in gemm1/gemm3
+    index_t kRM2;      // number of warps along q seqlen (block warps) in gemm4
+    index_t kRN2;      // number of warps along headdim_qk (block warps) in gemm4
+    index_t kRK2;      // number of warps along k seqlen (not used) in gemm4
+    index_t kWM0;      // warp size along m in gemm0/gemm2/gemm4
+    index_t kWN0;      // warp size along n in gemm0/gemm2/gemm4
+    index_t kWK0;      // warp size along k in gemm0/gemm2/gemm4
+    index_t kWM1;      // warp size along m in gemm1/gemm3
+    index_t kWN1;      // warp size along n in gemm1/gemm3
+    index_t kWK1;      // warp size along k in gemm1/gemm3
+    index_t occupancy; // occupancy
+};
+consteval FmhaBwdTileSize get_fmha_bwd_tile_size(ck_tile::index_t hdim, bool tr_load)
+{
+    if(tr_load)
+    {
+        switch(hdim)
+        {
+        case 128:
+            return FmhaBwdTileSize{32, 128, 128, 32, 128, 32, 32, 128, 128, 1,  4,  1, 4,
+                                   1,  1,   1,   4,  1,   16, 16, 32,  16,  16, 32, 1};
+        default: throw std::runtime_error("Unsupported hdim for fmha_bwd tile size with tr_load");
+        }
+    }
+    else
+    {
+        switch(hdim)
+        {
+        case 32:
+            return FmhaBwdTileSize{32, 128, 32, 32, 32, 32, 64, 32, 32, 1,  4,  1, 4,
+                                   1,  1,   2,  2,  1,  16, 16, 32, 16, 16, 16, 1};
+        case 64:
+            return FmhaBwdTileSize{32, 128, 64, 32, 64, 32, 32, 64, 64, 1,  4,  1, 4,
+                                   1,  1,   1,  4,  1,  16, 16, 32, 16, 16, 16, 1};
+        case 128:
+            return FmhaBwdTileSize{16, 128, 128, 16, 128, 16, 32, 128, 128, 1,  4,  1, 4,
+                                   1,  1,   1,   4,  1,   16, 16, 32,  16,  16, 16, 1};
+        case 160:
+            return FmhaBwdTileSize{32, 64, 160, 32, 160, 32, 32, 160, 160, 1,  4,  1, 4,
+                                   1,  1,  2,   2,  1,   16, 16, 32,  16,  16, 16, 1};
+        case 256:
+            return FmhaBwdTileSize{16, 64, 256, 16, 256, 16, 32, 256, 256, 1,  4,  1, 4,
+                                   1,  1,  1,   4,  1,   16, 16, 32,  16,  16, 16, 1};
+        default:
+            throw std::runtime_error("Unsupported hdim for fmha_bwd tile size without tr_load");
+        }
+    }
+}
+
+template <typename Traits>
+struct FmhaBwdKernelImpl
+{
+    static constexpr std::string GetName();
+    static void Run(const ck_tile::stream_config& s, fmha_bwd_args a);
+};
+
+enum class fmha_bwd_kernel_kind
+{
+    dot_do_o,
+    dq_dk_dv,
+    convert_dq,
+};
+
+template <ck_tile::index_t HDim_,
+          typename DataType_,
+          bool kIsGroupMode_,
+          typename FmhaMask_,
+          typename FmhaDropout_,
+          ck_tile::BlockAttentionBiasEnum BiasEnum_,
+          bool kHasBiasGrad_,
+          bool kPadS1D_,
+          bool kPadD_,
+          bool kPadDv_,
+          bool kIsDeterministic_,
+          bool kUseTrLoad_>
+class fmha_bwd_kernal_group_traits
+{
+    template <fmha_bwd_kernel_kind kid>
+    struct kernel_traits
+    {
+        using type = void;
+    } template <>
+    struct kernel_traits<fmha_bwd_kernel_kind::dot_do_o>
+    {
+        using type = fmha_bwd_dot_do_o_traits_< //
+            HDim_,
+            DataType_,
+            kIsGroupMode_,
+            kPadS1D_,
+            kPadDv_>;
+    };
+    template <>
+    struct kernel_traits<fmha_bwd_kernel_kind::dq_dk_dv>
+    {
+        using type = fmha_bwd_dq_dk_dv_traits_< //
+            HDim_,
+            DataType_,
+            kIsGroupMode_,
+            FmhaMask_,
+            FmhaDropout_,
+            BiasEnum_,
+            kHasBiasGrad_,
+            kPadS1D_,
+            kPadD_,
+            kPadDv_,
+            kIsDeterministic_,
+            kUseTrLoad_>;
+    };
+    template <>
+    struct kernel_traits<fmha_bwd_kernel_kind::convert_dq>
+    {
+        using type = fmha_bwd_convert_dq_traits_< //
+            HDim_,
+            DataType_,
+            kIsGroupMode_,
+            kPadS1D_,
+            kPadD_,
+            kIsDeterministic_>;
+    };
+
+    public:
+    static constexpr bool is_fmha_bwd_kernal_group_traits_ = true;
+    template <fmha_bwd_kernel_kind kid>
+    using kernel_traits_t = typename kernel_traits<kid>::type;
+};
+template <class T>
+concept fmha_bwd_kernal_group_traits_c =
+    requires { static_assert(T::is_fmha_bwd_kernal_group_traits_); };
+
+template <fmha_bwd_kernal_group_traits_c T, fmha_bwd_kernel_kind... kid>
+class FmhaBwdKernelGroup
+{
+    static constexpr size_t n_kernels = sizeof...(kid);
+    template <size_t I>
+    using kid_i = std::tuple_element_t<I, std::tuple<kid...>>;
+    public
+
+    static consteval string get_kernel_names()
+    {
+        std::string kernel_names =
+            FmhaBwdKernelImpl<typename T::kernel_traits_t<kid_i<0>>>::GetName();
+        for(size_t i = 1; i < T::n_kernels; ++i)
+        {
+            kernel_names +=
+                "@" + FmhaBwdKernelImpl<typename T::kernel_traits_t<kid_i<i>>>::GetName();
+        }
+        return kernel_names;
+    }
+
+    static float run(const ck_tile::stream_config& s, fmha_bwd_args a)
+    {
+
+        if(s.log_level_ > 0)
+            std::cout << ", " << get_kernel_names() << std::flush;
+        return ck_tile::launch_kernel(s, [=](const ck_tile::stream_config& s_) {
+            (FmhaBwdKernelImpl<typename T::kernel_traits_t<kid>>::Run(s_, a));
+        }...);
+    }
+}

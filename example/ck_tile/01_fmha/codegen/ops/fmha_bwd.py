@@ -9,10 +9,28 @@ import itertools
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Literal
 from collections import defaultdict
+import re
 
 from codegen.cmake_config import *
 from codegen.cpp_symbol_map import *
 from codegen.utils import update_file
+
+def configure_file(
+    src: Path,
+    dst: Path,
+    **kwargs
+) -> None:
+    """
+    Python implementation of https://cmake.org/cmake/help/latest/command/configure_file.html
+    """
+    content = src.read_text()
+    for key, value in kwargs.items():
+        content = re.sub(rf"^#cmakedefine\s+{key}", f"#define {key} {value}", content, flags=re.MULTILINE)
+    content = re.sub(r"^#cmakedefine\s+([a-zA-Z_][a-zA-Z0-9_]*).*$", r"/* #undef \1 */", content, flags=re.MULTILINE)
+    for key, value in kwargs.items():
+        content = content.replace(f'@{key}@', str(value))
+    
+    dst.write_text(content)
 
 
 FMHA_BWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
