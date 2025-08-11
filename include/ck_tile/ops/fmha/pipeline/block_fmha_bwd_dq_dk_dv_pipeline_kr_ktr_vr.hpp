@@ -554,12 +554,14 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                 });
             }
 
-            if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
+            // if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 bool need_perpixel_check = mask.IsEdgeTile(
                     seqlen_q_step, k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
                 if(need_perpixel_check)
                 {
+                    // if (get_thread_id() == 0)
+                    //     printf("need_perpixel_check\n");
                     set_tile_if(s_acc, -numeric<AccDataType>::infinity(), [&](auto tile_idx) {
                         const auto row = seqlen_q_step + tile_idx.at(number<0>{});
                         const auto col = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
