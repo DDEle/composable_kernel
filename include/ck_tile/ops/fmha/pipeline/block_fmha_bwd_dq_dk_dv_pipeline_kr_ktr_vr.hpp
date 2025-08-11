@@ -49,6 +49,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
     static constexpr index_t kVHeaddim  = BlockFmhaShape::kVHeaddim;
 
     static constexpr bool kIsGroupMode     = Problem::kIsGroupMode;
+    static constexpr bool kPadSeqLenQ      = Problem::kPadSeqLenQ;
+    static constexpr bool kPadSeqLenK      = Problem::kPadSeqLenK;
     static constexpr bool kPadHeadDimQ     = Problem::kPadHeadDimQ;
     static constexpr bool kPadHeadDimV     = Problem::kPadHeadDimV;
     static constexpr auto BiasEnum         = Problem::BiasEnum;
@@ -70,7 +72,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
         kPadHeadDimQ ? 1 : Policy::template GetAlignmentKGrad<Problem>();
     static constexpr index_t kAlignmentVGrad =
         kPadHeadDimV ? 1 : Policy::template GetAlignmentVGrad<Problem>();
-    static constexpr index_t kAlignmentBias = 1;
+    static constexpr index_t kAlignmentBias =
+        kPadSeqLenK ? 1 : Policy::template GetTransposedAlignmentBias<Problem>();
 
     static constexpr const char* name = "kr_ktr_vr";
 
@@ -551,6 +554,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                 });
             }
 
+            if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 bool need_perpixel_check = mask.IsEdgeTile(
                     seqlen_q_step, k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
