@@ -244,20 +244,6 @@ class FmhaBwdApiTrait:
         else:
             return f"a.hdim_v % {self.bhdv} == 0"
 
-    @property
-    def kernels(self) -> List[fmha_bwd_kernel_kind]:
-        if self.MaxSeqLenQ == 0:
-            return [
-                fmha_bwd_kernel_kind.dot_do_o,
-                fmha_bwd_kernel_kind.dq_dk_dv,
-                fmha_bwd_kernel_kind.convert_dq,
-            ]
-        else:
-            return [
-                fmha_bwd_kernel_kind.dot_do_o,
-                fmha_bwd_kernel_kind.dq_dk_dv,
-            ]
-
     def kernel_name(self, k: fmha_bwd_kernel_kind) -> str:
         if k == fmha_bwd_kernel_kind.dot_do_o:
             pad = ""
@@ -269,7 +255,7 @@ class FmhaBwdApiTrait:
                 pad = f"p{pad}"
             else:
                 pad = "npad"
-            return f"fmha_bwd_dot_do_o_d{self.HDim}_{self.dtype}_{self.mode}_{pad}"
+            return f"fmha_bwd_{k.name}_d{self.HDim}_{self.dtype}_{self.mode}_{pad}"
         elif k == fmha_bwd_kernel_kind.dq_dk_dv:
             pad = ""
             if self.kPadD:
@@ -281,7 +267,7 @@ class FmhaBwdApiTrait:
             else:
                 pad = "npad"
 
-            n = f"fmha_bwd_dq_dk_dv_d{self.HDim}_{self.dtype}_{self.mode}_{self.kM0}x{self.kN0}_{pad}"
+            n = f"fmha_bwd_{k.name}_d{self.HDim}_{self.dtype}_{self.mode}_{self.kM0}x{self.kN0}_{pad}"
             n += f"_{self.BiasEnum.value}"
             n += f"_dbias{int(self.kHasBiasGrad)}"
             n += f"_{self.FmhaMask.id}"
@@ -301,7 +287,7 @@ class FmhaBwdApiTrait:
             else:
                 pad = "npad"
 
-            n = f"fmha_bwd_convert_dq_d{self.HDim}_{self.dtype}_n{self.kN0}_{self.mode}_{pad}_deterministic{int(self.kIsDeterministic)}"
+            n = f"fmha_bwd_{k.name}_d{self.HDim}_{self.dtype}_n{self.kN0}_{self.mode}_{pad}_deterministic{int(self.kIsDeterministic)}"
             return n
         else:
             raise ValueError(f"Unknown kernel kind: {k}")
@@ -519,7 +505,7 @@ def get_kernel_tiles(
             )
         else:
             return (
-                (kernels2, 128, 32, 128, 0),
+                (kernels3, 128, 32, 128, 0),
                 (kernels2, 128, 16, 16, 16),
             )
     else:
@@ -636,7 +622,7 @@ def get_bwd_blobs(
                 cond = dtype in ["fp16", "bf16"]
                 if not cond:
                     continue
-            for k in t.kernels:
+            for k in t.kernel_kinds:
                 kernels[t.kernel_name(k)] = t.kernel_impl(k)
             api_pool.register_dq_dk_dv_traits(t)
 

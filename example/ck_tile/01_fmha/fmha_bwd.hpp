@@ -643,15 +643,14 @@ class FmhaBwdKernelGroup
 
         if(s.log_level_ > 1)
         {
-            constexpr auto kid_0 = std::get<0>(kid_tuple);
-            std::string kernel_names =
-                "|" + FmhaBwdKernelImpl<typename T::template kernel_traits_t<kid_0>>::GetName();
-            ck_tile::static_for<1, n_kernels, 1>{}([&](auto i) {
+            std::string kernel_names = "";
+            ck_tile::static_for<0, n_kernels, 1>{}([&](auto i) {
                 constexpr auto kid_i = std::get<i()>(kid_tuple);
                 kernel_names +=
-                    "@" + FmhaBwdKernelImpl<typename T::template kernel_traits_t<kid_i>>::GetName();
+                    (i() > 0 ? "@" : "|") +
+                    FmhaBwdKernelImpl<typename T::template kernel_traits_t<kid_i>>::GetName();
             });
-            std::cout << ", " << kernel_names << std::flush;
+            std::cout << kernel_names << std::flush;
         }
         return ck_tile::launch_kernel(s, [=](const ck_tile::stream_config& s_) {
             (FmhaBwdKernelImpl<typename T::template kernel_traits_t<kid>>::Run(s_, a));
