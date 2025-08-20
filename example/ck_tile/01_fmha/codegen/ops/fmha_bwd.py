@@ -3,20 +3,21 @@
 # generate kernel instances to speed up compilation
 
 import copy
-from dataclasses import dataclass, asdict, is_dataclass
-from enum import Enum, auto
+import fnmatch
 import itertools
-from pathlib import Path
-from typing import List, Tuple, Dict
 from collections import defaultdict
+from dataclasses import asdict, dataclass, is_dataclass
+from enum import Enum, auto
+from pathlib import Path
+from typing import Dict, List, Tuple
 
 from codegen.cmake_config import GEN_DIR
 from codegen.cpp_symbol_map import (
-    cpp_value,
-    configure_file,
     BOOL_MAP,
     BWD_DTYPE_MAP,
     MODE_MAP,
+    configure_file,
+    cpp_value,
 )
 from codegen.utils import update_file
 
@@ -43,7 +44,7 @@ class BlockAttentionBiasEnum(CKTileEnum):
     ALIBI = "alibi"
 
 
-class cpp_template:
+class CKTileTemplate:
     def __str__(self):
         assert is_dataclass(self)
         args = [cpp_value(a) for a in asdict(self).values()]
@@ -51,7 +52,7 @@ class cpp_template:
 
 
 @dataclass(frozen=True)
-class BlockDropoutBwd(cpp_template):
+class BlockDropoutBwd(CKTileTemplate):
     IsDropout: bool
     IsWG32: bool
     IsStoreRandval: bool
@@ -81,7 +82,7 @@ DROPOUTS = [
 
 
 @dataclass(frozen=True)
-class GenericAttentionMask(cpp_template):
+class GenericAttentionMask(CKTileTemplate):
     IsMasking: bool = True
     IsLocal: bool = False
 
@@ -105,7 +106,7 @@ class GenericAttentionMask(cpp_template):
 
 
 @dataclass(frozen=True)
-class SimplifiedGenericAttentionMask(cpp_template):
+class SimplifiedGenericAttentionMask(CKTileTemplate):
     IsMasking: bool = True
 
     @property
@@ -150,7 +151,6 @@ FMHA_BWD_API = """
 
 template <>
 float fmha_bwd<2>(fmha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_config& s){{
-    const bool has_load_tr = ck_tile::is_load_tr_supported();
     float r = -1;
 {F_dispatch}
     return r;
@@ -172,16 +172,12 @@ def FMHA_BWD_API_INNER_DISPATCH(**args) -> str:
     return """
 {F_if}((t.is_group_mode == {F_mode}) && ({F_mask_check}) && (static_cast<int>(t.bias_type) == static_cast<int>({F_bias})) && (t.has_dbias == {F_dbias}) && ({F_dropout_check}) &&
         ({F_scheck}) && ({F_dcheck}) && ({F_dvcheck}) && (t.is_deterministic == {F_deterministic})) {{
+    if(s.log_level_ > 0)
+        printf(", {F_name}");
     using trait_t = {F_trait};
     return FmhaBwdKernelGroup<trait_t, {F_kernel_kinds}>::run(s, a);
 }}
 """.format(**{k: cpp_value(v) for k, v in args.items()})
-
-
-def FMHA_BWD_API_TRAITS_NAME(**args) -> str:
-    return """template<> std::string FmhaBwdKernelGroup<{F_trait}, {F_kernel_kinds}>::GetName(){{ return "{F_name}"; }}""".format(
-        **{k: cpp_value(v) for k, v in args.items()}
-    )
 
 
 # M0 size for 1d kernels (dot/convert)
@@ -420,19 +416,12 @@ class FmhaBwdApiPool:
         return "if" if i == 0 else "else if"
 
     def _api_innders(self, traits: List[FmhaBwdApiTrait]):
-        names = []
         inners = ""
         i = 0
         for trait in traits:
-            names.append(
-                FMHA_BWD_API_TRAITS_NAME(
-                    F_trait=trait.group_traits_t,
-                    F_kernel_kinds=cpp_value(trait.kernel_kinds),
-                    F_name=trait.id,
-                )
-            )
             inners += FMHA_BWD_API_INNER_DISPATCH(
                 F_if=self.if_(i),
+                F_name=trait.id,
                 F_mode=MODE_MAP[trait.mode],
                 F_mask_check=trait.FmhaMask.check,
                 F_bias=trait.BiasEnum,
@@ -446,7 +435,7 @@ class FmhaBwdApiPool:
                 F_kernel_kinds=cpp_value(trait.kernel_kinds),
             )
             i += 1
-        return names, inners
+        return inners
 
     @staticmethod
     def trload_sort_key(tf: bool):
@@ -474,10 +463,9 @@ class FmhaBwdApiPool:
     @property
     def api(self) -> str:
         tr_load_cond_map = {
-            True: "has_load_tr",
+            True: "ck_tile::is_load_tr_supported()",
             False: "true /* no trload requirement */",
         }
-        trait_names = []
         per_tr_load = ""
         for tr_load in sorted(self.dq_dk_dv_pool.keys(), key=self.trload_sort_key):
             per_max_seq_q = ""
@@ -491,8 +479,7 @@ class FmhaBwdApiPool:
                     hdim_cases = dtype_cases[dtype]
                     for k, hdim in enumerate(hdim_cases):
                         traits = hdim_cases[hdim]
-                        names, inners = self._api_innders(traits)
-                        trait_names.extend(names)
+                        inners = self._api_innders(traits)
                         per_hdim_case += FMHA_BWD_API_COND_STATEMENT(
                             if_=k, F_cond=self.hdim_cond(hdim), F_body=inners
                         )
@@ -508,13 +495,7 @@ class FmhaBwdApiPool:
         if not per_tr_load:
             # empty string we add some ignore to suppress warning in api
             per_tr_load += "    (void)t ; (void)s ; (void)a;"
-        result = (
-            FMHA_BWD_KERNEL_HEADER
-            + "\n"
-            + "\n".join(trait_names)
-            + "\n\n"
-            + FMHA_BWD_API.format(F_dispatch=per_tr_load)
-        )
+        result = FMHA_BWD_KERNEL_HEADER + FMHA_BWD_API.format(F_dispatch=per_tr_load)
         return result.replace("\n\n", "\n")
 
 
@@ -546,8 +527,10 @@ def get_kernel_tiles(
 
 
 def get_bwd_blobs(
-    filter_list: str, receipt, mask_impl, optdim_list
+    filter: str, receipt, mask_impl, optdim_list
 ) -> Tuple[FmhaBwdApiPool, Dict[str, str]]:
+    if filter == "":
+        filter = "*"
     # use dict as ordered set
     kernels: Dict[str, str] = {}
     api_pool = FmhaBwdApiPool()
@@ -601,12 +584,8 @@ def get_bwd_blobs(
                 MaxSeqLenQ=max_seq_q,
             )
 
-            # if not fnmatch.fnmatch(t.dot_do_o_kernel.name, filter_dot_do_o):
-            #     continue
-            # if not fnmatch.fnmatch(t.dq_dk_dv_kernel.name, filter_dq_dk_dv):
-            #     continue
-            # if not fnmatch.fnmatch(t.convert_dq_kernel.name, filter_convert_dq):
-            #     continue
+            if not fnmatch.fnmatch(t.id, filter):
+                continue
             if optdim_list != [-1]:
                 if hdim not in optdim_list:
                     continue
@@ -664,19 +643,15 @@ def get_bwd_blobs(
     return api_pool, kernels
 
 
-def write_blobs(
-    output_dir: Path, filter_list: str, receipt, optdim_list, mask_impl
-) -> None:
-    api_pool, kernels = get_bwd_blobs(filter_list, receipt, mask_impl, optdim_list)
+def write_blobs(output_dir: Path, filter: str, receipt, optdim_list, mask_impl) -> None:
+    api_pool, kernels = get_bwd_blobs(filter, receipt, mask_impl, optdim_list)
     update_file(output_dir / FMHA_BWD_API_FILENAME, api_pool.api)
     for name, code in kernels.items():
         update_file(output_dir / (name + ".cpp"), code)
 
 
-def list_blobs(
-    file_path: Path, filter_list: str, receipt, optdim_list, mask_impl
-) -> None:
-    _, kernels = get_bwd_blobs(filter_list, receipt, mask_impl, optdim_list)
+def list_blobs(file_path: Path, filter: str, receipt, optdim_list, mask_impl) -> None:
+    _, kernels = get_bwd_blobs(filter, receipt, mask_impl, optdim_list)
     with file_path.open("a") as f:
         f.write(str(file_path.parent / GEN_DIR / FMHA_BWD_API_FILENAME) + "\n")
         for name, _ in kernels.items():

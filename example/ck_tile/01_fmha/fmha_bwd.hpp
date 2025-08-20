@@ -636,21 +636,21 @@ class FmhaBwdKernelGroup
 {
     static constexpr size_t n_kernels = sizeof...(kid);
     static constexpr auto kid_tuple   = std::make_tuple(kid...);
-    static std::string GetName();
 
     public:
     static float run(const ck_tile::stream_config& s, fmha_bwd_args a)
     {
 
-        if(s.log_level_ > 0)
+        if(s.log_level_ > 1)
         {
-            std::string kernel_names = GetName() + "|";
-            for(size_t i = 0; i < n_kernels; ++i)
-            {
-                constexpr auto kid_i = std::get<0>(kid_tuple);
+            constexpr auto kid_0 = std::get<0>(kid_tuple);
+            std::string kernel_names =
+                "|" + FmhaBwdKernelImpl<typename T::template kernel_traits_t<kid_0>>::GetName();
+            ck_tile::static_for<1, n_kernels, 1>{}([&](auto i) {
+                constexpr auto kid_i = std::get<i()>(kid_tuple);
                 kernel_names +=
                     "@" + FmhaBwdKernelImpl<typename T::template kernel_traits_t<kid_i>>::GetName();
-            }
+            });
             std::cout << ", " << kernel_names << std::flush;
         }
         return ck_tile::launch_kernel(s, [=](const ck_tile::stream_config& s_) {
