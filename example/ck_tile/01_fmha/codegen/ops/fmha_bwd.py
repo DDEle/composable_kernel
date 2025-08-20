@@ -629,15 +629,43 @@ def get_bwd_blobs(
     return api_pool, kernels
 
 
-def write_blobs(output_dir: Path, filter: str, receipt, optdim_list, mask_impl) -> None:
+def make_shards(kernels: Dict[str, str], num_shards: int) -> Dict[str, str]:
+    """Combine kernels into shards."""
+    if len(kernels) <= num_shards or num_shards <= 0:
+        return kernels  # no sharding
+
+    k_names = list(kernels.keys())
+    k_names.sort()
+
+    shards = {
+        f"fmha_bwd_kernels_shard_{i:03d}": "// Shard {i:03d} contains:\n"
+        + "\n".join("// " + n for i, n in enumerate(k_names) if (i % num_shards) == i)
+        + "\n"
+        + "\n".join(
+            f"// start {k_names[j]}:\n{kernels[k_names[j]]}\n// end {k_names[j]}\n"
+            for j in range(len(kernels))
+            if (j % num_shards) == i
+        )
+        for i in range(num_shards)
+    }
+    return shards
+
+
+def write_blobs(
+    output_dir: Path, filter: str, receipt, optdim_list, mask_impl, num_shards=64
+) -> None:
     api_pool, kernels = get_bwd_blobs(filter, receipt, mask_impl, optdim_list)
+    kernels = make_shards(kernels, num_shards)
     update_file(output_dir / FMHA_BWD_API_FILENAME, api_pool.api)
     for name, code in kernels.items():
         update_file(output_dir / (name + ".cpp"), code)
 
 
-def list_blobs(file_path: Path, filter: str, receipt, optdim_list, mask_impl) -> None:
+def list_blobs(
+    file_path: Path, filter: str, receipt, optdim_list, mask_impl, num_shards=64
+) -> None:
     _, kernels = get_bwd_blobs(filter, receipt, mask_impl, optdim_list)
+    kernels = make_shards(kernels, num_shards)
     with file_path.open("a") as f:
         f.write(str(file_path.parent / GEN_DIR / FMHA_BWD_API_FILENAME) + "\n")
         for name, _ in kernels.items():
