@@ -28,15 +28,15 @@ string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
 set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --api ${FMHA_FWD_APIS}
-  --optdim 32,64,128,256
+  --optdim 128
   # --filter fmha_fwd...
 )
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --api bwd
   --receipt 3
-  --optdim 32,64,128,256
-  # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
+  --optdim 128
+  --filter fmha_bwd_dot_do_o_d128_bf16_batch_o2_ps@*@fmha_bwd_d128_bf16_batch_*maxq0_npad_nbias_ndbias_nmask_ndropout_ndeterministic_trload
 )
 
 # generate a list of kernels, but not actually emit files at config sta
@@ -140,6 +140,7 @@ endif()
 # Allow comparing floating points directly in order to check sentinel values
 list(APPEND EXAMPLE_FMHA_FWD_COMPILE_OPTIONS -Wno-float-equal)
 list(APPEND EXAMPLE_FMHA_BWD_COMPILE_OPTIONS -Wno-float-equal)
+list(APPEND EXAMPLE_FMHA_BWD_COMPILE_OPTIONS --save-temps)
 
 target_compile_options(${EXAMPLE_FMHA_FWD} PRIVATE ${EXAMPLE_FMHA_FWD_COMPILE_OPTIONS})
 target_compile_options(${EXAMPLE_FMHA_BWD} PRIVATE ${EXAMPLE_FMHA_BWD_COMPILE_OPTIONS})

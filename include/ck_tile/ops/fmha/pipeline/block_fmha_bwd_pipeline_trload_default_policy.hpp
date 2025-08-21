@@ -127,7 +127,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
                                                 typename BlockFmhaShape::Gemm4BlockWarps,
                                                 WarpGemm>;
 
-        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy, false, true>{};
     }
 
     // these are for global load
@@ -490,11 +490,11 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
 
         constexpr auto kt_block_outer_dstr_encoding = tile_distribution_encoding<
             sequence<MWarp>,
-            tuple<sequence<NIterPerWarp, NWarp>, sequence<KIterPerWarp>>, // 2 4, 4
+            tuple<sequence<NWarp, NIterPerWarp>, sequence<KIterPerWarp>>, // 4 2, 4
             tuple<sequence<0, 1>>,
-            tuple<sequence<0, 1>>,
+            tuple<sequence<0, 0>>,
             sequence<1, 2>,
-            sequence<0, 0>>{};
+            sequence<1, 0>>{};
 
         constexpr auto kt_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             kt_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
@@ -948,11 +948,11 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
 
         constexpr auto ds_block_outer_dstr_encoding =
             tile_distribution_encoding<sequence<NWarp>,
-                                       tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
+                                       tuple<sequence<MWarp, MIterPerWarp>, sequence<KIterPerWarp>>,
                                        tuple<sequence<1, 0>>,
-                                       tuple<sequence<1, 0>>,
+                                       tuple<sequence<0, 0>>,
                                        sequence<1, 2>,
-                                       sequence<0, 0>>{};
+                                       sequence<1, 0>>{};
 
         constexpr auto ds_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             ds_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});

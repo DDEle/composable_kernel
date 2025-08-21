@@ -13,6 +13,7 @@
 #include "ck_tile/core/tensor/tensor_adaptor.hpp"
 #include "ck_tile/core/tensor/tile_distribution_encoding.hpp"
 #include "ck_tile/core/utility/functional.hpp"
+#include "ck_tile/core/utility/debug.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 
 namespace ck_tile {
@@ -589,12 +590,25 @@ CK_TILE_HOST_DEVICE constexpr auto slice_distribution_from_x(
             return number<len_ / p_len_over_h[i]>{};
         },
         number<x_slice_lengths.size()>{});
+    // CK_PRINT<Encoding>();
+    // using aaa = CK_PRINT<ck_tile::tile_distribution_encoding<
+    //     ck_tile::sequence<1>,
+    //     ck_tile::tuple<ck_tile::sequence<4, 2, 16>, ck_tile::sequence<4, 2, 4, 4>>,
+    //     ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 1>>,
+    //     ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<2, 2>>,
+    //     ck_tile::sequence<1, 2, 2, 2>,
+    //     ck_tile::sequence<1, 0, 1, 3>>>;
 
     constexpr auto src_h_prefix_sum = Encoding::detail::get_h_dim_lengths_prefix_sum();
     constexpr auto src_y_info       = Encoding::detail::get_sorted_y_to_h_info();
     constexpr auto src_y_dims       = src_y_info[number<0>{}];
     constexpr auto src_y_maps       = src_y_info[number<1>{}];
     constexpr auto src_y_prefix_sum = src_y_info[number<2>{}];
+    // using src_y_info_aaa = CK_PRINT<const ck_tile::tuple<ck_tile::sequence<1, 3, 4, 6>,
+    //                                           ck_tile::sequence<0, 1, 2, 3>,
+    //                                           ck_tile::sequence<0, 1, 4>>>;
+    // CK_PRINT<decltype(x_slice_lengths_without_p)>();
+    // using x_slice_lengths_without_p_aaa = ck_tile::sequence<2, 8>;
 
     constexpr auto sliced_hlen_yidx_ylen = [&]() constexpr {
         auto y_slice_sorted_origins = make_zero_multi_index<Encoding::NDimY>();
@@ -606,18 +620,36 @@ CK_TILE_HOST_DEVICE constexpr auto slice_distribution_from_x(
         // TODO: ugly
         auto new_h_lengths = transform_tuples(
             [&](auto h_len, auto id) {
+                // h_len is sequence<4, 2, 16>
+                // x_slice_lengths_without_p[id] is 2
+                // y_to_h_masks[id] is sequence<0, 1, 0>
                 constexpr auto sliced_h = reverse_slice_sequence(
                     h_len, number<x_slice_lengths_without_p[id]>{}, y_to_h_masks[id]);
+                // CK_PRINT<decltype(h_len),
+                //          number<x_slice_lengths_without_p[id]>,
+                //          decltype(y_to_h_masks[id]),
+                //          decltype(sliced_h)>();
+                // using aaaa = CK_PRINT<ck_tile::sequence<4, 2, 16>,
+                //                       ck_tile::constant<2>,
+                //                       ck_tile::sequence<0, 1, 0>,
+                //                       const ck_tile::tuple<ck_tile::sequence<4, 2, 16>,
+                //                                            ck_tile::sequence<1, 1, 1>,
+                //                                            ck_tile::constant<0>>>;
 
                 constexpr auto sliced_h_lens  = sliced_h[number<0>{}];
                 constexpr auto sliced_h_index = sliced_h[number<2>{}];
+
+                // using sliced_h_aaa = ck_tile::tuple<ck_tile::sequence<4, 2, 16>,
+                //                                     ck_tile::sequence<1, 1, 1>,
+                //                                     ck_tile::constant<0>>;
 
                 // update y_slice_lengths
                 constexpr auto uniformed_h_index = sliced_h_index + number<src_h_prefix_sum[id]>{};
                 constexpr auto found_y_index     = container_find(src_y_dims, uniformed_h_index);
                 constexpr auto y_to_h_dim_end    = src_y_prefix_sum[id + 1];
 
-                static_assert(found_y_index >= 0 && found_y_index < src_y_dims.size(),
+                // CK_PRINT<decltype(src_y_dims), decltype(uniformed_h_index)>();
+                static_assert(found_y_index >= 0 && found_y_index <= src_y_dims.size(),
                               "not sliced at y dim, please check");
 
                 {

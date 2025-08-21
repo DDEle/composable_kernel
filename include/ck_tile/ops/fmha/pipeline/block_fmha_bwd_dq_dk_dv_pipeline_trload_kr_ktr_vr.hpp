@@ -259,6 +259,63 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                              make_tuple(number<kN0>{}, number<kK0>{}),
                              {0, 0},
                              Policy::template MakeKTRegBlockDescriptor<Problem>());
+        // CK_PRINT<decltype(Policy::template MakeKTRegBlockDescriptor<Problem>())>();
+        // using a = ck_tile::tile_distribution<
+        //     ck_tile::tensor_adaptor<
+        //         ck_tile::tuple<
+        //             ck_tile::replicate<ck_tile::tuple<ck_tile::constant<1>>>,
+        //             ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<4>,
+        //                                             ck_tile::constant<2>,
+        //                                             ck_tile::constant<4>,
+        //                                             ck_tile::constant<4>>,
+        //                              false>,
+        //             ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<4>,
+        //                                             ck_tile::constant<2>,
+        //                                             ck_tile::constant<1>,
+        //                                             ck_tile::constant<4>,
+        //                                             ck_tile::constant<4>>,
+        //                              false>,
+        //             ck_tile::merge_v2_magic_division<
+        //                 ck_tile::tuple<ck_tile::constant<1>, ck_tile::constant<4>>>,
+        //             ck_tile::merge_v2_magic_division<ck_tile::tuple<ck_tile::constant<4>,
+        //                                                             ck_tile::constant<1>,
+        //                                                             ck_tile::constant<4>,
+        //                                                             ck_tile::constant<4>>>>,
+        //         ck_tile::tuple<ck_tile::sequence<>,
+        //                        ck_tile::sequence<0>,
+        //                        ck_tile::sequence<1>,
+        //                        ck_tile::sequence<2, 7>,
+        //                        ck_tile::sequence<5, 9, 6, 10>>,
+        //         ck_tile::tuple<ck_tile::sequence<2>,
+        //                        ck_tile::sequence<3, 4, 5, 6>,
+        //                        ck_tile::sequence<7, 8, 9, 10, 11>,
+        //                        ck_tile::sequence<12>,
+        //                        ck_tile::sequence<13>>,
+        //         ck_tile::sequence<0, 1>,
+        //         ck_tile::sequence<12, 13, 8, 3, 4, 11>>,
+        //     ck_tile::tensor_descriptor<
+        //         ck_tile::tuple<ck_tile::unmerge<ck_tile::tuple<ck_tile::constant<2>,
+        //                                                        ck_tile::constant<4>,
+        //                                                        ck_tile::constant<2>,
+        //                                                        ck_tile::constant<4>>,
+        //                                         false>>,
+        //         ck_tile::tuple<ck_tile::sequence<0>>,
+        //         ck_tile::tuple<ck_tile::sequence<1, 2, 3, 4>>,
+        //         ck_tile::sequence<1, 2, 3, 4>,
+        //         ck_tile::constant<64>,
+        //         ck_tile::sequence<-1, -1, -1, -1, -1>,
+        //         ck_tile::sequence<-1, -1, -1, -1, -1>>,
+        //     ck_tile::tile_distribution_encoding<
+        //         ck_tile::sequence<1>,
+        //         ck_tile::tuple<ck_tile::sequence<4, 2, 4, 4>, ck_tile::sequence<4, 2, 1, 4, 4>>,
+        //         ck_tile::tuple<ck_tile::sequence<0, 2>, ck_tile::sequence<1, 2, 1, 2>>,
+        //         ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<2, 2, 3, 3>>,
+        //         ck_tile::sequence<2, 1, 1, 2>,
+        //         ck_tile::sequence<1, 0, 1, 4>>,
+        //     ck_tile::detail::tile_distribution_detail<
+        //         ck_tile::tuple<ck_tile::sequence<2>,
+        //                        ck_tile::sequence<3, 4, 5, 6>,
+        //                        ck_tile::sequence<7, 8, 9, 10, 11>>>>;
 
         auto kt_reg_tensor = load_tile_transpose(kt_lds_read_window);
 
@@ -685,6 +742,27 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                         kt_reg_tensor,
                         sequence<0, i_k4 * kK4>{},
                         sequence<kQKHeaddim, (i_k4 + 1) * kK4>{});
+                    // CK_PRINT<typename
+                    // decltype(kt_reg_tensor.get_tile_distribution())::DstrEncode,
+                    //                 typename
+                    //                 decltype(kt_reg_tensor_slice.get_tile_distribution())::DstrEncode>();
+                    // using a = CK_PRINT<
+                    //            ck_tile::tile_distribution_encoding<
+                    //                ck_tile::sequence<1>,
+                    //                ck_tile::tuple<ck_tile::sequence<4, 2, 16>,
+                    //                               ck_tile::sequence<4, 2, 4, 4>>,
+                    //                ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2,
+                    //                1>>, ck_tile::tuple<ck_tile::sequence<0, 0>,
+                    //                ck_tile::sequence<2, 2>>, ck_tile::sequence<1, 2, 2, 2>,
+                    //                ck_tile::sequence<1, 0, 1, 3>>,
+                    //            ck_tile::tile_distribution_encoding<
+                    //                ck_tile::sequence<1>,
+                    //                ck_tile::tuple<ck_tile::sequence<4, 2, 16>,
+                    //                               ck_tile::sequence<1, 2, 4, 4>>,
+                    //                ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2,
+                    //                1>>, ck_tile::tuple<ck_tile::sequence<0, 0>,
+                    //                ck_tile::sequence<2, 2>>, ck_tile::sequence<1, 2, 2, 2>,
+                    //                ck_tile::sequence<1, 0, 1, 3>>>;
                     gemm_4(dq_acc, ds_reg_tensor, kt_reg_tensor_slice);
 
                     if constexpr(i_k4 < k4_loops - 1)
@@ -701,8 +779,6 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 do_reg_tensor = load_tile(do_lds_read_window);
                 d             = load_tile(d_lds_read_window);
             }
-            if constexpr(is_main_body)
-                Policy::template HotLoopScheduler<Problem>::SchedulerGemm4();
             if constexpr(is_epilogue)
             {
                 // QGrad Scale
@@ -715,16 +791,54 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                 {
                     tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
                 }
+
+                auto dq_acc_ = make_static_distributed_tensor<AccDataType>(
+                    make_static_tile_distribution(
+                        ck_tile::tile_distribution_encoding<
+                                   ck_tile::sequence<>,
+                                   ck_tile::tuple<ck_tile::sequence<1, 2, 1, 2, 8>, // <- 1, 2, 1, 4, 4
+                                                  ck_tile::sequence<4, 32>>,        // <- 4, 2, 16
+                                   ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
+                                   ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<3, 1>>,
+                                   ck_tile::sequence<1, 1, 1>,
+                                   ck_tile::sequence<1, 2, 4>>{}),
+                    dq_acc.get_thread_buffer());
+                auto&& buf = dq_acc_.get_thread_buffer();
+
+#define swap_lane16(idx, idy)                                                                \
+    {                                                                                        \
+        auto&& out##idx##idy =                                                               \
+            __builtin_amdgcn_permlane16_swap(buf.template get_as<int32_t>(number<(idx)>{}),  \
+                                             buf.template get_as<int32_t>(number<(idy)>{}),  \
+                                             false,                                          \
+                                             false);                                         \
+        buf.template get_as<int32_t>(number<(idx)>{}) = bit_cast<int32_t>(out##idx##idy[0]); \
+        buf.template get_as<int32_t>(number<(idy)>{}) = bit_cast<int32_t>(out##idx##idy[1]); \
+    }
+                swap_lane16(0, 4);
+                swap_lane16(1, 5);
+                swap_lane16(2, 6);
+                swap_lane16(3, 7);
+
+                swap_lane16(8, 12);
+                swap_lane16(9, 13);
+                swap_lane16(10, 14);
+                swap_lane16(11, 15);
+#undef swap_lane16
+
                 if constexpr(kIsDeterministic)
                 {
-                    store_tile(dq_dram_window, dq_acc);
+                    store_tile(dq_dram_window, dq_acc_);
                 }
                 else
                 {
-                    update_tile(dq_dram_window, dq_acc);
+                    update_tile(dq_dram_window, dq_acc_);
                 }
                 move_tile_window(dq_dram_window, {kM0, 0});
             }
+
+            if constexpr(is_main_body)
+                Policy::template HotLoopScheduler<Problem>::SchedulerGemm4();
             i_total_bodys += 1;
         };
 
