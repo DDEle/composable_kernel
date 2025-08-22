@@ -14,6 +14,7 @@
 #include "ck_tile/core/utility/bit_cast.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
+#include "ck_tile/core/utility/debug.hpp"
 
 using as3_uint32_ptr = uint32_t __attribute__((address_space(3)))*;
 
@@ -28,12 +29,33 @@ struct __attribute__((packed)) buffer_resource
     uint32_t config;
 };
 
-CK_TILE_DEVICE int32x4_t make_wave_buffer_resource(const void* ptr, uint32_t size = 0xffffffff)
+#ifndef USE_RSRC_BUILTIN
+#define USE_RSRC_BUILTIN                                \
+    __has_builtin(__builtin_amdgcn_make_buffer_rsrc) && \
+        __has_builtin(__builtin_amdgcn_raw_ptr_buffer_load_lds)
+#endif
+
+CK_TILE_DEVICE int32x4_t make_wave_buffer_resource_raw(const void* ptr, uint32_t size = 0xffffffff)
 {
     buffer_resource res{ptr, size, CK_TILE_BUFFER_RESOURCE_3RD_DWORD};
     int32x4_t r = __builtin_bit_cast(int32x4_t, res);
     return r;
 }
+#if USE_RSRC_BUILTIN
+using buffer_rsrc_t = __amdgpu_buffer_rsrc_t;
+CK_TILE_DEVICE auto make_wave_buffer_resource(const void* ptr, uint32_t size = 0xffffffff)
+{
+    int32_t stride = 0;
+    return __builtin_amdgcn_make_buffer_rsrc(
+        const_cast<void*>(ptr), stride, size, CK_TILE_BUFFER_RESOURCE_3RD_DWORD);
+}
+#else
+using buffer_rsrc_t = int32x4_t;
+CK_TILE_DEVICE auto make_wave_buffer_resource(const void* ptr, uint32_t size = 0xffffffff)
+{
+    return make_wave_buffer_resource_raw(ptr, size);
+}
+#endif
 
 namespace impl {
 // below type indicate the data type used for buffer load inline asm
@@ -66,7 +88,7 @@ struct buffer_load<16, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -94,7 +116,7 @@ struct buffer_load<8, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -122,7 +144,7 @@ struct buffer_load<4, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -150,7 +172,7 @@ struct buffer_load<2, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -178,7 +200,7 @@ struct buffer_load<1, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -209,7 +231,7 @@ struct buffer_load_if<16, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -243,7 +265,7 @@ struct buffer_load_if<8, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -276,7 +298,7 @@ struct buffer_load_if<4, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -309,7 +331,7 @@ struct buffer_load_if<2, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -342,7 +364,7 @@ struct buffer_load_if<1, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -378,7 +400,7 @@ struct buffer_store<16>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -398,7 +420,7 @@ struct buffer_store<8>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -418,7 +440,7 @@ struct buffer_store<4>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -438,7 +460,7 @@ struct buffer_store<2>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -458,7 +480,7 @@ struct buffer_store<1>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -481,7 +503,7 @@ struct buffer_store_if<16>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -509,7 +531,7 @@ struct buffer_store_if<8>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -538,7 +560,7 @@ struct buffer_store_if<4>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -566,7 +588,7 @@ struct buffer_store_if<2>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -594,7 +616,7 @@ struct buffer_store_if<1>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -875,6 +897,7 @@ CK_TILE_DEVICE auto async_load_fence_raw(index_t cnt = 0)
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
 }
 
+// #if !(USE_RSRC_BUILTIN)
 // buffer load i8
 CK_TILE_DEVICE_EXTERN int8_t
 llvm_amdgcn_raw_buffer_load_i8(int32x4_t srsrc,
@@ -1143,10 +1166,20 @@ llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
                                 index_t soffset,
                                 index_t offset,
                                 index_t aux) __asm("llvm.amdgcn.raw.buffer.load.lds");
-
+// #else
+// Direct loads from global to LDS.
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_ptr_buffer_load_lds(buffer_rsrc_t rsrc,
+                                    as3_uint32_ptr lds_ptr,
+                                    index_t size,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t offset,
+                                    index_t aux) __asm("llvm.amdgcn.raw.ptr.buffer.load.lds");
+// #endif
 template <unsigned num_dwords, bool pre_nop = false>
 CK_TILE_DEVICE void async_buffer_load_dwordxn_v(void* smem,
-                                                int32x4_t rsrc,
+                                                buffer_rsrc_t rsrc,
                                                 index_t voffset,
                                                 index_t /*soffset*/,
                                                 index_t ioffset /*max 0xFFF*/,
@@ -1218,7 +1251,7 @@ enum struct amd_buffer_coherence_enum
 template <index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
 CK_TILE_DEVICE thread_buffer<int8_t, N>
-amd_buffer_load_impl_with_bytes(int32x4_t src_wave_buffer_resource,
+amd_buffer_load_impl_with_bytes(buffer_rsrc_t src_wave_buffer_resource,
                                 index_t src_thread_addr_offset,
                                 index_t src_wave_addr_offset)
 {
@@ -1227,6 +1260,7 @@ amd_buffer_load_impl_with_bytes(int32x4_t src_wave_buffer_resource,
 
     using rtn_type = thread_buffer<int8_t, N>;
 
+#if !(USE_RSRC_BUILTIN)
     if constexpr(N == 1)
     {
         return bit_cast<rtn_type>(llvm_amdgcn_raw_buffer_load_i8(src_wave_buffer_resource,
@@ -1319,6 +1353,101 @@ amd_buffer_load_impl_with_bytes(int32x4_t src_wave_buffer_resource,
 
         return bit_cast<rtn_type>(tmp);
     }
+#else
+
+    if constexpr(N == 1)
+    {
+        return __builtin_amdgcn_raw_buffer_load_b8(src_wave_buffer_resource,
+                                                   src_thread_addr_offset,
+                                                   src_wave_addr_offset,
+                                                   static_cast<index_t>(coherence));
+    }
+    else if constexpr(N == 2)
+    {
+
+        int16_t tmp = __builtin_amdgcn_raw_buffer_load_b16(src_wave_buffer_resource,
+                                                           src_thread_addr_offset,
+                                                           src_wave_addr_offset,
+                                                           static_cast<index_t>(coherence));
+
+        return bit_cast<rtn_type>(tmp);
+    }
+    else if constexpr(N == 4)
+    {
+        int32_t tmp = __builtin_amdgcn_raw_buffer_load_b32(src_wave_buffer_resource,
+                                                           src_thread_addr_offset,
+                                                           src_wave_addr_offset,
+                                                           static_cast<index_t>(coherence));
+
+        return bit_cast<rtn_type>(tmp);
+    }
+    else if constexpr(N == 8)
+    {
+        int32x2_t tmp = __builtin_amdgcn_raw_buffer_load_b64(src_wave_buffer_resource,
+                                                             src_thread_addr_offset,
+                                                             src_wave_addr_offset,
+                                                             static_cast<index_t>(coherence));
+
+        return bit_cast<rtn_type>(tmp);
+    }
+    else if constexpr(N == 16)
+    {
+        int32x4_t tmp = __builtin_amdgcn_raw_buffer_load_b128(src_wave_buffer_resource,
+                                                              src_thread_addr_offset,
+                                                              src_wave_addr_offset,
+                                                              static_cast<index_t>(coherence));
+        return bit_cast<rtn_type>(tmp);
+    }
+    else if constexpr(N == 32)
+    {
+        int32x4_t tmp0 = __builtin_amdgcn_raw_buffer_load_b128(src_wave_buffer_resource,
+                                                               src_thread_addr_offset,
+                                                               src_wave_addr_offset,
+                                                               static_cast<index_t>(coherence));
+        int32x4_t tmp1 =
+            __builtin_amdgcn_raw_buffer_load_b128(src_wave_buffer_resource,
+                                                  src_thread_addr_offset,
+                                                  src_wave_addr_offset + 4 * sizeof(int32_t),
+                                                  static_cast<index_t>(coherence));
+        thread_buffer<int32_t, 8> tmp;
+
+        tmp.template get_as<int32x4_t>()(number<0>{}) = tmp0;
+        tmp.template get_as<int32x4_t>()(number<1>{}) = tmp1;
+
+        return bit_cast<rtn_type>(tmp);
+    }
+    else if constexpr(N == 64)
+    {
+        int32x4_t tmp0 = __builtin_amdgcn_raw_buffer_load_b128(src_wave_buffer_resource,
+                                                               src_thread_addr_offset,
+                                                               src_wave_addr_offset,
+                                                               static_cast<index_t>(coherence));
+        int32x4_t tmp1 =
+            __builtin_amdgcn_raw_buffer_load_b128(src_wave_buffer_resource,
+                                                  src_thread_addr_offset,
+                                                  src_wave_addr_offset + 4 * sizeof(int32_t),
+                                                  static_cast<index_t>(coherence));
+        int32x4_t tmp2 =
+            __builtin_amdgcn_raw_buffer_load_b128(src_wave_buffer_resource,
+                                                  src_thread_addr_offset,
+                                                  src_wave_addr_offset + 8 * sizeof(int32_t),
+                                                  static_cast<index_t>(coherence));
+        int32x4_t tmp3 =
+            __builtin_amdgcn_raw_buffer_load_b128(src_wave_buffer_resource,
+                                                  src_thread_addr_offset,
+                                                  src_wave_addr_offset + 12 * sizeof(int32_t),
+                                                  static_cast<index_t>(coherence));
+
+        thread_buffer<int32_t, 16> tmp;
+
+        tmp.template get_as<int32x4_t>()(number<0>{}) = tmp0;
+        tmp.template get_as<int32x4_t>()(number<1>{}) = tmp1;
+        tmp.template get_as<int32x4_t>()(number<2>{}) = tmp2;
+        tmp.template get_as<int32x4_t>()(number<3>{}) = tmp3;
+
+        return bit_cast<rtn_type>(tmp);
+    }
+#endif
 }
 
 #ifndef BUFFER_LOAD_USE_INLINEASM
@@ -1328,7 +1457,7 @@ amd_buffer_load_impl_with_bytes(int32x4_t src_wave_buffer_resource,
 template <typename T,
           index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
-CK_TILE_DEVICE thread_buffer<T, N> amd_buffer_load_impl(int32x4_t src_wave_buffer_resource,
+CK_TILE_DEVICE thread_buffer<T, N> amd_buffer_load_impl(buffer_rsrc_t src_wave_buffer_resource,
                                                         index_t src_thread_addr_offset,
                                                         index_t src_wave_addr_offset)
 {
@@ -1347,7 +1476,7 @@ CK_TILE_DEVICE thread_buffer<T, N> amd_buffer_load_impl(int32x4_t src_wave_buffe
         "wrong! not implemented");
 
     using rtn_type = thread_buffer<T, N>;
-
+#if !(USE_RSRC_BUILTIN)
     if constexpr(std::is_same<T, float>::value) // fp32
     {
         if constexpr(N == 1)
@@ -1496,6 +1625,9 @@ CK_TILE_DEVICE thread_buffer<T, N> amd_buffer_load_impl(int32x4_t src_wave_buffe
             return bit_cast<rtn_type>(tmp);
         }
     }
+#else
+    if constexpr(0) {}
+#endif
     else // other datatype
     {
         auto raw_data = amd_buffer_load_impl_with_bytes<sizeof(T) * N, coherence>(
@@ -1511,7 +1643,7 @@ template <typename T,
           bool oob_conditional_check          = true,
           bool pre_nop                        = false>
 CK_TILE_DEVICE void amd_buffer_load_raw_impl(thread_buffer<T, N>& dst,
-                                             int32x4_t src_wave_buffer_resource,
+                                             buffer_rsrc_t src_wave_buffer_resource,
                                              index_t src_thread_addr_offset,
                                              index_t src_wave_addr_offset,
                                              index_t src_linear_addr_offset,
@@ -1550,7 +1682,7 @@ template <typename T,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
           bool pre_nop                        = false>
 CK_TILE_DEVICE void amd_async_buffer_load_impl(T* smem,
-                                               int32x4_t src_wave_buffer_resource,
+                                               buffer_rsrc_t src_wave_buffer_resource,
                                                index_t src_thread_addr_offset,
                                                index_t src_wave_addr_offset,
                                                index_t src_immediate_addr_offset = 0,
@@ -1575,7 +1707,7 @@ template <typename T,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
           bool oob_conditional_check          = true>
 CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
-                                          int32x4_t src_wave_buffer_resource,
+                                          buffer_rsrc_t src_wave_buffer_resource,
                                           index_t src_thread_addr_offset,
                                           index_t src_wave_addr_offset,
                                           index_t src_immediate_addr_offset    = 0,
@@ -1601,30 +1733,37 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
     // Set up v_offset:
     index_t v_offset = src_thread_addr_offset;
     if constexpr(oob_conditional_check)
-        v_offset = flag ? v_offset : src_wave_buffer_resource[2];
-
+        v_offset = flag ? v_offset : 0xffffffff;
+// #ifdef __HIP_DEVICE_COMPILE__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
-    llvm_amdgcn_raw_buffer_load_lds(src_wave_buffer_resource,
-                                    (as3_uint32_ptr)(smem),
-                                    bytes,
-                                    v_offset,
-                                    src_wave_addr_offset,
-                                    /*src_immediate_addr_offset*/ 0,
-                                    static_cast<index_t>(coherence));
+#if !(USE_RSRC_BUILTIN)
+#define buffer_load_lds llvm_amdgcn_raw_buffer_load_lds
+#else
+#define buffer_load_lds llvm_amdgcn_raw_ptr_buffer_load_lds
+#endif
+    buffer_load_lds(src_wave_buffer_resource,
+                    (as3_uint32_ptr)(smem),
+                    bytes,
+                    v_offset,
+                    src_wave_addr_offset,
+                    /*src_immediate_addr_offset*/ 0,
+                    0);
+#undef buffer_load_lds
 #pragma clang diagnostic pop
+    // #endif
 }
 
 template <index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
 CK_TILE_DEVICE void amd_buffer_store_impl_with_bytes(const thread_buffer<int8_t, N> src_thread_data,
-                                                     int32x4_t dst_wave_buffer_resource,
+                                                     buffer_rsrc_t dst_wave_buffer_resource,
                                                      index_t dst_thread_addr_offset,
                                                      index_t dst_wave_addr_offset)
 {
     static_assert(N == 1 || N == 2 || N == 4 || N == 8 || N == 16 || N == 32 || N == 64,
                   "wrong! not implemented");
-
+#if !(USE_RSRC_BUILTIN)
     if constexpr(N == 1)
     {
         llvm_amdgcn_raw_buffer_store_i8(bit_cast<int8_t>(src_thread_data),
@@ -1712,13 +1851,100 @@ CK_TILE_DEVICE void amd_buffer_store_impl_with_bytes(const thread_buffer<int8_t,
             dst_wave_addr_offset + sizeof(int32_t) * 12,
             static_cast<index_t>(coherence));
     }
+#else
+    if constexpr(N == 1)
+    {
+        __builtin_amdgcn_raw_buffer_store_b8(bit_cast<int8_t>(src_thread_data),
+                                             dst_wave_buffer_resource,
+                                             dst_thread_addr_offset,
+                                             dst_wave_addr_offset,
+                                             static_cast<index_t>(coherence));
+    }
+    else if constexpr(N == 2)
+    {
+
+        __builtin_amdgcn_raw_buffer_store_b16(bit_cast<int16_t>(src_thread_data),
+                                              dst_wave_buffer_resource,
+                                              dst_thread_addr_offset,
+                                              dst_wave_addr_offset,
+                                              static_cast<index_t>(coherence));
+    }
+    else if constexpr(N == 4)
+    {
+        __builtin_amdgcn_raw_buffer_store_b32(bit_cast<int32_t>(src_thread_data),
+                                              dst_wave_buffer_resource,
+                                              dst_thread_addr_offset,
+                                              dst_wave_addr_offset,
+                                              static_cast<index_t>(coherence));
+    }
+    else if constexpr(N == 8)
+    {
+        __builtin_amdgcn_raw_buffer_store_b64(bit_cast<int32x2_t>(src_thread_data),
+                                              dst_wave_buffer_resource,
+                                              dst_thread_addr_offset,
+                                              dst_wave_addr_offset,
+                                              static_cast<index_t>(coherence));
+    }
+    else if constexpr(N == 16)
+    {
+        __builtin_amdgcn_raw_buffer_store_b128(bit_cast<int32x4_t>(src_thread_data),
+                                               dst_wave_buffer_resource,
+                                               dst_thread_addr_offset,
+                                               dst_wave_addr_offset,
+                                               static_cast<index_t>(coherence));
+    }
+    else if constexpr(N == 32)
+    {
+        thread_buffer<int32_t, 8> tmp{bit_cast<int32x8_t>(src_thread_data)};
+
+        __builtin_amdgcn_raw_buffer_store_b128(tmp.template get_as<int32x4_t>()[number<0>{}],
+                                               dst_wave_buffer_resource,
+                                               dst_thread_addr_offset,
+                                               dst_wave_addr_offset,
+                                               static_cast<index_t>(coherence));
+
+        __builtin_amdgcn_raw_buffer_store_b128(tmp.template get_as<int32x4_t>()[number<1>{}],
+                                               dst_wave_buffer_resource,
+                                               dst_thread_addr_offset,
+                                               dst_wave_addr_offset + sizeof(int32_t) * 4,
+                                               static_cast<index_t>(coherence));
+    }
+    else if constexpr(N == 64)
+    {
+        thread_buffer<int32_t, 16> tmp{bit_cast<int32x16_t>(src_thread_data)};
+
+        __builtin_amdgcn_raw_buffer_store_b128(tmp.template get_as<int32x4_t>()[number<0>{}],
+                                               dst_wave_buffer_resource,
+                                               dst_thread_addr_offset,
+                                               dst_wave_addr_offset,
+                                               static_cast<index_t>(coherence));
+
+        __builtin_amdgcn_raw_buffer_store_b128(tmp.template get_as<int32x4_t>()[number<1>{}],
+                                               dst_wave_buffer_resource,
+                                               dst_thread_addr_offset,
+                                               dst_wave_addr_offset + sizeof(int32_t) * 4,
+                                               static_cast<index_t>(coherence));
+
+        __builtin_amdgcn_raw_buffer_store_b128(tmp.template get_as<int32x4_t>()[number<2>{}],
+                                               dst_wave_buffer_resource,
+                                               dst_thread_addr_offset,
+                                               dst_wave_addr_offset + sizeof(int32_t) * 8,
+                                               static_cast<index_t>(coherence));
+
+        __builtin_amdgcn_raw_buffer_store_b128(tmp.template get_as<int32x4_t>()[number<3>{}],
+                                               dst_wave_buffer_resource,
+                                               dst_thread_addr_offset,
+                                               dst_wave_addr_offset + sizeof(int32_t) * 12,
+                                               static_cast<index_t>(coherence));
+    }
+#endif
 }
 
 template <typename T,
           index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
 CK_TILE_DEVICE void amd_buffer_store_impl(const thread_buffer<T, N> src_thread_data,
-                                          int32x4_t dst_wave_buffer_resource,
+                                          buffer_rsrc_t dst_wave_buffer_resource,
                                           index_t dst_thread_addr_offset,
                                           index_t dst_wave_addr_offset)
 {
@@ -1736,7 +1962,7 @@ CK_TILE_DEVICE void amd_buffer_store_impl(const thread_buffer<T, N> src_thread_d
              (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same<T, uint8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)),
         "wrong! not implemented");
-
+#if !(USE_RSRC_BUILTIN)
     if constexpr(std::is_same<T, float>::value) // fp32
     {
         if constexpr(N == 1)
@@ -1916,6 +2142,9 @@ CK_TILE_DEVICE void amd_buffer_store_impl(const thread_buffer<T, N> src_thread_d
                 static_cast<index_t>(coherence));
         }
     }
+#else
+    if constexpr(0) {}
+#endif
     else
     {
         using r_t = thread_buffer<int8_t, sizeof(T) * N>;
@@ -1932,7 +2161,7 @@ template <typename T,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
           bool oob_conditional_check          = true>
 CK_TILE_DEVICE void amd_buffer_store_raw_impl(const thread_buffer<T, N>& dst_thread_data,
-                                              int32x4_t dst_wave_buffer_resource,
+                                              buffer_rsrc_t dst_wave_buffer_resource,
                                               index_t dst_thread_addr_offset,
                                               index_t dst_wave_addr_offset,
                                               index_t dst_linear_addr_offset,
@@ -1964,7 +2193,7 @@ CK_TILE_DEVICE void amd_buffer_store_raw_impl(const thread_buffer<T, N>& dst_thr
 
 template <typename T, index_t N>
 CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_thread_data,
-                                               int32x4_t dst_wave_buffer_resource,
+                                               buffer_rsrc_t dst_wave_buffer_resource,
                                                index_t dst_thread_addr_offset,
                                                index_t dst_wave_addr_offset)
 {
@@ -1975,156 +2204,161 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
 
     if constexpr(std::is_same<T, float>::value)
     {
+
+#if !(USE_RSRC_BUILTIN)
+#define atomic_add_fp32 llvm_amdgcn_raw_buffer_atomic_add_fp32
+#else
+#define atomic_add_fp32 __builtin_amdgcn_raw_ptr_buffer_atomic_fadd_f32
+#endif
         if constexpr(N == 1)
         {
-            llvm_amdgcn_raw_buffer_atomic_add_fp32(bit_cast<float>(src_thread_data),
-                                                   dst_wave_buffer_resource,
-                                                   dst_thread_addr_offset,
-                                                   dst_wave_addr_offset,
-                                                   0);
+            atomic_add_fp32(bit_cast<float>(src_thread_data),
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset,
+                            0);
         }
         else if constexpr(N == 2)
         {
-            llvm_amdgcn_raw_buffer_atomic_add_fp32(
-                src_thread_data.template get_as<float>()[number<0>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset,
-                0);
+            atomic_add_fp32(src_thread_data.template get_as<float>()[number<0>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset,
+                            0);
 
-            llvm_amdgcn_raw_buffer_atomic_add_fp32(
-                src_thread_data.template get_as<float>()[number<1>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + sizeof(float),
-                0);
+            atomic_add_fp32(src_thread_data.template get_as<float>()[number<1>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset + sizeof(float),
+                            0);
         }
         else if constexpr(N == 4)
         {
-            llvm_amdgcn_raw_buffer_atomic_add_fp32(
-                src_thread_data.template get_as<float>()[number<0>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset,
-                0);
+            atomic_add_fp32(src_thread_data.template get_as<float>()[number<0>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset,
+                            0);
 
-            llvm_amdgcn_raw_buffer_atomic_add_fp32(
-                src_thread_data.template get_as<float>()[number<1>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + sizeof(float),
-                0);
+            atomic_add_fp32(src_thread_data.template get_as<float>()[number<1>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset + sizeof(float),
+                            0);
 
-            llvm_amdgcn_raw_buffer_atomic_add_fp32(
-                src_thread_data.template get_as<float>()[number<2>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + 2 * sizeof(float),
-                0);
+            atomic_add_fp32(src_thread_data.template get_as<float>()[number<2>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset + 2 * sizeof(float),
+                            0);
 
-            llvm_amdgcn_raw_buffer_atomic_add_fp32(
-                src_thread_data.template get_as<float>()[number<3>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + 3 * sizeof(float),
-                0);
+            atomic_add_fp32(src_thread_data.template get_as<float>()[number<3>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset + 3 * sizeof(float),
+                            0);
         }
+#undef atomic_add_fp32
     }
     else if constexpr(std::is_same<T, fp16_t>::value)
     {
+#if !(USE_RSRC_BUILTIN)
+#define atomic_add_fp16x2 llvm_amdgcn_raw_buffer_atomic_add_fp16x2
+#else
+#define atomic_add_fp16x2 __builtin_amdgcn_raw_ptr_buffer_atomic_fadd_v2f16
+#endif
         if constexpr(N == 2)
         {
-            llvm_amdgcn_raw_buffer_atomic_add_fp16x2(bit_cast<fp16x2_t>(src_thread_data),
-                                                     dst_wave_buffer_resource,
-                                                     dst_thread_addr_offset,
-                                                     dst_wave_addr_offset,
-                                                     0);
+            atomic_add_fp16x2(bit_cast<fp16x2_t>(src_thread_data),
+                              dst_wave_buffer_resource,
+                              dst_thread_addr_offset,
+                              dst_wave_addr_offset,
+                              0);
         }
         else if constexpr(N == 4)
         {
             static_for<0, 2, 1>{}([&](auto i) {
-                llvm_amdgcn_raw_buffer_atomic_add_fp16x2(
-                    src_thread_data.template get_as<fp16x2_t>()[i],
-                    dst_wave_buffer_resource,
-                    dst_thread_addr_offset,
-                    dst_wave_addr_offset + i * sizeof(fp16x2_t),
-                    0);
+                atomic_add_fp16x2(src_thread_data.template get_as<fp16x2_t>()[i],
+                                  dst_wave_buffer_resource,
+                                  dst_thread_addr_offset,
+                                  dst_wave_addr_offset + i * sizeof(fp16x2_t),
+                                  0);
             });
         }
         else if constexpr(N == 8)
         {
             static_for<0, 4, 1>{}([&](auto i) {
-                llvm_amdgcn_raw_buffer_atomic_add_fp16x2(
-                    src_thread_data.template get_as<fp16x2_t>()[i],
-                    dst_wave_buffer_resource,
-                    dst_thread_addr_offset,
-                    dst_wave_addr_offset + i * sizeof(fp16x2_t),
-                    0);
+                atomic_add_fp16x2(src_thread_data.template get_as<fp16x2_t>()[i],
+                                  dst_wave_buffer_resource,
+                                  dst_thread_addr_offset,
+                                  dst_wave_addr_offset + i * sizeof(fp16x2_t),
+                                  0);
             });
         }
+#undef atomic_add_fp16x2
     }
     else if constexpr(std::is_same<T, int32_t>::value)
     {
+#if !(USE_RSRC_BUILTIN)
+#define atomic_add_i32 llvm_amdgcn_raw_buffer_atomic_add_i32
+#else
+#define atomic_add_i32 __builtin_amdgcn_raw_ptr_buffer_atomic_add_i32
+#endif
         if constexpr(N == 1)
         {
-            llvm_amdgcn_raw_buffer_atomic_add_i32(bit_cast<int32_t>(src_thread_data),
-                                                  dst_wave_buffer_resource,
-                                                  dst_thread_addr_offset,
-                                                  dst_wave_addr_offset,
-                                                  0);
+            atomic_add_i32(bit_cast<int32_t>(src_thread_data),
+                           dst_wave_buffer_resource,
+                           dst_thread_addr_offset,
+                           dst_wave_addr_offset,
+                           0);
         }
         else if constexpr(N == 2)
         {
-            llvm_amdgcn_raw_buffer_atomic_add_i32(
-                src_thread_data.template get_as<int32_t>()[number<0>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset,
-                0);
+            atomic_add_i32(src_thread_data.template get_as<int32_t>()[number<0>{}],
+                           dst_wave_buffer_resource,
+                           dst_thread_addr_offset,
+                           dst_wave_addr_offset,
+                           0);
 
-            llvm_amdgcn_raw_buffer_atomic_add_i32(
-                src_thread_data.template get_as<int32_t>()[number<1>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + sizeof(int32_t),
-                0);
+            atomic_add_i32(src_thread_data.template get_as<int32_t>()[number<1>{}],
+                           dst_wave_buffer_resource,
+                           dst_thread_addr_offset,
+                           dst_wave_addr_offset + sizeof(int32_t),
+                           0);
         }
         else if constexpr(N == 4)
         {
-            llvm_amdgcn_raw_buffer_atomic_add_i32(
-                src_thread_data.template get_as<int32_t>()[number<0>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset,
-                0);
+            atomic_add_i32(src_thread_data.template get_as<int32_t>()[number<0>{}],
+                           dst_wave_buffer_resource,
+                           dst_thread_addr_offset,
+                           dst_wave_addr_offset,
+                           0);
 
-            llvm_amdgcn_raw_buffer_atomic_add_i32(
-                src_thread_data.template get_as<int32_t>()[number<1>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + sizeof(int32_t),
-                0);
+            atomic_add_i32(src_thread_data.template get_as<int32_t>()[number<1>{}],
+                           dst_wave_buffer_resource,
+                           dst_thread_addr_offset,
+                           dst_wave_addr_offset + sizeof(int32_t),
+                           0);
 
-            llvm_amdgcn_raw_buffer_atomic_add_i32(
-                src_thread_data.template get_as<int32_t>()[number<2>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + 2 * sizeof(int32_t),
-                0);
+            atomic_add_i32(src_thread_data.template get_as<int32_t>()[number<2>{}],
+                           dst_wave_buffer_resource,
+                           dst_thread_addr_offset,
+                           dst_wave_addr_offset + 2 * sizeof(int32_t),
+                           0);
 
-            llvm_amdgcn_raw_buffer_atomic_add_i32(
-                src_thread_data.template get_as<int32_t>()[number<3>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + 3 * sizeof(int32_t),
-                0);
+            atomic_add_i32(src_thread_data.template get_as<int32_t>()[number<3>{}],
+                           dst_wave_buffer_resource,
+                           dst_thread_addr_offset,
+                           dst_wave_addr_offset + 3 * sizeof(int32_t),
+                           0);
         }
+#undef atomic_add_i32
     }
 }
 
 template <typename T, index_t N>
 CK_TILE_DEVICE void amd_buffer_atomic_max_impl(const thread_buffer<T, N> src_thread_data,
-                                               int32x4_t dst_wave_buffer_resource,
+                                               buffer_rsrc_t dst_wave_buffer_resource,
                                                index_t dst_thread_addr_offset,
                                                index_t dst_wave_addr_offset)
 {
@@ -2132,59 +2366,58 @@ CK_TILE_DEVICE void amd_buffer_atomic_max_impl(const thread_buffer<T, N> src_thr
                   "wrong! not implemented");
     if constexpr(std::is_same<T, double>::value)
     {
+#if !(USE_RSRC_BUILTIN)
+#define atomic_max_fp64 llvm_amdgcn_raw_buffer_atomic_max_fp64
+#else
+#define atomic_max_fp64 __builtin_amdgcn_raw_ptr_buffer_atomic_fmax_f64
+#endif
         if constexpr(N == 1)
         {
-            llvm_amdgcn_raw_buffer_atomic_max_fp64(bit_cast<double>(src_thread_data),
-                                                   dst_wave_buffer_resource,
-                                                   dst_thread_addr_offset,
-                                                   dst_wave_addr_offset,
-                                                   0);
+            atomic_max_fp64(bit_cast<double>(src_thread_data),
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset,
+                            0);
         }
         else if constexpr(N == 2)
         {
-            llvm_amdgcn_raw_buffer_atomic_max_fp64(
-                src_thread_data.template get_as<double>()[number<0>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset,
-                0);
+            atomic_max_fp64(src_thread_data.template get_as<double>()[number<0>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset,
+                            0);
 
-            llvm_amdgcn_raw_buffer_atomic_max_fp64(
-                src_thread_data.template get_as<double>()[number<1>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + sizeof(double),
-                0);
+            atomic_max_fp64(src_thread_data.template get_as<double>()[number<1>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset + sizeof(double),
+                            0);
         }
         else if constexpr(N == 4)
         {
-            llvm_amdgcn_raw_buffer_atomic_max_fp64(
-                src_thread_data.template get_as<double>()[number<0>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset,
-                0);
+            atomic_max_fp64(src_thread_data.template get_as<double>()[number<0>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset,
+                            0);
 
-            llvm_amdgcn_raw_buffer_atomic_max_fp64(
-                src_thread_data.template get_as<double>()[number<1>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + sizeof(double),
-                0);
+            atomic_max_fp64(src_thread_data.template get_as<double>()[number<1>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset + sizeof(double),
+                            0);
 
-            llvm_amdgcn_raw_buffer_atomic_max_fp64(
-                src_thread_data.template get_as<double>()[number<2>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + 2 * sizeof(double),
-                0);
+            atomic_max_fp64(src_thread_data.template get_as<double>()[number<2>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset + 2 * sizeof(double),
+                            0);
 
-            llvm_amdgcn_raw_buffer_atomic_max_fp64(
-                src_thread_data.template get_as<double>()[number<3>{}],
-                dst_wave_buffer_resource,
-                dst_thread_addr_offset,
-                dst_wave_addr_offset + 3 * sizeof(double),
-                0);
+            atomic_max_fp64(src_thread_data.template get_as<double>()[number<3>{}],
+                            dst_wave_buffer_resource,
+                            dst_thread_addr_offset,
+                            dst_wave_addr_offset + 3 * sizeof(double),
+                            0);
         }
     }
 }
@@ -2204,7 +2437,7 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
                                             bool src_thread_element_valid,
                                             index_t src_element_space_size)
 {
-    const int32x4_t src_wave_buffer_resource =
+    const buffer_rsrc_t src_wave_buffer_resource =
         make_wave_buffer_resource(p_src_wave, src_element_space_size * sizeof(T));
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
@@ -2243,7 +2476,7 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
                                                         index_t src_element_space_size,
                                                         T customized_value)
 {
-    const int32x4_t src_wave_buffer_resource =
+    const buffer_rsrc_t src_wave_buffer_resource =
         make_wave_buffer_resource(p_src_wave, src_element_space_size * sizeof(T));
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
@@ -2270,7 +2503,7 @@ CK_TILE_DEVICE void amd_buffer_load_raw(thread_buffer<T, N>& dst,
                                         index_t is_valid_element = 0,
                                         bool_constant<pre_nop>   = {})
 {
-    const int32x4_t src_wave_buffer_resource =
+    const buffer_rsrc_t src_wave_buffer_resource =
         make_wave_buffer_resource(p_src_wave, src_element_space_size * sizeof(T));
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
@@ -2293,7 +2526,7 @@ template <typename T,
           bool oob_conditional_check          = true,
           bool pre_nop                        = false>
 CK_TILE_DEVICE void amd_buffer_load_raw(thread_buffer<T, N>& dst,
-                                        const int32x4_t src_wave_buffer_resource,
+                                        const buffer_rsrc_t src_wave_buffer_resource,
                                         index_t src_thread_element_offset,
                                         index_t src_linear_element_offset,
                                         index_t is_valid_element = 0,
@@ -2327,7 +2560,7 @@ CK_TILE_DEVICE void amd_async_buffer_load_with_oob_raw(T* smem,
                                                        index_t src_element_space_size,
                                                        bool_constant<pre_nop> = {})
 {
-    const int32x4_t src_wave_buffer_resource =
+    const buffer_rsrc_t src_wave_buffer_resource =
         make_wave_buffer_resource(p_src_wave, src_element_space_size * sizeof(T));
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
@@ -2347,7 +2580,7 @@ template <typename T,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
           bool pre_nop                        = false>
 CK_TILE_DEVICE void amd_async_buffer_load_with_oob_raw(T* smem,
-                                                       const int32x4_t src_wave_buffer_resource,
+                                                       const buffer_rsrc_t src_wave_buffer_resource,
                                                        index_t src_thread_element_offset,
                                                        index_t src_linear_element_offset,
                                                        bool_constant<pre_nop> = {})
@@ -2368,12 +2601,13 @@ template <typename T,
           index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
           bool oob_conditional_check          = false>
-CK_TILE_DEVICE void amd_async_buffer_load_with_oob(CK_TILE_LDS_ADDR T* smem,
-                                                   const int32x4_t src_wave_buffer_resource,
-                                                   index_t src_thread_element_offset,
-                                                   index_t src_linear_element_offset,
-                                                   bool is_valid_element,
-                                                   bool_constant<oob_conditional_check> = {})
+CK_TILE_DEVICE void amd_async_buffer_load_with_oob( //
+    CK_TILE_LDS_ADDR T* smem,
+    const buffer_rsrc_t src_wave_buffer_resource,
+    index_t src_thread_element_offset,
+    index_t src_linear_element_offset,
+    bool is_valid_element,
+    bool_constant<oob_conditional_check> = {})
 {
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
     index_t src_linear_addr_offset = src_linear_element_offset * sizeof(T);
@@ -2401,7 +2635,7 @@ CK_TILE_DEVICE void amd_buffer_store(const thread_buffer<T, N>& src_thread_data,
                                      const bool dst_thread_element_valid,
                                      const index_t dst_element_space_size)
 {
-    const int32x4_t dst_wave_buffer_resource =
+    const auto dst_wave_buffer_resource =
         make_wave_buffer_resource(p_dst_wave, dst_element_space_size * sizeof(T));
 
     index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
@@ -2443,7 +2677,7 @@ CK_TILE_DEVICE void amd_buffer_store_raw(const thread_buffer<T, N>& src_thread_d
                                          const bool dst_thread_element_valid,
                                          const index_t dst_element_space_size)
 {
-    const int32x4_t dst_wave_buffer_resource =
+    const auto dst_wave_buffer_resource =
         make_wave_buffer_resource(p_dst_wave, dst_element_space_size * sizeof(T));
 
     index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
@@ -2468,7 +2702,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
                                           const bool dst_thread_element_valid,
                                           const index_t dst_element_space_size)
 {
-    const int32x4_t dst_wave_buffer_resource =
+    const auto dst_wave_buffer_resource =
         make_wave_buffer_resource(p_dst_wave, dst_element_space_size * sizeof(T));
 
     index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
@@ -2501,7 +2735,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_raw(const thread_buffer<T, N>& src_thr
                                               bool_constant<pre_nop> = {})
 {
     const int32x4_t dst_wave_buffer_resource =
-        make_wave_buffer_resource(p_dst_wave, dst_element_space_size * sizeof(T));
+        make_wave_buffer_resource_raw(p_dst_wave, dst_element_space_size * sizeof(T));
 
     index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
     index_t dst_linear_addr_offset = dst_linear_element_offset * sizeof(T);
@@ -2537,7 +2771,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_max(const thread_buffer<T, N>& src_thread_
                                           const bool dst_thread_element_valid,
                                           const index_t dst_element_space_size)
 {
-    const int32x4_t dst_wave_buffer_resource =
+    const auto dst_wave_buffer_resource =
         make_wave_buffer_resource(p_dst_wave, dst_element_space_size * sizeof(T));
 
     index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
@@ -2553,54 +2787,6 @@ CK_TILE_DEVICE void amd_buffer_atomic_max(const thread_buffer<T, N>& src_thread_
         amd_buffer_atomic_max_impl<T, N>(
             src_thread_data, dst_wave_buffer_resource, dst_thread_addr_offset, 0);
     }
-#endif
-}
-
-template <typename T, index_t NumElemsPerThread>
-CK_TILE_DEVICE void amd_direct_load_global_to_lds(const T* global_base_ptr,
-                                                  const index_t global_offset,
-                                                  T* lds_base_ptr,
-                                                  const index_t lds_offset,
-                                                  const bool is_valid,
-                                                  const index_t src_element_space_size)
-{
-    const uint32_t* global_ptr =
-        reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(global_base_ptr));
-    const int32x4_t src_resource =
-        make_wave_buffer_resource(global_ptr, src_element_space_size * sizeof(T));
-    const index_t global_offset_bytes = is_valid ? global_offset * sizeof(T) : 0x80000000;
-
-#if CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
-    T* lds_ptr = lds_base_ptr + lds_offset;
-    auto const lds_ptr_sgpr =
-        __builtin_amdgcn_readfirstlane((reinterpret_cast<uintptr_t>(lds_ptr)));
-    asm volatile("s_mov_b32 m0, %0; \n\t"
-                 "buffer_load_dword %1, %2, 0 offen lds;\n\t" ::"s"(lds_ptr_sgpr),
-                 "v"(global_offset_bytes),
-                 "s"(src_resource)
-                 : "memory");
-#else
-    // Direct loads require that each thread reads and writes exactly a single DWORD.
-#if defined(__gfx9__)
-    constexpr auto bytes_per_thread = sizeof(T) * NumElemsPerThread;
-#endif
-    // Direct loads require that each thread reads and writes a multiple of DWORDs (4 bytes).
-    // For gfx950: supports 1, 3, or 4 DWORDs per thread
-    // For gfx942: supports exactly 1 DWORD per thread
-#if defined(__gfx950__)
-    constexpr auto dword_bytes = 4;
-    static_assert(bytes_per_thread == dword_bytes || bytes_per_thread == dword_bytes * 3 ||
-                  bytes_per_thread == dword_bytes * 4);
-#elif defined(__gfx9__)
-    constexpr auto dword_bytes = 4;
-    static_assert(bytes_per_thread == dword_bytes);
-#endif
-    // LDS pointer must be attributed with the LDS address space.
-    as3_uint32_ptr lds_ptr =
-        reinterpret_cast<as3_uint32_ptr>(reinterpret_cast<uintptr_t>(lds_base_ptr + lds_offset));
-
-    llvm_amdgcn_raw_buffer_load_lds(
-        src_resource, lds_ptr, bytes_per_thread, global_offset_bytes, 0, 0, 0);
 #endif
 }
 
