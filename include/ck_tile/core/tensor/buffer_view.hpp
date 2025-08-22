@@ -431,7 +431,7 @@ struct buffer_view<address_space_enum::global,
 
         constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
         const auto src_wave_buffer_resource =
-            make_wave_buffer_resource(p_data_, (buffer_size_) * sizeof(type));
+            make_wave_buffer_resource_raw(p_data_, (buffer_size_) * sizeof(type));
 
         amd_async_buffer_load_with_oob<remove_cvref_t<T>, t_per_x, Coherence>(
             smem,

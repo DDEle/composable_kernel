@@ -1707,7 +1707,7 @@ template <typename T,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
           bool oob_conditional_check          = true>
 CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
-                                          buffer_rsrc_t src_wave_buffer_resource,
+                                          int32x4_t src_wave_buffer_resource,
                                           index_t src_thread_addr_offset,
                                           index_t src_wave_addr_offset,
                                           index_t src_immediate_addr_offset    = 0,
@@ -1734,24 +1734,39 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
     index_t v_offset = src_thread_addr_offset;
     if constexpr(oob_conditional_check)
         v_offset = flag ? v_offset : 0xffffffff;
-// #ifdef __HIP_DEVICE_COMPILE__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
-#if !(USE_RSRC_BUILTIN)
+#if 1 || !(USE_RSRC_BUILTIN)
 #define buffer_load_lds llvm_amdgcn_raw_buffer_load_lds
 #else
-#define buffer_load_lds llvm_amdgcn_raw_ptr_buffer_load_lds
+#define buffer_load_lds __builtin_amdgcn_raw_ptr_buffer_load_lds
 #endif
-    buffer_load_lds(src_wave_buffer_resource,
-                    (as3_uint32_ptr)(smem),
-                    bytes,
-                    v_offset,
-                    src_wave_addr_offset,
-                    /*src_immediate_addr_offset*/ 0,
+
+#define buffer_load_lds_bytes(S)                     \
+    buffer_load_lds(src_wave_buffer_resource,        \
+                    (as3_uint32_ptr)(smem),          \
+                    S,                               \
+                    v_offset,                        \
+                    src_wave_addr_offset,            \
+                    /*src_immediate_addr_offset*/ 0, \
                     0);
+
+    if constexpr(bytes == 4)
+    {
+        buffer_load_lds_bytes(4);
+    }
+    if constexpr(bytes == 12)
+    {
+        buffer_load_lds_bytes(12);
+    }
+    if constexpr(bytes == 16)
+    {
+        buffer_load_lds_bytes(16);
+    }
+
 #undef buffer_load_lds
+#undef buffer_load_lds_bytes
 #pragma clang diagnostic pop
-    // #endif
 }
 
 template <index_t N,
@@ -2603,7 +2618,7 @@ template <typename T,
           bool oob_conditional_check          = false>
 CK_TILE_DEVICE void amd_async_buffer_load_with_oob( //
     CK_TILE_LDS_ADDR T* smem,
-    const buffer_rsrc_t src_wave_buffer_resource,
+    const int32x4_t src_wave_buffer_resource,
     index_t src_thread_element_offset,
     index_t src_linear_element_offset,
     bool is_valid_element,
