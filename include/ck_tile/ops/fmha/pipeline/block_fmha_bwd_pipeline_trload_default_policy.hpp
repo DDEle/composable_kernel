@@ -194,13 +194,7 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetTransposedAlignmentOGrad()
     {
-        constexpr index_t kBlockSize = Problem::kBlockSize;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kM0;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kVHeaddim;
-
-        constexpr index_t total_pixels = kNPerBlock * kKPerBlock / kBlockSize;
-
-        return total_pixels / GetAlignmentOGrad<Problem>();
+        return GetTransposedAlignmentX<typename Problem::OGradDataType>();
     }
 
     template <typename Problem>
@@ -1150,15 +1144,52 @@ struct BlockFmhaBwdPipelineTrLoadDefaultPolicy
             constexpr index_t MFMA_INST     = Gemm0MFMA;
             constexpr index_t LDS_READ_INST = OGradT_LDS_READ + LSE_LDS_READ + D_LDS_READ;
 
-            constexpr index_t lcm_inst = lcm(VMEM_READ_INST, MFMA_INST, LDS_READ_INST);
-            static_for<0, lcm_inst, 1>{}([&](auto i) {
-                if constexpr(i % (lcm_inst / VMEM_READ_INST) == 0)
-                    __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
-                if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+            // constexpr index_t lcm_inst = lcm(VMEM_READ_INST, MFMA_INST, LDS_READ_INST);
+            // static_for<0, lcm_inst, 1>{}([&](auto i) {
+            //     if constexpr(i % (lcm_inst / VMEM_READ_INST) == 0)
+            //         __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+            //     if constexpr(i % (lcm_inst / MFMA_INST) == 0)
+            //         __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            //     if constexpr(i % (lcm_inst / LDS_READ_INST) == 0)
+            //         __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+            // });
                     __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
-                if constexpr(i % (lcm_inst / LDS_READ_INST) == 0)
                     __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
-            });
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                    __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+
         }
 
         CK_TILE_DEVICE static constexpr void SchedulerGemm12()
