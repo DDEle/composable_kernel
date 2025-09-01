@@ -238,6 +238,7 @@ float invoke_gemm(ck_tile::HostTensor<ADataType>& a_m_k,
     return ave_time;
 }
 
+template <typename GemmConfig>
 int run_gemm_mx_example(int argc, char* argv[])
 {
     const ExampleArgs args(argc, argv);
@@ -287,15 +288,13 @@ int run_gemm_mx_example(int argc, char* argv[])
                             stride_A,
                             stride_B,
                             stride_C,
-                            kbatch,
-                            n_warmup,
-                            n_repeat,
-                            persistent);
+                            args.n_warmup,
+                            args.n_repeat);
 
     c_m_n_dev_buf.FromDevice(c_m_n.data());
     bool pass = true;
 
-    if(arg_parser.get_int("v") == 1)
+    if(args.validate == 1)
     {
         ck_tile::HostTensor<CDataType> c_m_n_host_ref(
             ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
@@ -317,57 +316,11 @@ int run_gemm_mx_example(int argc, char* argv[])
                   << " Absolute error threshold: " << rtol_atol.at(ck_tile::number<1>{})
                   << std::endl;
         std::cout << "The CPU verification result is:" << (pass ? "correct" : "fail") << std::endl;
-    }
-    else if(arg_parser.get_int("v") == 2)
-    {
-        if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
-        {
-            // Restore input for B for gpu reference
-            b_k_n_dev_buf.ToDevice(b_k_n.data());
-        }
-        if constexpr(GemmConfig::Preshuffle)
-        {
-            b_k_n_dev_buf.ToDevice(b_k_n.data());
-        }
-
-        // memory on host to store gpu reference result
-        ck_tile::HostTensor<CDataType> c_m_n_gpu_ref(
-            ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
-        // memory on device to store gpu reference result
-        ck_tile::DeviceMem c_m_n_gpu_buf_ref(c_m_n_gpu_ref.get_element_space_size_in_bytes());
-
-        c_m_n_gpu_ref.SetZero();
-        c_m_n_gpu_buf_ref.SetZero();
-
-        ADataType* d_A = static_cast<ADataType*>(a_m_k_dev_buf.GetDeviceBuffer());
-        BDataType* d_B = static_cast<BDataType*>(b_k_n_dev_buf.GetDeviceBuffer());
-        CDataType* d_C = static_cast<CDataType*>(c_m_n_gpu_buf_ref.GetDeviceBuffer());
-
-        ck_tile::reference_gemm_gpu<ADataType,
-                                    BDataType,
-                                    AccDataType,
-                                    CDataType,
-                                    ALayout,
-                                    BLayout,
-                                    CLayout>(d_A, d_B, d_C, M, N, K, stride_A, stride_B, stride_C);
-
-        c_m_n_gpu_buf_ref.FromDevice(c_m_n_gpu_ref.data());
-
-        const float max_accumulated_value =
-            *std::max_element(c_m_n_gpu_ref.mData.begin(), c_m_n_gpu_ref.mData.end());
-        const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
-            K, kbatch, max_accumulated_value);
-        pass = ck_tile::check_err(c_m_n,
-                                  c_m_n_gpu_ref,
-                                  "Error: Incorrect results!",
-                                  rtol_atol.at(ck_tile::number<0>{}),
-                                  rtol_atol.at(ck_tile::number<1>{}));
-        std::cout << "Relative error threshold: " << rtol_atol.at(ck_tile::number<0>{})
-                  << " Absolute error threshold: " << rtol_atol.at(ck_tile::number<1>{})
+    } else if (args.validate != 0) {
+        std::cout << "Wrong! validate flag only can be 0(no validation) or 1(with validation)!"
                   << std::endl;
-        std::cout << "The GPU verification result is: " << (pass ? "correct" : "fail") << std::endl;
+        pass = false;
     }
-
     return pass;
 }
 
@@ -375,7 +328,7 @@ int main(int argc, char* argv[])
 {
     try
     {
-        return !run_gemm_mx_example(argc, argv);
+        return !run_gemm_mx_example<GemmMXConfigBase>(argc, argv);
     }
     catch(const std::runtime_error& e)
     {
