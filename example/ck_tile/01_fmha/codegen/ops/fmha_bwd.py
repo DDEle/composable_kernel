@@ -651,13 +651,15 @@ class FmhaBwdApiTrait:
 
     @property
     def dcheck(self) -> str:
-        if self.dpad == 't': return f'a.hdim_q % {self.bhdq} != 0'
-        else :               return f'a.hdim_q % {self.bhdq} == 0'
+        return 'true'
+        # if self.dpad == 't': return f'a.hdim_q % {self.bhdq} != 0'
+        # else :               return f'a.hdim_q % {self.bhdq} == 0'
 
     @property
     def dvcheck(self) -> str:
-        if self.dvpad == 't': return f'a.hdim_v % {self.bhdv} != 0'
-        else :                return f'a.hdim_v % {self.bhdv} == 0'
+        return 'true'
+        # if self.dvpad == 't': return f'a.hdim_v % {self.bhdv} != 0'
+        # else :                return f'a.hdim_v % {self.bhdv} == 0'
 
     @property
     def extra_cond(self) -> str:

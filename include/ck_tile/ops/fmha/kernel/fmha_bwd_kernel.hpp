@@ -815,7 +815,7 @@ struct FmhaBwdDQDKDVKernel
         const auto q_dram = pad_tensor_view(
             q_dram_naive,
             make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kQKHeaddim>{}),
-            sequence<false, kPadHeadDimQ>{});
+            sequence<false, true>{});
 
         const auto k_dram_naive = make_naive_tensor_view<address_space_enum::global>(
             k_ptr,
@@ -826,7 +826,7 @@ struct FmhaBwdDQDKDVKernel
         const auto k_dram = pad_tensor_view(
             k_dram_naive,
             make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kQKHeaddim>{}),
-            sequence<false, kPadHeadDimQ>{});
+            sequence<false, true>{});
 
         const auto v_dram = [&]() {
             const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global>(
@@ -838,7 +838,7 @@ struct FmhaBwdDQDKDVKernel
             return pad_tensor_view(
                 v_dram_naive,
                 make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kVHeaddim>{}),
-                sequence<false, kPadHeadDimV>{});
+                sequence<false, true>{});
         }();
 
         // lse and d should be fine to read unpaded data as they are not on the reduction dimension
@@ -857,7 +857,7 @@ struct FmhaBwdDQDKDVKernel
         const auto do_dram = pad_tensor_view(
             do_dram_naive,
             make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kVHeaddim>{}),
-            sequence<false, kPadHeadDimV>{});
+            sequence<false, true>{});
 
         auto q_dram_window = make_tile_window(
             q_dram,
@@ -905,7 +905,7 @@ struct FmhaBwdDQDKDVKernel
             const auto dq_acc_dram = pad_tensor_view(
                 dq_acc_dram_naive,
                 make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kQKHeaddim>{}),
-                sequence<false, kPadHeadDimQ>{});
+                sequence<false, true>{});
             return make_tile_window(
                 dq_acc_dram,
                 make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kQKHeaddim>{}),
@@ -1089,7 +1089,7 @@ struct FmhaBwdDQDKDVKernel
             return pad_tensor_view(
                 dk_dram_naive,
                 make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kQKHeaddim>{}),
-                sequence<false, kPadHeadDimQ>{});
+                sequence<false, true>{});
         }();
 
         auto dv_dram = [&]() {
@@ -1103,7 +1103,7 @@ struct FmhaBwdDQDKDVKernel
             return pad_tensor_view(
                 dv_dram_naive,
                 make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kVHeaddim>{}),
-                sequence<false, kPadHeadDimV>{});
+                sequence<false, true>{});
         }();
 
         auto dk_dram_window = make_tile_window(
