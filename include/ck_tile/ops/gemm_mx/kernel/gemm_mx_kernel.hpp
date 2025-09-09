@@ -37,25 +37,23 @@ struct GemmMxKernel
     using ADataType = typename GemmMxPipeline::ADataType;
     using BDataType = typename GemmMxPipeline::BDataType;
     using EDataType = typename EpiloguePipeline::ODataType;
-    
 
     static constexpr index_t kBlockSize = GemmMxPipeline::BlockSize;
-    static constexpr index_t MPerBlock = TilePartitioner::MPerBlock;
-    static constexpr index_t NPerBlock = TilePartitioner::NPerBlock;
-    static constexpr index_t KPerBlock = TilePartitioner::KPerBlock;
-    using KernelArgs = GemmMxKernelArgs;
+    static constexpr index_t MPerBlock  = TilePartitioner::MPerBlock;
+    static constexpr index_t NPerBlock  = TilePartitioner::NPerBlock;
+    static constexpr index_t KPerBlock  = TilePartitioner::KPerBlock;
+    using KernelArgs                    = GemmMxKernelArgs;
 
-    using DsLayout         = typename EpiloguePipeline::DsLayout;
-    using DsDataType       = typename EpiloguePipeline::DsDataType;
+    using DsLayout   = typename EpiloguePipeline::DsLayout;
+    using DsDataType = typename EpiloguePipeline::DsDataType;
     static_assert(DsLayout::size() == DsDataType::size(),
                   "The size of DsLayout and DsDataType should be the same");
     static_assert(DsLayout::size() == 0, "Support D tensor later");
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
-        // clang-format off
-        return concat('_', "gemm_mx", gemm_prec_str<ADataType, BDataType>, GemmMxPipeline::GetName());
-        // clang-format on
+        return concat(
+            '_', "gemm_mx", gemm_prec_str<ADataType, BDataType>, GemmMxPipeline::GetName());
     }
 
     CK_TILE_HOST static constexpr auto GridSize(index_t M, index_t N, index_t KBatch)
@@ -75,73 +73,10 @@ struct GemmMxKernel
         return max(GemmMxPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
     }
 
-    CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs) { return true; }
-
-    template <memory_operation_enum DstInMemOp = memory_operation_enum::set>
-    CK_TILE_DEVICE static auto
-    MakeGemmTensorViews(const ADataType* a_ptr,
-                        const BDataType* b_flat_ptr,
-                        const std::array<const void*, NumDTensor>& ds_ptr,
-                        EDataType* e_ptr,
-                        const KernelArgs& kargs,
-                        const SplitKBatchOffset& splitk_batch_offset)
+    CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        // TODO: enable vector write for C in ColMajor
-        const auto& e_tensor_view = [&]() {
-            if constexpr(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>)
-            {
-                return make_naive_tensor_view<address_space_enum::global>(
-                    e_ptr,
-                    make_tuple(kargs.M, kargs.N),
-                    make_tuple(kargs.stride_E, 1),
-                    number<EpiloguePipeline::GetVectorSizeC()>{},
-                    number<1>{});
-            }
-            else
-            {
-                return make_naive_tensor_view<address_space_enum::global>(
-                    e_ptr,
-                    make_tuple(kargs.N, kargs.M),
-                    make_tuple(kargs.stride_E, 1),
-                    number<1>{},
-                    number<1>{});
-            }
-        }();
-
-        return make_tuple(a_tensor_view, b_flat_tensor_view, ds_tensor_view, e_tensor_view);
-    }
-
-    template <typename TensorView>
-    CK_TILE_DEVICE static auto MakeGemmPadViews(const TensorView& views)
-    {
-        // TODO vector write in for C in ColMajor
-        const auto& e_pad_view = [&]() {
-            const auto& e_tensor_view = views.at(I3);
-            if constexpr(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>)
-            {
-                return pad_tensor_view(e_tensor_view,
-                                       make_tuple(number<MPerBlock>{}, number<NPerBlock>{}),
-                                       sequence<false, GemmMxPipeline::kPadN>{});
-            }
-            else
-            {
-                return pad_tensor_view(e_tensor_view,
-                                       make_tuple(number<MPerBlock>{}, number<NPerBlock>{}),
-                                       sequence<GemmMxPipeline::kPadM, false>{});
-            }
-        }();
-
-        return make_tuple(a_pad_view, b_flat_tensor_view, ds_pad_view, e_pad_view);
-    }
-
-    template <typename PadView>
-    CK_TILE_DEVICE static auto
-    MakeGemmTileWindows(const PadView& views, const index_t i_m, const index_t i_n)
-    {
-        auto e_block_window = make_tile_window(
-            e_pad_view, make_tuple(number<MPerBlock>{}, number<NPerBlock>{}), {i_m, i_n});
-
-        return make_tuple(a_block_window, b_flat_block_window, ds_block_window, e_block_window);
+        // TODO: check argument validity
+        return true;
     }
 
     CK_TILE_DEVICE static void
@@ -173,38 +108,43 @@ struct GemmMxKernel
             return make_tile_window(
                 pad_view, make_tuple(number<MPerBlock>{}, number<KPerBlock>{}), make_tuple(i_m, 0));
         }();
-        const auto a_scale_window = [&]() {
-            const auto naive_view = make_naive_tensor_view<address_space_enum::global>(
-                
-            );}()
+        const auto a_scale_window =
+            [&]() {
+                const auto naive_view = make_naive_tensor_view<address_space_enum::global>(
 
-        const auto b_window = [&]() {
-            constexpr bool is_b_col_major =
-                std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>;
-            const auto naive_view = make_naive_tensor_view<address_space_enum::global>(
-                reinterpret_cast<const BDataType*>(kargs.b_ptr),
-                is_b_col_major ? make_tuple(kargs.N, kargs.K) : make_tuple(kargs.K, kargs.N),
-                make_tuple(kargs.stride_B, 1),
-                number<GemmMxPipeline::GetVectorSizeB()>{},
-                number<1>{});
-            const auto&& view_n_k = [&]() {
-                if constexpr(is_b_col_major)
-                    return naive_view;
-                else
-                    return transform_tensor_view(naive_view,
-                                                 make_tuple(make_pass_through_transform(kargs.N),
-                                                            make_pass_through_transform(kargs.K)),
-                                                 make_tuple(sequence<1>{}, sequence<0>{}),
-                                                 make_tuple(sequence<0>{}, sequence<1>{}));
-            }();
-            const auto pad_view =
-                pad_tensor_view(view_n_k,
-                                make_tuple(number<NPerBlock>{}, number<KPerBlock>{}),
-                                sequence<(is_b_col_major ? false : GemmMxPipeline::kPadN),
-                                         (is_b_col_major ? GemmMxPipeline::kPadK : false)>{});
-            return make_tile_window(
-                pad_view, make_tuple(number<NPerBlock>{}, number<KPerBlock>{}), make_tuple(i_n, 0));
-        }();
+                );
+            }()
+
+                const auto b_window = [&]() {
+                    constexpr bool is_b_col_major =
+                        std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>;
+                    const auto naive_view = make_naive_tensor_view<address_space_enum::global>(
+                        reinterpret_cast<const BDataType*>(kargs.b_ptr),
+                        is_b_col_major ? make_tuple(kargs.N, kargs.K)
+                                       : make_tuple(kargs.K, kargs.N),
+                        make_tuple(kargs.stride_B, 1),
+                        number<GemmMxPipeline::GetVectorSizeB()>{},
+                        number<1>{});
+                    const auto&& view_n_k = [&]() {
+                        if constexpr(is_b_col_major)
+                            return naive_view;
+                        else
+                            return transform_tensor_view(
+                                naive_view,
+                                make_tuple(make_pass_through_transform(kargs.N),
+                                           make_pass_through_transform(kargs.K)),
+                                make_tuple(sequence<1>{}, sequence<0>{}),
+                                make_tuple(sequence<0>{}, sequence<1>{}));
+                    }();
+                    const auto pad_view = pad_tensor_view(
+                        view_n_k,
+                        make_tuple(number<NPerBlock>{}, number<KPerBlock>{}),
+                        sequence<(is_b_col_major ? false : GemmMxPipeline::kPadN),
+                                 (is_b_col_major ? GemmMxPipeline::kPadK : false)>{});
+                    return make_tile_window(pad_view,
+                                            make_tuple(number<NPerBlock>{}, number<KPerBlock>{}),
+                                            make_tuple(i_n, 0));
+                }();
         const auto e_window = [&]() {
             constexpr bool is_e_row_major = std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>;
             const auto naive_view         = make_naive_tensor_view<address_space_enum::global>(

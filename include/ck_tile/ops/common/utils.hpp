@@ -10,7 +10,20 @@
 
 namespace ck_tile {
 
-// clang-format off
+// enum class DataType
+// {
+//     fp32,
+//     fp16,
+//     bf16,
+//     fp8,
+//     bf8,
+//     int8,
+//     pk_int4,
+// };
+
+// tuple<float, DataType, "fp32">
+
+    // clang-format off
 template <typename T> struct typeToStr;
 template <> struct typeToStr<float> { static constexpr const char * name = "fp32"; };
 template <> struct typeToStr<fp16_t> { static constexpr const char * name = "fp16"; };
