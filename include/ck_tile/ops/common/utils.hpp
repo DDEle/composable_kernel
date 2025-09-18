@@ -23,7 +23,7 @@ namespace ck_tile {
 
 // tuple<float, DataType, "fp32">
 
-    // clang-format off
+// clang-format off
 template <typename T> struct typeToStr;
 template <> struct typeToStr<float> { static constexpr const char * name = "fp32"; };
 template <> struct typeToStr<fp16_t> { static constexpr const char * name = "fp16"; };
