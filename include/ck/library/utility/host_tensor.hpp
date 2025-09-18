@@ -374,7 +374,8 @@ struct Tensor
 
     std::size_t GetElementSpaceSizeInBytes() const { return sizeof(T) * GetElementSpaceSize(); }
 
-    void SetZero() { ck::ranges::fill<T>(mData, T{0}); }
+    void SetValue(const T& v) { ck::ranges::fill<T>(mData, v); }
+    void SetZero() { SetValue(T{0}); }
 
     template <typename F>
     void ForEach_impl(F&& f, std::vector<size_t>& idx, size_t rank)
