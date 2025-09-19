@@ -50,46 +50,46 @@ __global__ void set_buffer_value(T* p, T x, uint64_t buffer_element_size)
 struct DeviceMem
 
 {
-    DeviceMem() : mpDeviceBuf(nullptr), mMemSize(0) {}
-    DeviceMem(std::size_t mem_size) : mMemSize(mem_size)
+    DeviceMem() : mpRealBuf(nullptr), mpDeviceBuf(nullptr), mMemSize(0), mPadSize(0) {}
+    DeviceMem(std::size_t mem_size, std::size_t pad_size = 0)
+        : mMemSize(mem_size), mPadSize(pad_size)
     {
-        if(mMemSize != 0)
-        {
-            HIP_CHECK_ERROR(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
-        }
-        else
-        {
-            mpDeviceBuf = nullptr;
-        }
+        Malloc();
     }
     template <typename T>
-    DeviceMem(const HostTensor<T>& t) : mMemSize(t.get_element_space_size_in_bytes())
+    DeviceMem(const HostTensor<T>& t, std::size_t pad_size = 0)
+        : mMemSize(t.get_element_space_size_in_bytes()), mPadSize(pad_size)
+    {
+        Malloc();
+        ToDevice(t.data());
+    }
+    void Malloc()
     {
         if(mMemSize != 0)
         {
-            HIP_CHECK_ERROR(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
+            HIP_CHECK_ERROR(hipMalloc(static_cast<void**>(&mpRealBuf), mMemSize + mPadSize * 2));
+            mpDeviceBuf = reinterpret_cast<char*>(mpRealBuf) + mPadSize;
+            if(mPadSize > 0)
+            {
+                HIP_CHECK_ERROR(hipMemset(mpRealBuf, 0xff, mPadSize));
+                HIP_CHECK_ERROR(hipMemset(
+                    reinterpret_cast<char*>(mpRealBuf) + mMemSize + mPadSize, 0xff, mPadSize));
+            }
         }
         else
         {
+            mpRealBuf   = nullptr;
             mpDeviceBuf = nullptr;
         }
-        ToDevice(t.data());
     }
     void Realloc(std::size_t mem_size)
     {
-        if(mpDeviceBuf)
+        if(mpRealBuf)
         {
-            HIP_CHECK_ERROR(hipFree(mpDeviceBuf));
+            HIP_CHECK_ERROR(hipFree(mpRealBuf));
         }
         mMemSize = mem_size;
-        if(mMemSize != 0)
-        {
-            HIP_CHECK_ERROR(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
-        }
-        else
-        {
-            mpDeviceBuf = nullptr;
-        }
+        Malloc();
     }
     void* GetDeviceBuffer() const { return mpDeviceBuf; }
     std::size_t GetBufferSize() const { return mMemSize; }
@@ -175,11 +175,11 @@ struct DeviceMem
     }
     ~DeviceMem()
     {
-        if(mpDeviceBuf)
+        if(mpRealBuf)
         {
             try
             {
-                HIP_CHECK_ERROR(hipFree(mpDeviceBuf));
+                HIP_CHECK_ERROR(hipFree(mpRealBuf));
             }
             catch(std::runtime_error& re)
             {
@@ -188,8 +188,10 @@ struct DeviceMem
         }
     }
 
+    void* mpRealBuf;      ///< original pointer returned by hipMalloc
     void* mpDeviceBuf;    ///< pointer to device buffer
     std::size_t mMemSize; ///< size of device buffer in bytes
+    std::size_t mPadSize; ///< size of padding in bytes
 };
 
 } // namespace ck_tile

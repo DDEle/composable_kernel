@@ -277,7 +277,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
         ck_tile::FillUniformDistribution<KDataType>{0.f, 1.f, next_seed()}(k_host);
         ck_tile::FillUniformDistribution<VDataType>{0.f, 1.f, next_seed()}(v_host);
         ck_tile::FillUniformDistribution<BiasDataType>{0.f, 1.f, next_seed()}(bias_host);
-        ck_tile::FillUniformDistribution<OGradDataType>{0.f, 1.f, next_seed()}(do_host);
+        ck_tile::FillUniformDistribution<OGradDataType>{-5.f, 5.f, next_seed()}(do_host);
     }
     else if(init_method == "tf" || init_method == "2")
     {
@@ -312,25 +312,26 @@ bwd_result fmha_bwd_run(mode_enum mode,
         }
     }
 
-    ck_tile::DeviceMem q_buf(q_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem k_buf(k_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem v_buf(v_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem bias_buf(bias_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem o_buf(o_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem lse_buf(lse_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem d_buf(d_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem randval_buf(randval_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem dq_buf(dq_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem dk_buf(dk_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem dv_buf(dv_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem do_buf(do_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem dbias_buf(dbias_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem seqstart_q(seqstart_q_host.size() * sizeof(int32_t));
-    ck_tile::DeviceMem seqstart_k(seqstart_k_host.size() * sizeof(int32_t));
-    ck_tile::DeviceMem drop_seed_buf(drop_prefs ? sizeof(uint64_t) : 0);
-    ck_tile::DeviceMem drop_offset_buf(drop_prefs ? sizeof(uint64_t) : 0);
-    ck_tile::DeviceMem alibi_slope_buf(alibi_slope_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem dq_acc_buf(dq_acc_host.get_element_space_size_in_bytes());
+    constexpr size_t pad1k = 16384;
+    ck_tile::DeviceMem q_buf(q_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem k_buf(k_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem v_buf(v_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem bias_buf(bias_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem o_buf(o_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem lse_buf(lse_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem d_buf(d_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem randval_buf(randval_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem dq_buf(dq_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem dk_buf(dk_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem dv_buf(dv_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem do_buf(do_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem dbias_buf(dbias_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem seqstart_q(seqstart_q_host.size() * sizeof(int32_t), pad1k);
+    ck_tile::DeviceMem seqstart_k(seqstart_k_host.size() * sizeof(int32_t), pad1k);
+    ck_tile::DeviceMem drop_seed_buf(drop_prefs ? sizeof(uint64_t) : 0, pad1k);
+    ck_tile::DeviceMem drop_offset_buf(drop_prefs ? sizeof(uint64_t) : 0, pad1k);
+    ck_tile::DeviceMem alibi_slope_buf(alibi_slope_host.get_element_space_size_in_bytes(), pad1k);
+    ck_tile::DeviceMem dq_acc_buf(dq_acc_host.get_element_space_size_in_bytes(), pad1k);
 
     q_buf.ToDevice(q_host.data());
     k_buf.ToDevice(k_host.data());
@@ -858,6 +859,12 @@ bwd_result fmha_bwd_run(mode_enum mode,
             ck_tile::
                 reference_batched_gemm<GemmDataType, OGradDataType, AccDataType, VGradDataType>(
                     p_t_lp_host_ref, do_t_host_ref, dv_host_ref); // dv_g_n_o = p_lp_g_n_m@do_g_o_m
+            std::cout << std::endl;
+            p_t_lp_host_ref.print_first_n(std::cout, 293);
+            std::cout << std::endl;
+            do_t_host_ref.print_first_n(std::cout, 128);
+            std::cout << std::endl;
+            dv_host_ref.print_first_n(std::cout, 128 * 10);
 
             // dQ = scale * dS@K^T
             auto k_t_host_ref = k_host_refs[wb].transpose({0, 2, 1}); // k_g_n_k -> k_g_k_n
