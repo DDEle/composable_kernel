@@ -687,6 +687,33 @@ struct HostTensor
         return os;
     }
 
+    std::ostream& print_2d(std::ostream& os) const
+    {
+        os << mDesc << std::endl;
+        if(mDesc.get_num_of_dimension() < 2)
+        {
+            os << "Not a 2D tensor!" << std::endl;
+            return os;
+        }
+        const auto dims = mDesc.get_num_of_dimension();
+        std::vector<std::size_t> idx(dims, 0);
+        for(std::size_t i = 0; i < mDesc.get_length(dims - 2); ++i)
+        {
+            idx[dims - 2] = i;
+            for(std::size_t j = 0; j < mDesc.get_length(dims - 1); ++j)
+            {
+                idx[dims - 1] = j;
+                if constexpr(std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>)
+                    os << std::setw(8) << static_cast<int>((*this)(idx));
+                else
+                    os << std::setw(8) << (*this)(idx);
+                os << std::setw(0) << " ";
+            }
+            os << std::endl;
+        }
+        return os;
+    }
+
     friend std::ostream& operator<<(std::ostream& os, const HostTensor<T>& t)
     {
         os << t.mDesc;

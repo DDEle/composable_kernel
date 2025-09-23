@@ -48,7 +48,7 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   --api bwd
   --receipt 3
   --optdim 32,64,128,256
-  # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
+  # --filter *@*@fmha_bwd_d128_bf16_batch_b32x128x128x32x128x32x32x128x128_r1x4x1_r4x1x1_r1x4x1_w16x16x32_w16x16x32_o1_maxq0_npad_*_ndbias_*_*_ndeterministic_trload
 )
 
 # Reduce building time by disabling instances that are not currently used in the gtests
