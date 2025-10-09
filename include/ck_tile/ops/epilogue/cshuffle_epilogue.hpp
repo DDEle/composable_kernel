@@ -20,6 +20,7 @@ template <typename ADataType_,
           typename DsLayout_,
           typename ELayout_,
           typename CDElementwise_,
+          index_t kBlockSize_,
           index_t kM_,
           index_t kN_,
           index_t MWave_,
@@ -29,9 +30,11 @@ template <typename ADataType_,
           index_t KPerXdl_,
           bool isCTransposed_,
           memory_operation_enum MemoryOperation_,
-          index_t kNumWaveGroups_ = 1,
-          bool FixedVectorSize_   = false,
-          index_t VectorSizeC_    = 1>
+          index_t kNumWaveGroups_      = 1,
+          bool FixedVectorSize_        = false,
+          index_t VectorSizeC_         = 1,
+          bool TiledMMAPermuteN_       = false,
+          index_t BlockedXDLN_PerWarp_ = 1> // The number of continuous xdl_output per warp
 struct CShuffleEpilogueProblem
 {
     using ADataType                                        = remove_cvref_t<ADataType_>;
@@ -42,7 +45,7 @@ struct CShuffleEpilogueProblem
     using DsLayout                                         = remove_cvref_t<DsLayout_>;
     using ELayout                                          = remove_cvref_t<ELayout_>;
     using CDElementwise                                    = remove_cvref_t<CDElementwise_>;
-    static constexpr index_t kBlockSize                    = MWave_ * NWave_ * get_warp_size();
+    static constexpr index_t kBlockSize                    = kBlockSize_;
     static constexpr index_t kMPerBlock                    = kM_;
     static constexpr index_t kNPerBlock                    = kN_;
     static constexpr index_t MWave                         = MWave_;
@@ -54,6 +57,8 @@ struct CShuffleEpilogueProblem
     static constexpr memory_operation_enum MemoryOperation = MemoryOperation_;
     static constexpr bool FixedVectorSize                  = FixedVectorSize_;
     static constexpr index_t VectorSizeC                   = VectorSizeC_;
+    static constexpr index_t BlockedXDLN_PerWarp           = BlockedXDLN_PerWarp_;
+    static constexpr bool TiledMMAPermuteN                 = TiledMMAPermuteN_;
     static constexpr index_t kNumWaveGroups                = kNumWaveGroups_;
     static constexpr index_t NumDTensor                    = DsDataType::size();
 
@@ -89,10 +94,14 @@ struct CShuffleEpilogue
     static constexpr index_t KPerXdl                       = Problem::KPerXdl;
     static constexpr index_t isCTransposed                 = Problem::isCTransposed;
     static constexpr bool FixedVectorSize                  = Problem::FixedVectorSize;
+    static constexpr bool TiledMMAPermuteN                 = Problem::TiledMMAPermuteN;
     static constexpr index_t VectorSizeC                   = Problem::VectorSizeC;
+    static constexpr index_t BlockedXDLN_PerWarp           = Problem::BlockedXDLN_PerWarp;
     static constexpr index_t MPerIteration                 = MPerXdl * MWave;
     static constexpr index_t NPerIteration                 = NPerXdl * NWave;
     static constexpr index_t NumDTensor                    = Problem::NumDTensor;
+    static constexpr index_t MRepeat                       = kMPerBlock / (MPerXdl * MWave);
+    static constexpr index_t NRepeat                       = kNPerBlock / (NPerXdl * NWave);
 
     static_assert(NumDTensor == DsLayout::size(),
                   "The size of DsDataType and DsLayout should be the same");
@@ -192,7 +201,10 @@ struct CShuffleEpilogue
         }
     }();
     static constexpr index_t NumMXdlPerWavePerShuffle = std::get<0>(shuffle_tile_tuple);
-    static constexpr index_t NumNXdlPerWavePerShuffle = std::get<1>(shuffle_tile_tuple);
+    static constexpr index_t NumNXdlPerWavePerShuffle =
+        max(BlockedXDLN_PerWarp, std::get<1>(shuffle_tile_tuple));
+
+    static_assert(NumNXdlPerWavePerShuffle % BlockedXDLN_PerWarp == 0);
 
     static constexpr auto MNPerIterationShuffle = [] {
         constexpr index_t m_val = MPerXdl * MWave * NumMXdlPerWavePerShuffle;
@@ -245,14 +257,31 @@ struct CShuffleEpilogue
 
     CK_TILE_DEVICE static constexpr auto MakeLdsDistributionEncode()
     {
-        constexpr auto block_outer_dstr_encoding =
-            tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<NumMXdlPerWavePerShuffle, MWave>,
-                                             sequence<NumNXdlPerWavePerShuffle, NWave>>,
-                                       tuple<sequence<1, 2>>,
-                                       tuple<sequence<1, 1>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 0>>{};
+        constexpr auto block_outer_dstr_encoding = [] {
+            if constexpr(BlockedXDLN_PerWarp == 1)
+            {
+                return tile_distribution_encoding<sequence<>,
+                                                  tuple<sequence<NumMXdlPerWavePerShuffle, MWave>,
+                                                        sequence<NumNXdlPerWavePerShuffle, NWave>>,
+                                                  tuple<sequence<1, 2>>,
+                                                  tuple<sequence<1, 1>>,
+                                                  sequence<1, 2>,
+                                                  sequence<0, 0>>{};
+            }
+            else
+            {
+                constexpr int RakedXDLN_PerWarp = NumNXdlPerWavePerShuffle / BlockedXDLN_PerWarp;
+                // BlockedLayout
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<NumMXdlPerWavePerShuffle, MWave>,
+                          sequence<RakedXDLN_PerWarp, NWave, BlockedXDLN_PerWarp>>,
+                    tuple<sequence<1, 2>>,
+                    tuple<sequence<1, 1>>,
+                    sequence<1, 2, 2>,
+                    sequence<0, 0, 2>>{};
+            }
+        }();
         constexpr auto block_dstr_encoding = detail::make_embed_tile_distribution_encoding(
             block_outer_dstr_encoding, typename CWarpDstr::DstrEncode{});
 
@@ -264,120 +293,91 @@ struct CShuffleEpilogue
         return MPerIterationShuffle * NPerIterationShuffle * sizeof(ODataType);
     }
 
-    template <auto iAccess, typename LdsTile, typename ScaleM, typename ScaleN>
-    CK_TILE_DEVICE void
-    scale_tile(LdsTile& lds_tile, ScaleM& scale_m_window, ScaleN& scale_n_window)
+    template <typename ODramWindow,
+              typename OAccTile,
+              typename DsDramWindows,
+              int EnablePermuateN_                    = TiledMMAPermuteN,
+              std::enable_if_t<EnablePermuateN_, int> = 0>
+    CK_TILE_DEVICE auto operator()(ODramWindow& out_dram_window,
+                                   const OAccTile& o_acc_tile,
+                                   const DsDramWindows& ds_dram_windows,
+                                   void* p_smem)
     {
-        // Load tiles
-        const auto scale_m_tile = load_tile(scale_m_window);
-        const auto scale_n_tile = load_tile(scale_n_window);
+        constexpr int kM0 = MWave;
+        constexpr int kM2 = 4;
+        constexpr int kM1 = MPerXdl / kM2;
 
-        // Compute element-wise product in-place i.e. lds_tile = lds_tile * scale_m * scale_n
-        tile_elementwise_inout(
-            element_wise::MultiDMultiply{}, lds_tile, lds_tile, scale_m_tile, scale_n_tile);
+        constexpr int kN0 = NWave;
+        constexpr int kN1 = NPerXdl;
+        constexpr int kN2 = NRepeat;
 
-        // Move scale windows
-        constexpr index_t num_access = SFC::get_num_of_access();
-        if constexpr(iAccess != num_access - 1)
-        {
-            constexpr auto step = SFC::get_forward_step(iAccess);
+        using IntrThreadShuffleEncode =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<kM0, kM1, kM2>, sequence<kN0, kN1, kN2>>,
+                                       tuple<sequence<1, 2>, sequence<1, 2>>,
+                                       tuple<sequence<0, 0>, sequence<1, 1>>,
+                                       sequence<1, 2>,
+                                       sequence<2, 2>>;
+        constexpr auto dram_tile_distribution =
+            make_static_tile_distribution(IntrThreadShuffleEncode{});
 
-            move_tile_window(scale_m_window, {step.at(number<0>{}), step.at(number<1>{})});
-            move_tile_window(scale_n_window, {step.at(number<0>{}), step.at(number<1>{})});
-        }
-    }
+        auto d_dram_windows = generate_tuple(
+            [&](auto idx) {
+                return make_tile_window(ds_dram_windows[idx], dram_tile_distribution);
+            },
+            number<NumDTensor>{});
 
-    template <auto iAccess, typename OAccTile, typename LdsTile>
-    CK_TILE_DEVICE void slice_acc_tile(const OAccTile& o_acc_tile, LdsTile& lds_tile)
-    {
-        constexpr auto idx_y_start = SFC::get_index(iAccess);
-
-        constexpr auto mIter = number<idx_y_start.at(number<0>{}) / (MPerIterationShuffle)>{};
-        constexpr auto nIter = number<idx_y_start.at(number<1>{}) / (NPerIterationShuffle)>{};
         constexpr auto c_warp_y_lengths =
             to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-        lds_tile.get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
-            merge_sequences(
-                sequence<mIter * NumMXdlPerWavePerShuffle, nIter * NumNXdlPerWavePerShuffle>{},
-                c_warp_y_index_zeros),
-            merge_sequences(sequence<NumMXdlPerWavePerShuffle, NumNXdlPerWavePerShuffle>{},
-                            c_warp_y_lengths));
-    }
+        auto shuffle_acc  = make_static_distributed_tensor<AccDataType>(dram_tile_distribution);
+        auto c_out_tensor = make_static_distributed_tensor<ODataType>(dram_tile_distribution);
+        // auto c_out_tensor = make_static_distributed_tensor<ODataType>(dram_tile_distribution);
 
-    template <typename LdsTile, typename InLdsWindow>
-    CK_TILE_DEVICE void cast_lds_tile(LdsTile& lds_tile, InLdsWindow& in_lds_window)
-    {
-        const auto c_warptile_in_tensor_casted = cast_tile<ODataType>(lds_tile);
+        static_for<0, MRepeat, 1>{}([&](auto mIter) {
+            shuffle_acc.get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
+                merge_sequences(sequence<mIter, 0>{}, c_warp_y_index_zeros),
+                merge_sequences(sequence<1, NRepeat>{}, c_warp_y_lengths));
 
-        store_tile(in_lds_window, c_warptile_in_tensor_casted);
-    }
-
-    template <typename DramWindows, typename COutTensor>
-    CK_TILE_DEVICE void apply_d_tensors(DramWindows& d_dram_windows, COutTensor& c_out_tensor)
-    {
-        const auto ds_tensor = generate_tuple(
-            [&](auto idx) { return load_tile(d_dram_windows[idx]); }, number<NumDTensor>{});
-
-        const auto c_ds_tiles = concat_tuple_of_reference(
-            tie(c_out_tensor, c_out_tensor),
-            generate_tie([&](auto idx) -> const auto& { return ds_tensor[idx]; },
-                         number<NumDTensor>{}));
-
-        tile_elementwise_inout_unpack(typename Problem::CDElementwise{}, c_ds_tiles);
-    }
-
-    template <typename OutDramWindow, typename COutTensor>
-    CK_TILE_DEVICE void store_to_dram(OutDramWindow& out_dram_window,
-                                      const COutTensor& c_out_tensor)
-    {
-        if constexpr(MemoryOperation == memory_operation_enum::set)
-        {
-            store_tile(out_dram_window, c_out_tensor);
-        }
-        else
-        {
-            update_tile(out_dram_window, c_out_tensor);
-        }
-    }
-
-    /**
-     * @brief Move both the output and D tensors windows for the next access.
-     */
-    template <auto iAccess, typename OutDramWindow, typename DDramWindows>
-    CK_TILE_DEVICE void move_windows(OutDramWindow& out_dram_window, DDramWindows& d_dram_windows)
-    {
-        constexpr index_t num_access = SFC::get_num_of_access();
-        if constexpr(iAccess != num_access - 1)
-        {
-            constexpr auto step = SFC::get_forward_step(iAccess);
-
-            // move the output dram window
-            move_tile_window(out_dram_window, {step.at(number<0>{}), step.at(number<1>{})});
-
-            // move windows for each of the D matrices (inputs for element-wise)
-            static_for<0, NumDTensor, 1>{}([&](auto idx) {
-                move_tile_window(d_dram_windows[idx], {step.at(number<0>{}), step.at(number<1>{})});
+            static_for<0, NRepeat, 1>{}([&](auto n_idx) {
+                c_out_tensor.get_thread_buffer()[n_idx + 0 * NRepeat] = type_convert<ODataType>(
+                    shuffle_acc.get_thread_buffer()[n_idx * c_warp_y_lengths.product() + 0]);
+                c_out_tensor.get_thread_buffer()[n_idx + 1 * NRepeat] = type_convert<ODataType>(
+                    shuffle_acc.get_thread_buffer()[n_idx * c_warp_y_lengths.product() + 1]);
+                c_out_tensor.get_thread_buffer()[n_idx + 2 * NRepeat] = type_convert<ODataType>(
+                    shuffle_acc.get_thread_buffer()[n_idx * c_warp_y_lengths.product() + 2]);
+                c_out_tensor.get_thread_buffer()[n_idx + 3 * NRepeat] = type_convert<ODataType>(
+                    shuffle_acc.get_thread_buffer()[n_idx * c_warp_y_lengths.product() + 3]);
             });
-        }
+
+            // c_out_tensor = cast_tile<ODataType>(c_out_tensor_fp32);
+
+            if constexpr(MemoryOperation == memory_operation_enum::set)
+            {
+                store_tile(out_dram_window, c_out_tensor);
+            }
+            else
+            {
+                update_tile(out_dram_window, c_out_tensor);
+            }
+            move_tile_window(out_dram_window, {number<MPerXdl * MWave>{}, number<0>{}});
+
+            static_for<0, NumDTensor, 1>{}([&](auto idx) {
+                move_tile_window(d_dram_windows[idx], {number<MPerXdl * MWave>{}, number<0>{}});
+            });
+        });
     }
 
-    // TODO: Check if there would be nicer ways to overload rather than with EmptyScale or nullptr_t
-    struct EmptyScale
-    {
-    };
     template <typename ODramWindow,
               typename OAccTile,
               typename DsDramWindows,
-              typename ScaleM = EmptyScale,
-              typename ScaleN = EmptyScale>
+              int EnablePermuateN_                     = TiledMMAPermuteN,
+              std::enable_if_t<!EnablePermuateN_, int> = 0>
     CK_TILE_DEVICE auto operator()(ODramWindow& out_dram_window,
                                    const OAccTile& o_acc_tile,
                                    const DsDramWindows& ds_dram_windows,
-                                   void* p_smem,
-                                   const ScaleM& scale_m = {},
-                                   const ScaleN& scale_n = {})
+                                   void* p_smem)
     {
         constexpr auto LdsTileDistr = make_static_tile_distribution(MakeLdsDistributionEncode());
 
@@ -398,6 +398,10 @@ struct CShuffleEpilogue
             make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
             {0, 0});
 
+        // using SFC                    = space_filling_curve<sequence<kMPerBlock, kNPerBlock>,
+        //                                                    sequence<0, 1>,
+        //                                                    sequence<MPerIterationShuffle,
+        //                                                    NPerIterationShuffle>>;
         constexpr index_t num_access = SFC::get_num_of_access();
 
         static_assert(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>,
@@ -419,46 +423,390 @@ struct CShuffleEpilogue
             },
             number<NumDTensor>{});
 
-        constexpr bool has_scales =
-            !std::is_same<ScaleM, EmptyScale>::value && !std::is_same<ScaleN, EmptyScale>::value;
-        auto scale_m_window = [&]() {
-            if constexpr(has_scales)
-            {
-                return make_tile_window(scale_m, lds_tile.get_tile_distribution());
-            }
-            else
-            {
-                return EmptyScale{};
-            }
-        }();
-        auto scale_n_window = [&]() {
-            if constexpr(has_scales)
-            {
-                return make_tile_window(scale_n, lds_tile.get_tile_distribution());
-            }
-            else
-            {
-                return EmptyScale{};
-            }
-        }();
+        constexpr auto c_warp_y_lengths =
+            to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
         static_for<0, num_access, 1>{}([&](auto iAccess) {
             block_sync_lds();
-            slice_acc_tile<iAccess>(o_acc_tile, lds_tile);
+            constexpr auto idx_y_start = SFC::get_index(iAccess);
 
-            if constexpr(has_scales)
-            {
-                scale_tile<iAccess>(lds_tile, scale_m_window, scale_n_window);
-            }
+            constexpr auto mIter = number<idx_y_start.at(number<0>{}) / (MPerIterationShuffle)>{};
+            constexpr auto nIter = number<idx_y_start.at(number<1>{}) / (NPerIterationShuffle)>{};
 
-            cast_lds_tile(lds_tile, in_lds_window);
+            lds_tile.get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
+                merge_sequences(
+                    sequence<mIter * NumMXdlPerWavePerShuffle, nIter * NumNXdlPerWavePerShuffle>{},
+                    c_warp_y_index_zeros),
+                merge_sequences(sequence<NumMXdlPerWavePerShuffle, NumNXdlPerWavePerShuffle>{},
+                                c_warp_y_lengths));
+
+            const auto c_warptile_in_tensor_casted = cast_tile<ODataType>(lds_tile);
+
+            store_tile(in_lds_window, c_warptile_in_tensor_casted);
             block_sync_lds();
 
             auto c_out_tensor = load_tile(make_tile_window(out_lds_window, dram_tile_distribution));
 
-            apply_d_tensors(d_dram_windows, c_out_tensor);
-            store_to_dram(out_dram_window, c_out_tensor);
-            move_windows<iAccess>(out_dram_window, d_dram_windows);
+            const auto ds_tensor = generate_tuple(
+                [&](auto idx) { return load_tile(d_dram_windows[idx]); }, number<NumDTensor>{});
+
+            const auto c_ds_tiles = concat_tuple_of_reference(
+                tie(c_out_tensor, c_out_tensor),
+                generate_tie([&](auto idx) -> const auto& { return ds_tensor[idx]; },
+                             number<NumDTensor>{}));
+
+            tile_elementwise_inout_unpack(typename Problem::CDElementwise{}, c_ds_tiles);
+
+            if constexpr(MemoryOperation == memory_operation_enum::set)
+            {
+                store_tile(out_dram_window, c_out_tensor);
+            }
+            else
+            {
+                update_tile(out_dram_window, c_out_tensor);
+            }
+            if constexpr(iAccess != num_access - 1)
+            {
+                constexpr auto step = SFC::get_forward_step(iAccess);
+
+                move_tile_window(out_dram_window, {step.at(number<0>{}), step.at(number<1>{})});
+
+                static_for<0, NumDTensor, 1>{}([&](auto idx) {
+                    move_tile_window(d_dram_windows[idx],
+                                     {step.at(number<0>{}), step.at(number<1>{})});
+                });
+            }
+        });
+    }
+
+    template <typename ODramWindow,
+              typename OAccTile,
+              typename DsDramWindows,
+              typename ScaleM,
+              typename ScaleN,
+              int EnablePermuateN_                    = TiledMMAPermuteN,
+              std::enable_if_t<EnablePermuateN_, int> = 0>
+    CK_TILE_DEVICE auto operator()(ODramWindow& out_dram_window,
+                                   const OAccTile& o_acc_tile,
+                                   const DsDramWindows& ds_dram_windows,
+                                   void* p_smem,
+                                   ScaleM scale_m,
+                                   ScaleN scale_n)
+    {
+        constexpr int kM0 = MWave;
+        constexpr int kM2 = 4;
+        constexpr int kM1 = MPerXdl / kM2;
+        static_assert(MPerXdl == 16, "TiledMMAPermuteN only supports MPerXdl = 16 now");
+
+        constexpr int kN0 = NWave;
+        constexpr int kN1 = NPerXdl;
+        constexpr int kN2 = NRepeat;
+
+        using IntrThreadShuffleEncode =
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<kM0, kM1, kM2>, sequence<kN0, kN1, kN2>>,
+                                       tuple<sequence<1, 2>, sequence<1, 2>>,
+                                       tuple<sequence<0, 0>, sequence<1, 1>>,
+                                       sequence<1, 2>,
+                                       sequence<2, 2>>;
+        constexpr auto dram_tile_distribution =
+            make_static_tile_distribution(IntrThreadShuffleEncode{});
+
+        auto d_dram_windows = generate_tuple(
+            [&](auto idx) {
+                return make_tile_window(ds_dram_windows[idx], dram_tile_distribution);
+            },
+            number<NumDTensor>{});
+
+        constexpr auto c_warp_y_lengths =
+            to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        using ShuffleAcc =
+            decltype(make_static_distributed_tensor<AccDataType>(dram_tile_distribution));
+        ShuffleAcc shuffle_acc[MRepeat];
+        auto c_out_tensor_fp32 =
+            make_static_distributed_tensor<AccDataType>(dram_tile_distribution);
+        auto c_out_tensor = make_static_distributed_tensor<ODataType>(dram_tile_distribution);
+
+        const index_t iMWarp = get_warp_id() / NWave;
+        const index_t iNWarp = get_warp_id() - iMWarp * NWave;
+        const index_t iMLane = get_lane_id() / NPerXdl;
+        const index_t iNLane = get_lane_id() % NPerXdl;
+
+        float vec_scale_A[kM2 * MRepeat];
+        float vec_scale_B[NRepeat];
+
+        _Pragma("unroll") for(int i = 0; i < NRepeat; ++i)
+        {
+            vec_scale_B[i] = scale_n[i + iNLane * NRepeat + iNWarp * NRepeat * NPerXdl];
+        }
+        _Pragma("unroll") for(int i = 0; i < MRepeat; ++i)
+        {
+            vec_scale_A[i * kM2 + 0] =
+                scale_m[0 + iMLane * kM2 + iMWarp * MPerXdl + i * MPerXdl * MWave];
+            vec_scale_A[i * kM2 + 1] =
+                scale_m[1 + iMLane * kM2 + iMWarp * MPerXdl + i * MPerXdl * MWave];
+            vec_scale_A[i * kM2 + 2] =
+                scale_m[2 + iMLane * kM2 + iMWarp * MPerXdl + i * MPerXdl * MWave];
+            vec_scale_A[i * kM2 + 3] =
+                scale_m[3 + iMLane * kM2 + iMWarp * MPerXdl + i * MPerXdl * MWave];
+        }
+
+        static_for<0, MRepeat, 1>{}([&](auto mIter) {
+            shuffle_acc[mIter].get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
+                merge_sequences(sequence<mIter, 0>{}, c_warp_y_index_zeros),
+                merge_sequences(sequence<1, NRepeat>{}, c_warp_y_lengths));
+            static_for<0, NRepeat, 1>{}([&](auto n_idx) {
+                shuffle_acc[mIter].get_thread_buffer()[n_idx * kM2 + 0] *= vec_scale_B[n_idx];
+                shuffle_acc[mIter].get_thread_buffer()[n_idx * kM2 + 1] *= vec_scale_B[n_idx];
+                shuffle_acc[mIter].get_thread_buffer()[n_idx * kM2 + 2] *= vec_scale_B[n_idx];
+                shuffle_acc[mIter].get_thread_buffer()[n_idx * kM2 + 3] *= vec_scale_B[n_idx];
+            });
+        });
+
+        static_for<0, MRepeat, 1>{}([&](auto mIter) {
+            static_for<0, NRepeat, 1>{}([&](auto n_idx) {
+                c_out_tensor_fp32.get_thread_buffer()[n_idx + 0 * NRepeat] =
+                    shuffle_acc[mIter].get_thread_buffer()[n_idx * c_warp_y_lengths.product() + 0] *
+                    vec_scale_A[mIter * kM2 + 0];
+                c_out_tensor_fp32.get_thread_buffer()[n_idx + 1 * NRepeat] =
+                    shuffle_acc[mIter].get_thread_buffer()[n_idx * c_warp_y_lengths.product() + 1] *
+                    vec_scale_A[mIter * kM2 + 1];
+                c_out_tensor_fp32.get_thread_buffer()[n_idx + 2 * NRepeat] =
+                    shuffle_acc[mIter].get_thread_buffer()[n_idx * c_warp_y_lengths.product() + 2] *
+                    vec_scale_A[mIter * kM2 + 2];
+                c_out_tensor_fp32.get_thread_buffer()[n_idx + 3 * NRepeat] =
+                    shuffle_acc[mIter].get_thread_buffer()[n_idx * c_warp_y_lengths.product() + 3] *
+                    vec_scale_A[mIter * kM2 + 3];
+            });
+
+            c_out_tensor = cast_tile<ODataType>(c_out_tensor_fp32);
+
+            if constexpr(MemoryOperation == memory_operation_enum::set)
+            {
+                store_tile(out_dram_window, c_out_tensor);
+            }
+            else
+            {
+                update_tile(out_dram_window, c_out_tensor);
+            }
+            move_tile_window(out_dram_window, {number<MPerXdl * MWave>{}, number<0>{}});
+
+            static_for<0, NumDTensor, 1>{}([&](auto idx) {
+                move_tile_window(d_dram_windows[idx], {number<MPerXdl * MWave>{}, number<0>{}});
+            });
+        });
+    }
+
+    template <typename ODramWindow,
+              typename OAccTile,
+              typename DsDramWindows,
+              typename ScaleM,
+              typename ScaleN,
+              int EnablePermuateN_                     = TiledMMAPermuteN,
+              std::enable_if_t<!EnablePermuateN_, int> = 0>
+    CK_TILE_DEVICE auto operator()(ODramWindow& out_dram_window,
+                                   const OAccTile& o_acc_tile,
+                                   const DsDramWindows& ds_dram_windows,
+                                   void* p_smem,
+                                   ScaleM scale_m,
+                                   ScaleN scale_n)
+    {
+        constexpr auto LdsTileDistr = make_static_tile_distribution(MakeLdsDistributionEncode());
+
+        using LDSTileTensor = decltype(make_static_distributed_tensor<AccDataType>(LdsTileDistr));
+        LDSTileTensor lds_tile[2];
+
+        constexpr auto lds_block_desc = MakeLdsBlockDescriptor<Problem>();
+        auto o_lds_block              = make_tensor_view<address_space_enum::lds>(
+            static_cast<ODataType*>(p_smem), lds_block_desc);
+
+        auto in_lds_window = make_tile_window(
+            o_lds_block,
+            make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
+            {0, 0},
+            LdsTileDistr);
+
+        auto out_lds_window = make_tile_window(
+            o_lds_block,
+            make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
+            {0, 0});
+
+        // using SFC                    = space_filling_curve<sequence<kMPerBlock, kNPerBlock>,
+        //                                                    sequence<0, 1>,
+        //                                                    sequence<MPerIterationShuffle,
+        //                                                    NPerIterationShuffle>>;
+        constexpr index_t num_access = SFC::get_num_of_access();
+
+        static_assert(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>,
+                      "Currently, the CShuffle Epilogue only supports the Row Major Output layout");
+
+        using TileEncodingPattern =
+            tile_distribution_encoding_pattern_2d<kBlockSize,
+                                                  MPerIterationShuffle,
+                                                  NPerIterationShuffle,
+                                                  GetVectorSizeC(),
+                                                  tile_distribution_pattern::thread_raked,
+                                                  Problem::kNumWaveGroups>;
+        constexpr auto dram_tile_distribution =
+            TileEncodingPattern::make_2d_static_tile_distribution();
+
+        auto d_dram_windows = generate_tuple(
+            [&](auto idx) {
+                return make_tile_window(ds_dram_windows[idx], dram_tile_distribution);
+            },
+            number<NumDTensor>{});
+
+        constexpr auto c_warp_y_lengths =
+            to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        constexpr int kM2 = 4;                   // Val
+        constexpr int kM1 = (64 / NPerXdl);      // Thr
+        constexpr int kM0 = MPerXdl / kM1 / kM2; // Val
+
+        const index_t iMWarp = get_warp_id() / NWave;
+        const index_t iNWarp = get_warp_id() - iMWarp * NWave;
+        const index_t iMLane = get_lane_id() / NPerXdl;
+        const index_t iNLane = get_lane_id() % NPerXdl;
+
+        float vec_scale_A[kM0 * kM2 * MRepeat];
+        float vec_scale_B[NRepeat];
+
+        _Pragma("unroll") for(int i = 0; i < NRepeat; ++i)
+        {
+            vec_scale_B[i] = scale_n[i * NWave * NPerXdl + iNWarp * NPerXdl + iNLane];
+        }
+        _Pragma("unroll") for(int i = 0; i < MRepeat; ++i)
+        {
+            _Pragma("unroll") for(int m0 = 0; m0 < kM0; ++m0)
+            {
+                vec_scale_A[i * kM0 * kM2 + m0 * kM2 + 0] =
+                    scale_m[0 + iMLane * kM2 + m0 * kM2 * kM1 + iMWarp * MPerXdl +
+                            i * MPerXdl * MWave];
+                vec_scale_A[i * kM0 * kM2 + m0 * kM2 + 1] =
+                    scale_m[1 + iMLane * kM2 + m0 * kM2 * kM1 + iMWarp * MPerXdl +
+                            i * MPerXdl * MWave];
+                vec_scale_A[i * kM0 * kM2 + m0 * kM2 + 2] =
+                    scale_m[2 + iMLane * kM2 + m0 * kM2 * kM1 + iMWarp * MPerXdl +
+                            i * MPerXdl * MWave];
+                vec_scale_A[i * kM0 * kM2 + m0 * kM2 + 3] =
+                    scale_m[3 + iMLane * kM2 + m0 * kM2 * kM1 + iMWarp * MPerXdl +
+                            i * MPerXdl * MWave];
+            }
+        }
+
+        lds_tile[0].get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
+            merge_sequences(sequence<0 * NumMXdlPerWavePerShuffle, 0 * NumNXdlPerWavePerShuffle>{},
+                            c_warp_y_index_zeros),
+            merge_sequences(sequence<NumMXdlPerWavePerShuffle, NumNXdlPerWavePerShuffle>{},
+                            c_warp_y_lengths));
+        static_for<0, NumNXdlPerWavePerShuffle, 1>{}([&](auto n_xdl) {
+            static_for<0, NumMXdlPerWavePerShuffle, 1>{}([&](auto m_xdl) {
+                constexpr int acc_xdl_offset =
+                    (m_xdl + n_xdl * NumMXdlPerWavePerShuffle) * c_warp_y_lengths.product();
+                _Pragma("unroll") for(int m0 = 0; m0 < kM0; ++m0)
+                {
+                    lds_tile[0].get_thread_buffer()[acc_xdl_offset + m0 * kM2 + 0] *=
+                        vec_scale_A[m_xdl * kM0 * kM2 + m0 * kM2 + 0] * vec_scale_B[n_xdl];
+                    lds_tile[0].get_thread_buffer()[acc_xdl_offset + m0 * kM2 + 1] *=
+                        vec_scale_A[m_xdl * kM0 * kM2 + m0 * kM2 + 1] * vec_scale_B[n_xdl];
+                    lds_tile[0].get_thread_buffer()[acc_xdl_offset + m0 * kM2 + 2] *=
+                        vec_scale_A[m_xdl * kM0 * kM2 + m0 * kM2 + 2] * vec_scale_B[n_xdl];
+                    lds_tile[0].get_thread_buffer()[acc_xdl_offset + m0 * kM2 + 3] *=
+                        vec_scale_A[m_xdl * kM0 * kM2 + m0 * kM2 + 3] * vec_scale_B[n_xdl];
+                }
+            });
+        });
+
+        static_for<0, num_access, 1>{}([&](auto iAccess) {
+            constexpr int read_stage  = iAccess % 2;
+            constexpr int write_stage = read_stage ^ 1;
+
+            block_sync_lds();
+            constexpr auto idx_y_start = SFC::get_index(number<iAccess.value + 1>{});
+
+            constexpr auto mIter = number<idx_y_start.at(number<0>{}) / (MPerIterationShuffle)>{};
+            constexpr auto nIter = number<idx_y_start.at(number<1>{}) / (NPerIterationShuffle)>{};
+
+            const auto c_warptile_in_tensor_casted = cast_tile<ODataType>(lds_tile[read_stage]);
+
+            store_tile(in_lds_window, c_warptile_in_tensor_casted);
+
+            if constexpr(iAccess < num_access - 1)
+            {
+                lds_tile[write_stage].get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
+                    merge_sequences(sequence<mIter * NumMXdlPerWavePerShuffle,
+                                             nIter * NumNXdlPerWavePerShuffle>{},
+                                    c_warp_y_index_zeros),
+                    merge_sequences(sequence<NumMXdlPerWavePerShuffle, NumNXdlPerWavePerShuffle>{},
+                                    c_warp_y_lengths));
+                static_for<0, NumNXdlPerWavePerShuffle, 1>{}([&](auto n_xdl) {
+                    static_for<0, NumMXdlPerWavePerShuffle, 1>{}([&](auto m_xdl) {
+                        constexpr int acc_xdl_offset =
+                            (m_xdl + n_xdl * NumMXdlPerWavePerShuffle) * c_warp_y_lengths.product();
+                        _Pragma("unroll") for(int m0 = 0; m0 < kM0; ++m0)
+                        {
+                            lds_tile[write_stage]
+                                .get_thread_buffer()[acc_xdl_offset + m0 * kM2 + 0] *=
+                                vec_scale_A[mIter * NumMXdlPerWavePerShuffle * kM0 * kM2 +
+                                            m_xdl * kM0 * kM2 + m0 * kM2 + 0] *
+                                vec_scale_B[nIter * NumNXdlPerWavePerShuffle + n_xdl];
+                            lds_tile[write_stage]
+                                .get_thread_buffer()[acc_xdl_offset + m0 * kM2 + 1] *=
+                                vec_scale_A[mIter * NumMXdlPerWavePerShuffle * kM0 * kM2 +
+                                            m_xdl * kM0 * kM2 + m0 * kM2 + 1] *
+                                vec_scale_B[nIter * NumNXdlPerWavePerShuffle + n_xdl];
+                            lds_tile[write_stage]
+                                .get_thread_buffer()[acc_xdl_offset + m0 * kM2 + 2] *=
+                                vec_scale_A[mIter * NumMXdlPerWavePerShuffle * kM0 * kM2 +
+                                            m_xdl * kM0 * kM2 + m0 * kM2 + 2] *
+                                vec_scale_B[nIter * NumNXdlPerWavePerShuffle + n_xdl];
+                            lds_tile[write_stage]
+                                .get_thread_buffer()[acc_xdl_offset + m0 * kM2 + 3] *=
+                                vec_scale_A[mIter * NumMXdlPerWavePerShuffle * kM0 * kM2 +
+                                            m_xdl * kM0 * kM2 + m0 * kM2 + 3] *
+                                vec_scale_B[nIter * NumNXdlPerWavePerShuffle + n_xdl];
+                        }
+                    });
+                });
+            }
+
+            block_sync_lds();
+
+            auto c_out_tensor = load_tile(make_tile_window(out_lds_window, dram_tile_distribution));
+
+            const auto ds_tensor = generate_tuple(
+                [&](auto idx) { return load_tile(d_dram_windows[idx]); }, number<NumDTensor>{});
+
+            const auto c_ds_tiles = concat_tuple_of_reference(
+                tie(c_out_tensor, c_out_tensor),
+                generate_tie([&](auto idx) -> const auto& { return ds_tensor[idx]; },
+                             number<NumDTensor>{}));
+
+            tile_elementwise_inout_unpack(typename Problem::CDElementwise{}, c_ds_tiles);
+
+            if constexpr(MemoryOperation == memory_operation_enum::set)
+            {
+                store_tile(out_dram_window, c_out_tensor);
+            }
+            else
+            {
+                update_tile(out_dram_window, c_out_tensor);
+            }
+            if constexpr(iAccess != num_access - 1)
+            {
+                constexpr auto step = SFC::get_forward_step(iAccess);
+
+                move_tile_window(out_dram_window, {step.at(number<0>{}), step.at(number<1>{})});
+
+                static_for<0, NumDTensor, 1>{}([&](auto idx) {
+                    move_tile_window(d_dram_windows[idx],
+                                     {step.at(number<0>{}), step.at(number<1>{})});
+                });
+            }
         });
     }
 };
