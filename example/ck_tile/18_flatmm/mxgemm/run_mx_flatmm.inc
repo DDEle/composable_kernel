@@ -11,9 +11,9 @@ template <typename PrecActType,
           typename CLayout>
 int run_mx_flatmm_with_layouts(int argc,
                                char* argv[],
-                               const ALayout a_layout                  = ALayout{},
-                               const BLayout b_layout                  = BLayout{},
-                               [[maybe_unused]] const CLayout c_layout = CLayout{})
+                               const ALayout a_layout = ALayout{},
+                               const BLayout b_layout = BLayout{},
+                               const CLayout c_layout = CLayout{})
 {
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
@@ -45,7 +45,7 @@ int run_mx_flatmm_with_layouts(int argc,
 
     stride_A = ck_tile::get_default_stride(M, K, stride_A, is_row_major(a_layout));
     stride_B = ck_tile::get_default_stride(K, N, stride_B, is_row_major(b_layout));
-    stride_C = ck_tile::get_default_stride(M, N, stride_C, is_row_major(CLayout{}));
+    stride_C = ck_tile::get_default_stride(M, N, stride_C, is_row_major(c_layout));
 
     auto scale_stride_A = ck_tile::get_default_stride(
         M / ScaleGranularityM, K / ScaleGranularityK, 0, is_row_major(a_layout));
@@ -319,9 +319,6 @@ int run_mx_flatmm_with_layouts(int argc,
 
         ck_tile::reference_mx_gemm<ADataType, BDataType, ScaleDataType, AccDataType, CDataType>(
             a_host, b_origin_host, c_m_n_host_ref, scale_a, scale_b);
-
-        const float max_accumulated_value =
-            *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
 
         const float rtol = std::is_same_v<ADataType, ck_tile::half_t> ? 1e-3 : 1e-2;
         const float atol = std::is_same_v<ADataType, ck_tile::half_t> ? 1e-3 : 1e-2;

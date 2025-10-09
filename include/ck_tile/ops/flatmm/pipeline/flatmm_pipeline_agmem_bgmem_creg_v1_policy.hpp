@@ -348,7 +348,6 @@ struct UniversalFlatmmPipelineAgBgCrPolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeADramDistribution()
     {
         using ADataType = remove_cvref_t<typename Problem::ADataType>;
-        using ALayout   = remove_cvref_t<typename Problem::ALayout>;
 
         constexpr index_t BlockSize = Problem::kBlockSize;
 

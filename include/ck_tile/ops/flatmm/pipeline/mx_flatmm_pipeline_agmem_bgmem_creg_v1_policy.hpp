@@ -70,7 +70,6 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeMXFP4_ADramTileDistribution()
     {
         using ADataType = remove_cvref_t<typename Problem::ADataType>;
-        using ALayout   = remove_cvref_t<typename Problem::ALayout>;
 
         constexpr index_t BlockSize = Problem::kBlockSize;
 
@@ -102,8 +101,6 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeMXF4_ALDS_TileDistribution()
     {
         using TileShape = typename Problem::BlockGemmShape;
-        using ADataType = remove_cvref_t<typename Problem::ADataType>;
-        using ALayout   = remove_cvref_t<typename Problem::ALayout>;
 
         static_assert(TileShape::WarpTile::at(I1) == 16, "requires XDL_N == 16");
         static_assert(TileShape::BlockWarps::at(I0) == 1, "requires Wave_M == 1");
@@ -235,17 +232,12 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeMXFP4_ScaleA_FlatDramTileDistribution()
     {
-        using TileShape             = typename Problem::BlockGemmShape;
-        constexpr index_t BlockSize = Problem::kBlockSize;
-        constexpr index_t WaveSize  = get_warp_size();
-        constexpr index_t WaveNum   = BlockSize / WaveSize;
+        using TileShape = typename Problem::BlockGemmShape;
 
-        constexpr index_t M_Warp = TileShape::BlockWarps::at(number<0>{});
-        constexpr index_t K_Lane = 64 / TileShape::WarpTile::at(I0);
-        constexpr index_t M_Lane = TileShape::WarpTile::at(I0);
-
-        constexpr index_t N_Wrap = TileShape::BlockWarps::at(number<1>{});
-
+        constexpr index_t M_Warp      = TileShape::BlockWarps::at(number<0>{});
+        constexpr index_t K_Lane      = 64 / TileShape::WarpTile::at(I0);
+        constexpr index_t M_Lane      = TileShape::WarpTile::at(I0);
+        constexpr index_t N_Wrap      = TileShape::BlockWarps::at(number<1>{});
         constexpr index_t MWavePerBlk = M_Warp;
 
         return make_static_tile_distribution(
@@ -262,17 +254,12 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeMXFP4_ScaleB_FlatDramTileDistribution()
     {
-        using TileShape             = typename Problem::BlockGemmShape;
-        constexpr index_t BlockSize = Problem::kBlockSize;
-        constexpr index_t WaveSize  = get_warp_size();
-        constexpr index_t WaveNum   = BlockSize / WaveSize;
+        using TileShape = typename Problem::BlockGemmShape;
 
-        constexpr index_t N_Warp = TileShape::BlockWarps::at(number<1>{});
-        constexpr index_t K_Lane = 64 / TileShape::WarpTile::at(I1);
-        constexpr index_t N_Lane = TileShape::WarpTile::at(I1);
-
-        constexpr index_t M_Wrap = TileShape::BlockWarps::at(number<0>{});
-
+        constexpr index_t N_Warp      = TileShape::BlockWarps::at(number<1>{});
+        constexpr index_t K_Lane      = 64 / TileShape::WarpTile::at(I1);
+        constexpr index_t N_Lane      = TileShape::WarpTile::at(I1);
+        constexpr index_t M_Wrap      = TileShape::BlockWarps::at(number<0>{});
         constexpr index_t NWavePerBlk = N_Warp;
 
         return make_static_tile_distribution(

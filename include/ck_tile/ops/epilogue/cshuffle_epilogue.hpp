@@ -301,7 +301,7 @@ struct CShuffleEpilogue
     CK_TILE_DEVICE auto operator()(ODramWindow& out_dram_window,
                                    const OAccTile& o_acc_tile,
                                    const DsDramWindows& ds_dram_windows,
-                                   void* p_smem)
+                                   void* /*p_smem*/)
     {
         constexpr int kM0 = MWave;
         constexpr int kM2 = 4;
@@ -490,7 +490,7 @@ struct CShuffleEpilogue
     CK_TILE_DEVICE auto operator()(ODramWindow& out_dram_window,
                                    const OAccTile& o_acc_tile,
                                    const DsDramWindows& ds_dram_windows,
-                                   void* p_smem,
+                                   void* /*p_smem*/,
                                    ScaleM scale_m,
                                    ScaleN scale_n)
     {

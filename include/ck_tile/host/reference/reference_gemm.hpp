@@ -274,10 +274,14 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
                                     HostTensor<CDataType>& c_m_n,
                                     const HostTensor<ScaleDataType>& scale_a,
                                     const HostTensor<ScaleDataType>& scale_b,
-                                    const AElementOp& a_element_op     = {},
-                                    const BElementOp& b_element_op     = {},
-                                    const ACCElementOp& acc_element_op = {})
+                                    const AElementOp&   = {},
+                                    const BElementOp&   = {},
+                                    const ACCElementOp& = {})
 {
+    static_assert(std::is_same_v<AElementOp, ck_tile::identity>);
+    static_assert(std::is_same_v<BElementOp, ck_tile::identity>);
+    static_assert(std::is_same_v<ACCElementOp, ck_tile::identity>);
+
     const std::size_t M = a_m_k.get_length(0);
     const std::size_t N = b_k_n.get_length(1);
     const std::size_t K = a_m_k.get_length(1);

@@ -497,7 +497,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
 
         constexpr auto MIter_2nd_last = (MIterPerWarp >= 2) ? MIterPerWarp - 2 : MIterPerWarp - 1;
         const index_t iMWarp          = get_warp_id() / NWarp;
-        const index_t iNWarp          = get_warp_id() % NWarp;
+        // const index_t iNWarp          = get_warp_id() % NWarp;
 
         using CWarpDstr   = typename WG::CWarpDstr;
         using CWarpTensor = typename WG::CWarpTensor;

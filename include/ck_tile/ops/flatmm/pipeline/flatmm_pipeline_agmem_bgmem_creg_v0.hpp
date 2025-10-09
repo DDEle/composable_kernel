@@ -504,8 +504,9 @@ struct FlatmmPipelineAGmemBGmemCRegV0
         static_assert(kKPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
 
-        constexpr auto MIter_2nd_last = (MIterPerWarp >= 2) ? MIterPerWarp - 2 : MIterPerWarp - 1;
-        const index_t iMWarp          = get_warp_id() / NWarp;
+        // constexpr auto MIter_2nd_last = (MIterPerWarp >= 2) ? MIterPerWarp - 2 : MIterPerWarp -
+        // 1;
+        const index_t iMWarp = get_warp_id() / NWarp;
 
         using CWarpDstr   = typename WG::CWarpDstr;
         using CWarpTensor = typename WG::CWarpTensor;

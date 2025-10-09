@@ -80,7 +80,10 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             int dync_smem_size       = 0;
             int maxActiveBlocksPerCU = 0;
 
-            [[maybe_unused]] auto e = hipGetDeviceProperties(&prop, deviceId);
+            hipError_t e = hipGetDeviceProperties(&prop, deviceId);
+            if(e != hipSuccess)
+                throw std::runtime_error(std::string("hipGetDeviceProperties failed: ") +
+                                         hipGetErrorName(e));
 
             e = hipOccupancyMaxActiveBlocksPerMultiprocessor(
                 &maxActiveBlocksPerCU,
@@ -90,6 +93,10 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                             FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>>),
                 block_size,
                 dync_smem_size);
+            if(e != hipSuccess)
+                throw std::runtime_error(
+                    std::string("hipOccupancyMaxActiveBlocksPerMultiprocessor failed: ") +
+                    hipGetErrorName(e));
 
             const int persistent_block_size = prop.multiProcessorCount * maxActiveBlocksPerCU;
             const int total_work_tile_cnt   = TilePartitioner::GridSize(kargs.M, kargs.N);
@@ -98,7 +105,8 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             //           << ", persistent_block_size: " << persistent_block_size
             //           << ", total_work_tile_cnt: " << total_work_tile_cnt << std::endl;
 
-            assert(kargs.k_batch == 1);
+            if(kargs.k_batch != 1)
+                throw std::runtime_error("Wrong! k_batch != 1 not supported in persistent kernel");
             return dim3(min(persistent_block_size, total_work_tile_cnt), 1, kargs.k_batch);
         }
         else
@@ -529,6 +537,11 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                                                           splitk_batch_offset,
                                                           i_m,
                                                           i_n);
+            }
+            else
+            {
+                static_assert(false,
+                              "Unimplemented: atomic_add with odd vector size for fp16/bf16");
             }
             partition_idx += gridDim.x;
         } while(UsePersistentKernel && partition_idx < total_work_tile_cnt);
