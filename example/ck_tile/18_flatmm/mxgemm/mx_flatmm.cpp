@@ -216,10 +216,10 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
         }
         else
         {
-            Run(has_hot_loop_,
-                tail_number_,
-                ck_tile::integral_constant<ck_tile::memory_operation_enum,
-                                           ck_tile::memory_operation_enum::atomic_add>{});
+            // Run(has_hot_loop_,
+            //     tail_number_,
+            //     ck_tile::integral_constant<ck_tile::memory_operation_enum,
+            //                                ck_tile::memory_operation_enum::atomic_add>{});
         }
     };
     BaseGemmPipeline::TailHandler(RunSplitk, has_hot_loop, tail_num);
@@ -484,11 +484,11 @@ int run_mx_flatmm_example(int argc, char* argv[])
             }
             else
             {
-                run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
-                                           ck_tile::pk_fp4_t,
-                                           ck_tile::fp16_t,
-                                           FlatmmConfig,
-                                           true>(argc, argv, Row{}, Col{}, Row{});
+                // run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
+                //                            ck_tile::pk_fp4_t,
+                //                            ck_tile::fp16_t,
+                //                            FlatmmConfig,
+                //                            true>(argc, argv, Row{}, Col{}, Row{});
             }
         }
         else if(mx_prec == "fp6xfp6")

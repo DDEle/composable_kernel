@@ -21,11 +21,90 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     static constexpr int NXdlPack = 2;
     static constexpr int KXdlPack = 2;
 
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeMXFP4_ALdsBlockDescriptor()
+    template <typename Problem, typename TensorView>
+    CK_TILE_DEVICE static constexpr auto
+    MakeMXFP4_AsyncLoadDramTensorViewA(const TensorView& naive_view)
     {
-        using namespace ck_tile;
+        const auto transformed_desc =
+            MakeMXFP4_AsyncLoadDramDescriptorA<Problem>(naive_view.get_tensor_descriptor());
+        return tensor_view<typename TensorView::buffer_view,
+                           remove_cvref_t<decltype(transformed_desc)>,
+                           TensorView::DstInMemOp>{naive_view.buf_, transformed_desc};
+    }
+    template <typename Problem, typename... TD_TS>
+    CK_TILE_DEVICE static constexpr auto
+    MakeMXFP4_AsyncLoadDramDescriptorA(const tensor_descriptor<TD_TS...>& from_desc)
+    {
+        using from_desc_t    = tensor_descriptor<TD_TS...>;
+        constexpr auto ndims = from_desc_t::get_num_of_dimension();
+        static_assert(ndims == 2, "XDram descriptor must have 2 dimensions");
+        const auto Rows = from_desc.get_length(number<0>{});
+        const auto Cols = from_desc.get_length(number<1>{});
 
+        using ADataType               = remove_cvref_t<typename Problem::ADataType>;
+        constexpr index_t KPerBlock   = Problem::BlockGemmShape::kK;
+        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+        constexpr index_t K2          = GetSmemPackA<Problem>() * APackedSize;
+        constexpr index_t K1          = KPerBlock / K2;
+        const index_t K0              = Cols / KPerBlock;
+        const auto ColLens            = make_tuple(K0, number<K1>{}, number<K2>{});
+
+        const auto desc_tmp1 = transform_tensor_descriptor(
+            from_desc,
+            make_tuple(make_pass_through_transform(Rows), make_unmerge_transform(ColLens)),
+            make_tuple(sequence<0>{}, sequence<1>{}),
+            make_tuple(sequence<0>{}, sequence<1, 2, 3>{}));
+
+        const auto desc_tmp2 = transform_tensor_descriptor(
+            desc_tmp1,
+            make_tuple(make_xor_transform(make_tuple(Rows, number<K1>{})),
+                       make_pass_through_transform(K0),
+                       make_pass_through_transform(number<K2>{})),
+            make_tuple(sequence<0, 2>{}, sequence<1>{}, sequence<3>{}),
+            make_tuple(sequence<0, 2>{}, sequence<1>{}, sequence<3>{}));
+
+        return transform_tensor_descriptor(
+            desc_tmp2,
+            make_tuple(make_pass_through_transform(Rows),
+                       make_merge_transform_v3_division_mod(ColLens)),
+            make_tuple(sequence<0>{}, sequence<1, 2, 3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeMXFP4_AsyncLoadATileDistribution()
+    {
+
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+        using ALayout   = remove_cvref_t<typename Problem::ALayout>;
+
+        constexpr index_t BlockSize   = Problem::kBlockSize;
+        constexpr index_t MPerBlock   = Problem::BlockGemmShape::kM;
+        constexpr index_t KPerBlock   = Problem::BlockGemmShape::kK;
+        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+
+        constexpr index_t K1 = Problem::VectorLoadSize / sizeof(ADataType) * APackedSize;
+        constexpr index_t K0 = KPerBlock / K1;
+
+        constexpr index_t M2 = get_warp_size() / K0;
+        constexpr index_t M1 = BlockSize / get_warp_size();
+        constexpr index_t M0 = MPerBlock / (M2 * M1);
+        static_assert(M0 * M1 * M2 == MPerBlock && K0 * K1 == KPerBlock,
+                      "Incorrect M0, M2, M1 configuration! "
+                      "M0, M1, M2 must cover whole MPerBlock!");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<1>,
+                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1>>,
+                                       tuple<sequence<1>, sequence<1, 2>>,
+                                       tuple<sequence<1>, sequence<2, 0>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 1>>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeMXFP4_ALdsBlockDescriptor()
+    {
         using ADataType           = remove_cvref_t<typename Problem::ADataType>;
         using ALayout             = remove_cvref_t<typename Problem::ALayout>;
         constexpr index_t MPerXdl = Problem::BlockGemmShape::WarpTile::at(I0);
