@@ -470,18 +470,16 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
     }
 
     template <typename ADramBlockWindowTmp,
-              typename AElementFunction,
               typename BFlatBlockWindowTmp,
               typename ScaleADramBlockWindowTmp,
               typename ScaleBDramBlockWindowTmp>
-    CK_TILE_HOST_DEVICE auto operator()(ADramBlockWindowTmp a_copy_dram_window,
-                                        const AElementFunction& a_element_func,
-                                        const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
-                                        const ScaleADramBlockWindowTmp& scale_a_window,
-                                        const ScaleBDramBlockWindowTmp& scale_b_window,
-                                        index_t num_loop,
-                                        void* p_smem_ping,
-                                        void* p_smem_pong) const
+    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_copy_dram_window_tmp,
+                                   const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                   const ScaleADramBlockWindowTmp& scale_a_window,
+                                   const ScaleBDramBlockWindowTmp& scale_b_window,
+                                   index_t num_loop,
+                                   void* p_smem_ping,
+                                   void* p_smem_pong) const
     {
 #ifndef __gfx950__
         static_assert(false, "Only gfx950 is supported for MXFP4 flatmm pipeline now.");
@@ -509,6 +507,13 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         __builtin_amdgcn_sched_barrier(0);
 
         // A tile in LDS
+        auto a_dram_window = make_tile_window(
+            PipelinePolicy::template MakeMXFP4_AsyncLoadDramTensorViewA<Problem>(
+                a_copy_dram_window_tmp.get_bottom_tensor_view()),
+            a_copy_dram_window_tmp.get_window_lengths(),
+            a_copy_dram_window_tmp.get_window_origin(),
+            PipelinePolicy::template MakeMXFP4_AsyncLoadATileDistribution<Problem>());
+
         ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem_ping);
         ADataType* p_a_lds_pong = static_cast<ADataType*>(p_smem_pong);
 
@@ -520,16 +525,10 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         auto a_lds_block_pong =
             make_tensor_view<address_space_enum::lds>(p_a_lds_pong, a_lds_block_desc);
 
-        auto a_copy_lds_window_ping =
-            make_tile_window(a_lds_block_ping,
-                             make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}),
-                             {0, 0},
-                             PipelinePolicy::template MakeADramTileDistribution<Problem>());
-        auto a_copy_lds_window_pong =
-            make_tile_window(a_lds_block_pong,
-                             make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}),
-                             {0, 0},
-                             PipelinePolicy::template MakeADramTileDistribution<Problem>());
+        auto a_store_lds_window_ping = make_tile_window(
+            a_lds_block_ping, make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}), {0, 0});
+        auto a_store_lds_window_pong = make_tile_window(
+            a_lds_block_pong, make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}), {0, 0});
 
         // ping-pong window for A LDS
         auto a_warp_window_ping_tmp =
@@ -651,9 +650,9 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
 
         // HEAD
         // Prefetch A0
-        auto a_block_tile = load_tile(a_copy_dram_window);
-        // move A window to next k
-        move_tile_window(a_copy_dram_window, {0, kKPerBlock});
+        async_load_tile(a_store_lds_window_ping, a_dram_window);
+        move_tile_window(a_dram_window, {0, kKPerBlock});
+        // s_waitcnt_barrier<0,0,0>();
 
         // prefetch B
         static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
@@ -700,20 +699,15 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         });
         // move Scale B window to next K
         move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
-
-        // A_Lds_TileDist may differ with ADramTileDistribution
-        auto a_block_tile_transformed = tile_elementwise_in(a_element_func, a_block_tile);
-        store_tile(a_copy_lds_window_ping, a_block_tile_transformed);
-
         __builtin_amdgcn_sched_barrier(0);
 
         // Prefetch A1
-        a_block_tile = load_tile(a_copy_dram_window);
-        // move A window to next k
-        move_tile_window(a_copy_dram_window, {0, kKPerBlock});
+        async_load_tile(a_store_lds_window_pong, a_dram_window);
+        // s_waitcnt_barrier<0,0,0>();
+        move_tile_window(a_dram_window, {0, kKPerBlock});
 
         // initialize C
-        tile_elementwise_inout([](auto& c) { c = 0; }, c_block_tile);
+        clear_tile(c_block_tile);
 
         block_sync_lds();
 
@@ -748,9 +742,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         __builtin_amdgcn_sched_barrier(0);
 
         // MAIN LOOP
-        index_t iCounter = (num_loop - 1) / 2;
-        while(iCounter > 0)
-        {
+        auto main_body_implx2 = [&]() mutable {
             // prefetch B(2i+1)
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
@@ -791,14 +783,10 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                 });
             });
 
-            // Prefill A(2i+1)
-            a_block_tile_transformed = tile_elementwise_in(a_element_func, a_block_tile);
-            store_tile(a_copy_lds_window_pong, a_block_tile_transformed);
-
             // Prefetch A(2i+2)
-            a_block_tile = load_tile(a_copy_dram_window);
-            // move A window to next k
-            move_tile_window(a_copy_dram_window, {0, kKPerBlock});
+            async_load_tile(a_store_lds_window_ping, a_dram_window);
+            move_tile_window(a_dram_window, {0, kKPerBlock});
+            // s_waitcnt_barrier<0,0,0>();
 
             // GEMM 2i
             static_for<0, KIterPerWarp / KXdlPack, 1>{}([&](auto kIter_pack) {
@@ -882,7 +870,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                 ua_pong.mxfp4 = load_tile(a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
                 a_warp_tensor(loadIter) = ua_pong.u; // reload a_warp_tensor with pong buffer
             });
-            HotLoopScheduler();
+            // HotLoopScheduler();
 
             // Next K
 
@@ -926,14 +914,10 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                 });
             });
 
-            // Prefill A(2i+2)
-            a_block_tile_transformed = tile_elementwise_in(a_element_func, a_block_tile);
-            store_tile(a_copy_lds_window_ping, a_block_tile_transformed);
-
             // Prefetch A(2i+3)
-            a_block_tile = load_tile(a_copy_dram_window);
-            // move A window to next k
-            move_tile_window(a_copy_dram_window, {0, kKPerBlock});
+            async_load_tile(a_store_lds_window_pong, a_dram_window);
+            move_tile_window(a_dram_window, {0, kKPerBlock});
+            // s_waitcnt_barrier<0,0,0>();
 
             // GEMM 2i+1
             static_for<0, KIterPerWarp / KXdlPack, 1>{}([&](auto kIter_pack) {
@@ -1018,9 +1002,17 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                 ua_ping.mxfp4 = load_tile(a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
                 a_warp_tensor(loadIter) = ua_ping.u; // reload a_warp_tensor with ping buffer
             });
-            HotLoopScheduler();
+            // HotLoopScheduler();
+        };
 
-            iCounter--;
+        index_t iCounter = (num_loop - 1) / 2;
+        // if(iCounter > 0)
+        {
+            do
+            {
+                main_body_implx2();
+                iCounter--;
+            } while(iCounter > 1);
         }
 
         // TAIL
@@ -1066,10 +1058,6 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                         load_tile(scale_b_dram_windows(nIter_pack)(kIter_pack));
                 });
             });
-
-            // Prefill A(loopK)
-            a_block_tile_transformed = tile_elementwise_in(a_element_func, a_block_tile);
-            store_tile(a_copy_lds_window_pong, a_block_tile_transformed);
 
             // GEMM loopK-1
             static_for<0, KIterPerWarp / KXdlPack, 1>{}([&](auto kIter_pack) {
@@ -1150,7 +1138,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                 a_warp_tensor(loadIter) = ua_pong.u; // reload a_warp_tensor with pong buffer
             });
 
-            Last2ndHotLoopScheduler();
+            // Last2ndHotLoopScheduler();
 
             // GEMM loopK
             static_for<0, KIterPerWarp / KXdlPack, 1>{}([&](auto kIter_pack) {
@@ -1222,7 +1210,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                     });
                 });
             });
-            LastHotLoopScheduler();
+            // LastHotLoopScheduler();
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
@@ -1297,33 +1285,10 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                     });
                 });
             });
-            LastHotLoopScheduler();
+            // LastHotLoopScheduler();
         }
 
         return c_block_tile;
-    }
-
-    template <typename ADramBlockWindowTmp,
-              typename BFlatBlockWindowTmp,
-              typename ScaleADramBlockWindowTmp,
-              typename ScaleBDramBlockWindowTmp>
-    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
-                                   const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
-                                   const ScaleADramBlockWindowTmp& scale_a_flat_window_tmp,
-                                   const ScaleBDramBlockWindowTmp& scale_b_flat_window_tmp,
-                                   index_t num_loop,
-                                   void* p_smem_ping,
-                                   void* p_smem_pong) const
-    {
-        return operator()(
-            a_dram_block_window_tmp,
-            [](const ADataType & a) { return a; },
-            b_flat_dram_block_window_tmp,
-            scale_a_flat_window_tmp,
-            scale_b_flat_window_tmp,
-            num_loop,
-            p_smem_ping,
-            p_smem_pong);
     }
 };
 

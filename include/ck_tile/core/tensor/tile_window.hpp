@@ -484,7 +484,8 @@ struct tile_window_with_static_distribution
                     make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
                 // Calculate SMEM address using base pointer
-                CK_TILE_LDS_ADDR LdsDataType* smem = smem_base_ptr + lds_coord.get_offset();
+                CK_TILE_LDS_ADDR LdsDataType* smem =
+                    smem_base_ptr + lds_coord.get_offset() / Traits::PackedSize;
 
                 // Write into bottom tensor
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
