@@ -7,18 +7,6 @@
 
 namespace ck_tile {
 
-#define CKTILE_FLATMM_USE_BUFFER_LOAD_LDS_AS_POSSIBLE 0
-
-#if defined(__gfx950__)
-#define CKTILE_FLATMM_ARCH_SUPPORT_BUFFER_LOAD_LDS_DWORDx4 1
-#else
-#define CKTILE_FLATMM_ARCH_SUPPORT_BUFFER_LOAD_LDS_DWORDx4 0
-#endif
-
-#define CKTILE_FLATMM_USE_BUFFER_LOAD_LDS             \
-    (CKTILE_FLATMM_USE_BUFFER_LOAD_LDS_AS_POSSIBLE && \
-     CKTILE_FLATMM_ARCH_SUPPORT_BUFFER_LOAD_LDS_DWORDx4)
-
 struct F16xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 {
     static constexpr auto I0 = number<0>{};
@@ -29,67 +17,11 @@ struct F16xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     static constexpr index_t N_Pack    = 2; // it's fixed for fp4
     static constexpr index_t K_Pack    = 2; // it's fixed for fp4
 
-    template <typename Problem, typename NativeADramTensorView>
-    CK_TILE_HOST_DEVICE static constexpr auto
-    TransformF16xF4_ATensorView(const NativeADramTensorView& a_dram_view)
-    {
-#if CKTILE_FLATMM_USE_BUFFER_LOAD_LDS
-        constexpr int DynamicTileOffsetFlag = 0;
-
-        constexpr index_t MPerXdl = Problem::BlockGemmShape::WarpTile::at(I0);
-        constexpr index_t NPerXdl = Problem::BlockGemmShape::WarpTile::at(I1);
-
-        static_assert(MPerXdl == 16 && NPerXdl == 16);
-
-        constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
-        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t KPack     = GetSmemPackA<Problem>();
-
-        constexpr int ContiguousThreadsCntInDS_READ_16B = 4;
-
-        // implement swizzle pattern on global side
-        // because we can't adjust the ds_write pattern of BUFFER_LOAD_LDS.
-        auto swizzle_a_dram_view_1 = transform_tensor_view(
-            a_dram_view,
-            make_tuple(
-                // M-dim is not affected by swizzle pattern
-                make_unmerge_transform(
-                    make_tuple(number<DynamicTileOffsetFlag>{}, number<MPerBlock>{})),
-                // K-dim is the swizzle dimension
-                make_unmerge_transform(make_tuple(number<DynamicTileOffsetFlag>{},
-                                                  number<KPerBlock / KPack>{},
-                                                  number<KPack>{}))),
-            make_tuple(sequence<0>{}, sequence<1>{}),
-            make_tuple(sequence<0, 1>{}, sequence<2, 3, 4>{}));
-
-        auto swizzle_a_dram_view_2 = transform_tensor_view(
-            swizzle_a_dram_view_1,
-            make_tuple(make_pass_through_transform(number<DynamicTileOffsetFlag>{}),
-                       make_xor_transform(make_tuple(number<MPerBlock>{},
-                                                     number<ContiguousThreadsCntInDS_READ_16B>{})),
-                       make_pass_through_transform(number<DynamicTileOffsetFlag>{}),
-                       make_pass_through_transform(number<KPack>{})),
-            make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}, sequence<4>{}),
-            make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}, sequence<4>{}));
-
-        return transform_tensor_view(
-            swizzle_a_dram_view_2,
-            make_tuple(
-                make_merge_transform_v3_division_mod(
-                    make_tuple(number<DynamicTileOffsetFlag>{}, number<MPerBlock>{})),
-                make_merge_transform_v3_division_mod(make_tuple(number<DynamicTileOffsetFlag>{},
-                                                                number<KPerBlock / KPack>{},
-                                                                number<KPack>{}))),
-            make_tuple(sequence<0, 1>{}, sequence<2, 3, 4>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-#else
-        return a_dram_view;
-#endif
-    }
-
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeF16xF4_ReadALdsBlockDescriptor()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeF16xF4_ALdsBlockDescriptor()
     {
+        using namespace ck_tile;
+
         constexpr index_t MPerXdl = Problem::BlockGemmShape::WarpTile::at(I0);
         constexpr index_t NPerXdl = Problem::BlockGemmShape::WarpTile::at(I1);
 
@@ -128,19 +60,34 @@ struct F16xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeF16xF4_WriteALdsBlockDescriptor()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeFp16xF4_ADramTileDistribution()
     {
-#if CKTILE_FLATMM_USE_BUFFER_LOAD_LDS
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+
+        constexpr index_t BlockSize = Problem::kBlockSize;
+
         constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-        constexpr index_t KPack     = GetSmemPackA<Problem>();
-        return make_naive_tensor_descriptor(make_tuple(number<MPerBlock>{}, number<KPerBlock>{}),
-                                            make_tuple(number<KPerBlock>{}, number<1>{}),
-                                            number<KPack>{},
-                                            number<1>{});
-#else
-        return MakeF16xF4_ReadALdsBlockDescriptor<Problem>();
-#endif
+
+        constexpr index_t K1 = Problem::VectorLoadSize / sizeof(ADataType);
+        constexpr index_t K0 = KPerBlock / K1;
+        constexpr index_t M2 = get_warp_size() / K0;
+
+        constexpr index_t M1 = BlockSize / get_warp_size();
+        static_assert(M2 != 0, "M2 is zero, which will lead to a division by zero error.");
+        static_assert(M1 != 0, "M1 is zero, which will lead to a division by zero error.");
+        constexpr index_t M0 = MPerBlock / (M2 * M1);
+        static_assert(M0 * M1 * M2 == MPerBlock,
+                      "Incorrect M0, M2, M1 configuration! "
+                      "M0, M1, M2 must cover whole MPerBlock!");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<1>,
+                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1>>,
+                                       tuple<sequence<1>, sequence<1, 2>>,
+                                       tuple<sequence<1>, sequence<2, 0>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 1>>{});
     }
 
     template <typename Problem>
@@ -207,14 +154,7 @@ struct F16xMXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     {
         using TileShape = typename Problem::BlockGemmShape; // ck_tile::TileFlatmmShape
 
-        constexpr index_t BlockSize                = Problem::kBlockSize;
-        constexpr index_t WaveSize                 = get_warp_size();
-        [[maybe_unused]] constexpr index_t WaveNum = BlockSize / WaveSize;
-
         constexpr index_t N_Warp = TileShape::BlockWarps::at(number<1>{});
-
-        [[maybe_unused]] constexpr index_t XDLPerBlock =
-            TileShape::kK / TileShape::WarpTile::at(I2);
         constexpr index_t K_Lane = 64 / TileShape::WarpTile::at(I1);
         constexpr index_t N_Lane = TileShape::WarpTile::at(I1);
 

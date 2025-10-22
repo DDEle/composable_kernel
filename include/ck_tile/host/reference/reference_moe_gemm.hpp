@@ -173,15 +173,14 @@ __global__ void moe_gemm_kernel(const ck_tile::index_t* p_sorted_token_ids_,
             }
             else if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
-                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(B[b_index / packed_size_b], 1.0f);
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(B[b_index / packed_size_b]);
                 if(k % 2 == 1)
                     v_b = fp32_val.hi;
                 else
                     v_b = fp32_val.lo;
                 if constexpr(MoeGemmKind == 1)
                 {
-                    const fp32x2_t fp32_val_up =
-                        pk_fp4_to_fp32x2(B[b_index_up / packed_size_b], 1.0f);
+                    const fp32x2_t fp32_val_up = pk_fp4_to_fp32x2(B[b_index_up / packed_size_b]);
                     if(k % 2 == 1)
                         v_b_up = fp32_val_up.hi;
                     else

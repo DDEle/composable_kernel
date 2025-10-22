@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
@@ -10,7 +11,7 @@
 namespace ck_tile {
 
 template <typename Problem>
-struct BaseFlatmmPipelineAGmemBGmemCRegV1
+struct BaseFlatmmPipelineAGmemBGmemCRegV0
 {
     static constexpr index_t PrefetchStages = 2;
 
@@ -23,6 +24,7 @@ struct BaseFlatmmPipelineAGmemBGmemCRegV1
     {
         return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
     }
+
     template <typename RunFunction>
     CK_TILE_HOST_DEVICE static auto
     TailHandler(const RunFunction& run_func, bool, TailNumber tail_num)
@@ -37,12 +39,15 @@ struct BaseFlatmmPipelineAGmemBGmemCRegV1
             return run_func(bool_constant<true>{},
                             integral_constant<TailNumber, TailNumber::Odd>{});
         }
+        // assert(false);
         return run_func(bool_constant<true>{}, integral_constant<TailNumber, TailNumber::Empty>{});
+        // return run_func(bool_constant<true>{}, integral_constant<TailNumber,
+        // TailNumber::Empty>{});
     }
 };
 
 template <typename Problem, typename PipelinePolicy = UniversalFlatmmPipelineAgBgCrPolicy>
-struct FlatmmPipelineAGmemBGmemCRegV1
+struct FlatmmPipelineAGmemBGmemCRegV0
 {
     using ADataType      = remove_cvref_t<typename Problem::ADataType>;
     using BDataType      = remove_cvref_t<typename Problem::BDataType>;
@@ -61,11 +66,7 @@ struct FlatmmPipelineAGmemBGmemCRegV1
 
     using WG = remove_cvref_t<decltype(config.template at<0>())>;
 
-    static constexpr index_t DsWritePreIssue = 3; // default 2, ds write at MIter - 2
-    static constexpr index_t DsReadPreload   = 2; // default 2, preload 2 ds read
-
     static constexpr index_t BlockSize = Problem::kBlockSize;
-    static constexpr index_t WaveSize  = get_warp_size();
 
     static constexpr index_t kMPerBlock = BlockGemmShape::kM;
     static constexpr index_t kNPerBlock = BlockGemmShape::kN;
@@ -84,7 +85,6 @@ struct FlatmmPipelineAGmemBGmemCRegV1
 
     static constexpr index_t kLdsAlignmentInBytes = 16;
     static constexpr index_t NumWaveGroups        = Problem::NumWaveGroups;
-    static constexpr bool UsePersistentKernel     = Problem::Traits::UsePersistentKernel;
 
     static constexpr auto I0   = number<0>();
     static constexpr auto I1   = number<1>();
@@ -109,74 +109,89 @@ struct FlatmmPipelineAGmemBGmemCRegV1
     static constexpr index_t MPerBlockPerIter = kMPerBlock / MIterPerWarp;
     static constexpr index_t KPerBlockPerIter = kKPerBlock / KIterPerWarp;
 
-    static constexpr index_t K1        = Problem::VectorLoadSize / sizeof(ADataType);
-    static constexpr index_t m_preload = (MIterPerWarp * KIterPerWarp >= DsReadPreload)
-                                             ? DsReadPreload
-                                             : MIterPerWarp * KIterPerWarp;
+    static constexpr index_t K1               = 16 / sizeof(ADataType);
+    static constexpr index_t ACopyLoadNum     = kMPerBlock * kKPerBlock / BlockSize / K1;
+    static constexpr index_t ACopyLoadNumPerK = ACopyLoadNum / KIterPerWarp;
+    static constexpr index_t AcopyPerLoadM    = kMPerBlock / ACopyLoadNum;
+    static constexpr index_t BloadGap         = MIterPerWarp / 2;
 
     static constexpr bool HasHotLoop = Problem::HasHotLoop;
     static constexpr auto TailNum    = Problem::TailNum;
 
-/*
-defined(USING_MFMA_16x16x32) && defined(ENABLE_FP8) // mi300 fp8 16c 0.5*K1
-defined(USING_MFMA_32x32x16) && defined(ENABLE_FP8) // mi300 fp8 32c 0.5*K1
-defined(USING_MFMA_16x16x16) && defined(ENABLE_FP16) // mi300 fp16 16c 0.5*K1
-defined(USING_MFMA_32x32x8) && defined(ENABLE_FP16) // mi300 fp16 32c 0.5*K1
+    static constexpr auto warp_m = WarpTile::at(idxM);
+    static constexpr auto warp_n = WarpTile::at(idxN);
+    static constexpr auto warp_k = WarpTile::at(idxK);
 
-defined(USING_MFMA_16x16x128) && defined(ENABLE_FP8) // mi350 fp8 32c 2*K1
-defined(USING_MFMA_32x32x64) && defined(ENABLE_FP8) // mi350 fp8 64c 2*K1
-defined(USING_MFMA_16x16x32) && defined(ENABLE_FP16) // mi350 fp16 16c 1*K1
-defined(USING_MFMA_32x32x16) && defined(ENABLE_FP16) // mi350 fp16 32c 1*K1
+    /*
+    defined(USING_MFMA_16x16x32) && defined(ENABLE_FP8) // mi300 fp8 16c 0.5*K1
+    defined(USING_MFMA_32x32x16) && defined(ENABLE_FP8) // mi300 fp8 32c 0.5*K1
+    defined(USING_MFMA_16x16x16) && defined(ENABLE_FP16) // mi300 fp16 16c 0.5*K1
+    defined(USING_MFMA_32x32x8) && defined(ENABLE_FP16) // mi300 fp16 32c 0.5*K1
 
-defined(USING_MFMA_16x16x128) && defined(ENABLE_FP4) // mi350 fp4 16c 1*K1
-defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
-*/
+    defined(USING_MFMA_16x16x128) && defined(ENABLE_FP8) // mi350 fp8 32c 2*K1
+    defined(USING_MFMA_32x32x64) && defined(ENABLE_FP8) // mi350 fp8 64c 2*K1
+    defined(USING_MFMA_16x16x32) && defined(ENABLE_FP16) // mi350 fp16 16c 1*K1
+    defined(USING_MFMA_32x32x16) && defined(ENABLE_FP16) // mi350 fp16 32c 1*K1
 
-// #if (defined(USING_MFMA_16x16x32_F8) ||  \
-//     defined(USING_MFMA_32x32x16_F8) ||  \
-//     defined(USING_MFMA_16x16x16_F16) || \
-//     defined(USING_MFMA_32x32x8_F16)) // K1 per Mfma = 0.5
-//     static constexpr auto mfma_per_wg = 2;
-//     static constexpr auto dsread_per_wg = 1;
-// #elif (defined(USING_MFMA_16x16x32_F16) || \
-//     defined(USING_MFMA_32x32x16_F16) ||   \
-//     defined(USING_MFMA_16x16x128_F4) ||   \
-//     defined(USING_MFMA_32x32x64_F4)) // K1 per Mfma = 1
-//     static constexpr auto mfma_per_wg = 1;
-//     static constexpr auto dsread_per_wg = 1;
-// #elif (defined(USING_MFMA_16x16x128_F8) || \
-//     defined(USING_MFMA_32x32x64_F8)) // K1 per Mfma = 2
-//     static constexpr auto mfma_per_wg = 1;
-//     static constexpr auto dsread_per_wg = 2;
-// #endif
-#ifdef __gfx942__
-    static constexpr index_t mfma_per_wg = 2;
-#else
-    static constexpr index_t mfma_per_wg = 1;
-#endif
-    static constexpr index_t dsread_per_wg =
-        WG::kM * WG::kK * sizeof(ADataType) / WaveSize / Problem::VectorLoadSize;
-    static_assert((WG::kM * WG::kK * sizeof(ADataType) / WaveSize) % Problem::VectorLoadSize == 0);
+    defined(USING_MFMA_16x16x128) && defined(ENABLE_FP4) // mi350 fp4 16c 1*K1
+    defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
+    */
+    struct MfmaConfig
+    {
+        int mfma_per_wg;
+        int dsread_per_wg;
+    };
+    static constexpr MfmaConfig GetMfmaConfig()
+    {
 
-    static constexpr index_t dsread_num_perK  = dsread_per_wg * MIterPerWarp;
-    static constexpr index_t dswrite_num_perK = dsread_num_perK / (MWarp * NWarp);
-    static constexpr index_t dswrite_rep    = (dswrite_num_perK + MIterPerWarp - 1) / MIterPerWarp;
-    static constexpr index_t Aload_num_perK = dswrite_num_perK;
-    static constexpr index_t Aload_rep      = dswrite_rep;
-    static constexpr index_t Bload_num_perK = kNPerBlock * WG::kK / NWarp / K1 / WaveSize;
-    static constexpr index_t HalfMIter      = (MIterPerWarp + 1) / 2;
-    static constexpr index_t Bload_rep      = (Bload_num_perK + HalfMIter - 1) / HalfMIter;
+        // K1 per Mfma = 0.5 cases: mfma_per_wg = 2, dsread_per_wg = 1
+        if constexpr((warp_m == 16 && warp_n == 16 && warp_k == 32 &&
+                      std::is_same_v<ADataType, fp8_t>) ||
+                     (warp_m == 32 && warp_n == 32 && warp_k == 16 &&
+                      std::is_same_v<ADataType, fp8_t>) ||
+                     (warp_m == 16 && warp_n == 16 && warp_k == 16 &&
+                      std::is_same_v<ADataType, fp16_t>) ||
+                     (warp_m == 32 && warp_n == 32 && warp_k == 8 &&
+                      std::is_same_v<ADataType, fp16_t>))
+        {
+            return {2, 1};
+        }
+        // K1 per Mfma = 2 cases: mfma_per_wg = 1, dsread_per_wg = 2
+        else if constexpr((warp_m == 16 && warp_n == 16 && warp_k == 128 &&
+                           std::is_same_v<ADataType, fp8_t>) ||
+                          (warp_m == 32 && warp_n == 32 && warp_k == 64 &&
+                           std::is_same_v<ADataType, fp8_t>))
+        {
+            return {1, 2};
+        }
+        // K1 per Mfma = 1 cases: mfma_per_wg = 1, dsread_per_wg = 1
+        else if constexpr((warp_m == 16 && warp_n == 16 && warp_k == 32 &&
+                            std::is_same_v<ADataType, fp16_t>) ||
+                            (warp_m == 32 && warp_n == 32 && warp_k == 16 &&
+                            std::is_same_v<ADataType, fp16_t>) ||
+                            (warp_m == 16 && warp_n == 16 && warp_k == 128 /*&&
+                            std::is_same_v<ADataType, fp4_t> */) ||
+                            (warp_m == 32 && warp_n == 32 && warp_k == 64  /*&&
+                            std::is_same_v<ADataType, fp4_t> */))
+        {
+            return {1, 1};
+        }
+        // Default configuration
+        else
+        {
+            return {1, 1};
+        }
+    }
 
-    static constexpr index_t mfma_perM_perK = NIterPerWarp * mfma_per_wg;
-    static constexpr index_t dswrite_mIter  = (DsWritePreIssue - 1) % MIterPerWarp;
-    static constexpr index_t dswrite_kIter  = (DsWritePreIssue - 1) / MIterPerWarp;
+    static constexpr auto mfma_config   = GetMfmaConfig();
+    static constexpr auto mfma_per_wg   = mfma_config.mfma_per_wg;
+    static constexpr auto dsread_per_wg = mfma_config.dsread_per_wg;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
         return concat('_', "pipeline_AGmemBGmemCRegV1", 
                       concat('x', kMPerBlock, kNPerBlock, kKPerBlock,  BlockSize),
-                      concat('x', WG::kM, WG::kN, WG::kK),
                       concat('x', GetVectorSizeA(), GetVectorSizeB(), GetVectorSizeC()),
                       concat('x', kPadM, kPadN, kPadK));
         // clang-format on
@@ -192,96 +207,6 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
         return PipelinePolicy::template GetSmemSize<Problem>();
     }
 
-    CK_TILE_HOST_DEVICE static constexpr auto
-    SchedulerPerM(index_t dsread_perM, index_t dswrite_perM, index_t load_perM)
-    {
-        // Init inst order
-        index_t max_data_inst   = dsread_perM > load_perM
-                                      ? (dsread_perM > dswrite_perM ? dsread_perM : dswrite_perM)
-                                      : (load_perM > dswrite_perM ? load_perM : dswrite_perM);
-        index_t sum_data_inst   = dsread_perM + load_perM + dswrite_perM;
-        index_t round_data_inst = (sum_data_inst + mfma_perM_perK - 1) / mfma_perM_perK;
-
-        index_t inst_order[NIterPerWarp * 10];
-#pragma unroll
-        for(int idx = 0; idx < NIterPerWarp * 10; idx++)
-        {
-            inst_order[idx] = 0;
-        }
-
-        index_t index = 0;
-#pragma unroll
-        for(int j = 0; j < max_data_inst; j++)
-        {
-            if(dswrite_perM > j)
-            {
-                inst_order[index] = 1;
-                index++;
-            }
-            if(load_perM > j)
-            {
-                inst_order[index] = 2;
-                index++;
-            }
-            if(dsread_perM > j)
-            {
-                inst_order[index] = 3;
-                index++;
-            }
-        }
-
-// Schedule IGLP
-#pragma unroll
-        for(int j = 0; j < mfma_perM_perK; j++)
-        {
-            index_t inst_idx = 0;
-            if(j == 0)
-                ;
-            else if(j == 1)
-                inst_idx = mfma_perM_perK == 2 ? 1 : mfma_perM_perK - 2;
-            else if(j == 2)
-                inst_idx = mfma_perM_perK - 1;
-            else
-                inst_idx = mfma_perM_perK - j;
-
-            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
-
-#pragma unroll
-            for(int r = 0; r < round_data_inst; r++)
-            {
-                if(r % 2 == 0)
-                {
-                    if(inst_order[inst_idx + r * mfma_perM_perK] == 1)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
-                    }
-                    if(inst_order[inst_idx + r * mfma_perM_perK] == 2)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
-                    }
-                    if(inst_order[inst_idx + r * mfma_perM_perK] == 3)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
-                    }
-                }
-                else
-                {
-                    if(inst_order[(r + 1) * mfma_perM_perK - 1 - inst_idx] == 1)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
-                    }
-                    if(inst_order[(r + 1) * mfma_perM_perK - 1 - inst_idx] == 2)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
-                    }
-                    if(inst_order[(r + 1) * mfma_perM_perK - 1 - inst_idx] == 3)
-                    {
-                        __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
-                    }
-                }
-            }
-        }
-    }
     CK_TILE_HOST_DEVICE static constexpr auto HotLoopScheduler()
     {
         // Keypoint of pipeline optimize is workload balance in time
@@ -295,21 +220,21 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
         // -1   M7N1:   62      3       -           -       -
         // -1   M7N2:   63      -       -           8       -
         // -1   M7N3:   64      4       -           -       -
-        //  0   M0N0K0:  1      -       -           -       1
-        //  0   M0N1:    2      5       -           -       -
-        //  0   M0N2:    3      -       -           -       2
+        //  0   M0N0K0:  1      -       -           -       -
+        //  0   M0N1:    2      5       -           -       2
+        //  0   M0N2:    3      -       -           -       -
         //  0   M0N3:    4      6       -           -       -
-        //  0   M1N0:    5      -       -           -       3
-        //  0   M1N1:    6      7       -           -       -
-        //  0   M1N2:    7      -       -           -       4
+        //  0   M1N0:    5      -       -           -       -
+        //  0   M1N1:    6      7       -           -       4
+        //  0   M1N2:    7      -       -           -       -
         //  0   M1N3:    8      8       -           -       -
-        //  0   M2N0:    9      -       -           -       5
-        //  0   M2N1:   10      9       -           -       -
-        //  0   M2N2:   11      -       -           -       6
+        //  0   M2N0:    9      -       -           -       -
+        //  0   M2N1:   10      9       -           -       6
+        //  0   M2N2:   11      -       -           -       -
         //  0   M2N3:   12     10       -           -       -
-        //  0   M3N0:   13      -       1           -       7
-        //  0   M3N1:   14     11       -           -       -
-        //  0   M3N2:   15      -       -           -       8
+        //  0   M3N0:   13      -       1           -       -
+        //  0   M3N1:   14     11       -           -       8
+        //  0   M3N2:   15      -       -           -       -
         //  0   M3N3:   16     12       -           -       -
         //  0   M4N0:   17      -       2           -       -
         //  0   M4N1:   18     13       -           -       -
@@ -327,21 +252,21 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
         //  0   M7N1:   30     19       -           -       -
         //  0   M7N2:   31      -       -           4       -
         //  0   M7N3:   32     20       -           -       -
-        //  0   M0N0K1: 33      -       -           -       9
-        //  0   M0N1:   34     21       -           -       -
-        //  0   M0N2:   35      -       -           -       10
+        //  0   M0N0K1: 33      -       -           -       -
+        //  0   M0N1:   34     21       -           -       10
+        //  0   M0N2:   35      -       -           -       -
         //  0   M0N3:   36     22       -           -       -
-        //  0   M1N0:   37      -       -           -       11
-        //  0   M1N1:   38     23       -           -       -
-        //  0   M1N2:   39      -       -           -       12
+        //  0   M1N0:   37      -       -           -       -
+        //  0   M1N1:   38     23       -           -       12
+        //  0   M1N2:   39      -       -           -       -
         //  0   M1N3:   40     24       -           -       -
-        //  0   M2N0:   41      -       -           -       13
-        //  0   M2N1:   42     25       -           -       -
-        //  0   M2N2:   43      -       -           -       14
+        //  0   M2N0:   41      -       -           -       -
+        //  0   M2N1:   42     25       -           -       14
+        //  0   M2N2:   43      -       -           -       -
         //  0   M2N3:   44     26       -           -       -
-        //  0   M3N0:   45      -       5           -       15
-        //  0   M3N1:   46     27       -           -       -
-        //  0   M3N2:   47      -       -           -       16
+        //  0   M3N0:   45      -       5           -       -
+        //  0   M3N1:   46     27       -           -       16
+        //  0   M3N2:   47      -       -           -       -
         //  0   M3N3:   48     28       -           -       -
         //  0   M4N0:   49      -       6           -       -
         //  0   M4N1:   50     29       -           -       -
@@ -360,152 +285,215 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
         //  0   M7N2:   63      -       -           8       -
         //  0   M7N3:   64      4       -           -       -
 
+#if 0
+        constexpr auto dsread_num_perK = dsread_per_wg * MIterPerWarp;
+        constexpr auto dswrite_num_perK = (dsread_num_perK + MWarp * NWarp - 1) / (MWarp * NWarp);
+        constexpr auto dswrite_rep = (dswrite_num_perK + MIterPerWarp - 1) / MIterPerWarp;
+
+        // index_t dsread_perM[MIterPerWarp];
+        // index_t dswrite_perM[MIterPerWarp];
+        index_t dsread_perM[MIterPerWarp];
+        index_t dswrite_perM[MIterPerWarp];
+        index_t load_perM[MIterPerWarp];
+        
+        constexpr int dswrite_inst = dswrite_num_perK;
+        constexpr int NIter_num = NIterPerWarp*mfma_per_wg;
+
 #pragma unroll
-        for(int kIter = 0; kIter < KIterPerWarp; kIter++)
+        for(int i=0;i<MIterPerWarp;i++)
         {
-#pragma unroll
-            for(int mIter = 0; mIter < MIterPerWarp; mIter++)
+            dsread_perM[i] = 2;
+            if(i==0)
             {
-                index_t dsread_perM  = 0;
-                index_t dswrite_perM = 0;
-                index_t load_perM    = 0;
-
-                // Calculate ds_read number per M
-                dsread_perM = dsread_per_wg;
-
-                // Calculate ds_write number per M
-                if(mIter == 0)
-                {
-                    dswrite_perM =
-                        (dswrite_num_perK - (MIterPerWarp - DsWritePreIssue) * dswrite_rep) > 0
-                            ? dswrite_num_perK - (MIterPerWarp - DsWritePreIssue) * dswrite_rep
-                            : 0;
-                }
-                else if(mIter >= MIterPerWarp - DsWritePreIssue + 1)
-                {
-                    dswrite_perM = 0;
-                }
-                else
-                {
-                    dswrite_perM = (dswrite_num_perK -
-                                    (MIterPerWarp - DsWritePreIssue - mIter) * dswrite_rep) > 0
-                                       ? dswrite_rep
-                                       : 0;
-                }
-                // Add ds write when ds write data > needed
-                if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
-                {
-                    if(mIter == MIterPerWarp - 1 - dswrite_mIter)
-                        dswrite_perM = 1;
-                }
-
-                // Calculate buffer_load number per M
-                if(mIter < HalfMIter)
-                {
-                    load_perM =
-                        ((Aload_num_perK - (MIterPerWarp - 1 - mIter) * Aload_rep) > 0 ? Aload_rep
-                                                                                       : 0) +
-                        ((Bload_num_perK - (HalfMIter - 1 - mIter) * Bload_rep) > 0 ? Bload_rep
-                                                                                    : 0);
-                }
-                else
-                {
-                    load_perM = (Aload_num_perK - (MIterPerWarp - 1 - mIter) * Aload_rep) > 0
-                                    ? Aload_rep
-                                    : 0;
-                }
-                SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
+                dswrite_perM[0] = (dswrite_inst - MIterPerWarp + 2) > 0 ? dswrite_inst - MIterPerWarp + 2 : 0;
+            }
+            else if(i==MIterPerWarp-1)
+            {
+                dswrite_perM[MIterPerWarp-1] = 0;
+            }
+            else
+            {
+                dswrite_perM[i] = (i + 2 - dswrite_inst) > 0 ? 1 : 0;
             }
         }
-        // Add Aload when Aload data > needed
-        if(Aload_num_perK == 0)
+
+#pragma unroll
+        for(int i=0;i<4;i++)
+        {
+            load_perM[i] = 2;
+        }
+
+#pragma unroll
+        for(int i=4;i<8;i++)
+        {
+            load_perM[i] = 1;
+        }
+
+#pragma unroll
+        for(int i=0;i<MIterPerWarp;i++)
+        {
+            int biger_num = dsread_perM[i] > load_perM[i] ? (dsread_perM[i] > dswrite_perM[i] ? dsread_perM[i] : dswrite_perM[i]) : (load_perM[i] > dswrite_perM[i] ? load_perM[i] : dswrite_perM[i]);
+            int total_num = dsread_perM[i] + load_perM[i] + dswrite_perM[i];
+            int gap = (total_num+NIter_num-1)/NIter_num;
+
+            index_t inst_order[MIterPerWarp*10];
+#pragma unroll
+            for(int j=0;j<MIterPerWarp*10;j++)
+            {
+                inst_order[j] = 0;
+            }
+
+            int index=0;
+#pragma unroll
+            for(int j=0;j<biger_num;j++)
+            {
+                if(dswrite_perM[i]>j)
+                {
+                    inst_order[index] = 1;
+                    index++;
+                }
+                if(load_perM[i]>j)
+                {
+                    inst_order[index] = 2;
+                    index++;
+                }
+                if(dsread_perM[i]>j)
+                {
+                    inst_order[index] = 3;
+                    index++;
+                }
+            }
+
+#pragma unroll
+            for(int j=0;j<NIter_num;j++)
+            {
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+#pragma unroll
+                for(int m=0;m<gap;m++)
+                {
+                    if(m%2==0)
+                    {
+                        if(inst_order[j+m*NIter_num]==1)
+                        {
+                            __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
+                        }
+                        if(inst_order[j+m*NIter_num]==2)
+                        {
+                            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                        }
+                        if(inst_order[j+m*NIter_num]==3)
+                        {
+                            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                        }
+                    }
+                    else
+                    {
+                        if(inst_order[(m+1)*NIter_num-1-j]==1)
+                        {
+                            __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
+                        }
+                        if(inst_order[(m+1)*NIter_num-1-j]==2)
+                        {
+                            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                        }
+                        if(inst_order[(m+1)*NIter_num-1-j]==3)
+                        {
+                            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                        }
+                    }
+
+                }
+            }
+        }
+        __builtin_amdgcn_sched_barrier(0);
+#endif
+
+        if constexpr(kMPerBlock == 128 && kNPerBlock == 128 && kKPerBlock == 128)
+        {
+            constexpr index_t KPerLoad = Problem::VectorLoadSize / sizeof(ADataType);
+            constexpr index_t A_Buffer_Load_Inst_Num =
+                kMPerBlock * kKPerBlock / BlockSize / KPerLoad;
+            constexpr index_t A_LDS_Read_Inst_Num    = MIterPerWarp * KIterPerWarp;
+            constexpr index_t B_Buffer_Load_Inst_Num = NIterPerWarp * KIterPerWarp;
+
+            static_for<0, A_LDS_Read_Inst_Num, 1>{}([&](auto i) {
+                ignore = i;
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                __builtin_amdgcn_sched_group_barrier(0x008, 2, 0); // MFMA
+            });
+            static_for<0, A_Buffer_Load_Inst_Num, 1>{}([&](auto i) {
+                ignore = i;
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                __builtin_amdgcn_sched_group_barrier(0x008, 2, 0); // MFMA
+            });
+            static_for<0, A_Buffer_Load_Inst_Num, 1>{}([&](auto i) {
+                ignore = i;
+                __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
+                __builtin_amdgcn_sched_group_barrier(0x008, 2, 0); // MFMA
+            });
+            static_for<0, B_Buffer_Load_Inst_Num, 1>{}([&](auto i) {
+                ignore = i;
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
+            });
+            __builtin_amdgcn_sched_barrier(0);
+        }
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto TailHotLoopScheduler()
+    {
+#if 0
+        static_for<0, 2, 1>{}([&](auto j) {
+            ignore = j;
+            static_for<0, 3, 1>{}([&](auto i) {
+                ignore = i;
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+            });
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
             __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+
+            static_for<0, 3, 1>{}([&](auto i) {
+                ignore = i;
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+            });
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+        });
         __builtin_amdgcn_sched_barrier(0);
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr auto Last2ndHotLoopScheduler()
-    {
-#pragma unroll
-        for(int kIter = 0; kIter < KIterPerWarp; kIter++)
-        {
-#pragma unroll
-            for(int mIter = 0; mIter < MIterPerWarp; mIter++)
-            {
-                index_t dsread_perM  = 0;
-                index_t dswrite_perM = 0;
-                index_t load_perM    = 0;
-
-                // Calculate ds_read number per M
-                dsread_perM = dsread_per_wg;
-
-                // Calculate ds_write number per M
-                if(mIter == 0)
-                {
-                    dswrite_perM =
-                        (dswrite_num_perK - (MIterPerWarp - DsWritePreIssue) * dswrite_rep) > 0
-                            ? dswrite_num_perK - (MIterPerWarp - DsWritePreIssue) * dswrite_rep
-                            : 0;
-                }
-                else if(mIter >= MIterPerWarp - DsWritePreIssue + 1)
-                {
-                    dswrite_perM = 0;
-                }
-                else
-                {
-                    dswrite_perM = (dswrite_num_perK -
-                                    (MIterPerWarp - DsWritePreIssue - mIter) * dswrite_rep) > 0
-                                       ? dswrite_rep
-                                       : 0;
-                }
-                // Add ds write when ds write data > needed
-                if(dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
-                {
-                    if(mIter == MIterPerWarp - 1 - dswrite_mIter)
-                        dswrite_perM = 1;
-                }
-
-                // Calculate buffer_load number per M
-                if(mIter < HalfMIter)
-                {
-                    load_perM =
-                        ((Bload_num_perK - (HalfMIter - 1 - mIter) * Bload_rep) > 0 ? Bload_rep
-                                                                                    : 0);
-                }
-                SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
-            }
-        }
-        __builtin_amdgcn_sched_barrier(0);
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr auto LastHotLoopScheduler()
-    {
-#pragma unroll
-        for(int kIter = 0; kIter < KIterPerWarp; kIter++)
-        {
-#pragma unroll
-            for(int mIter = 0; mIter < MIterPerWarp; mIter++)
-            {
-                index_t dsread_perM  = 0;
-                index_t dswrite_perM = 0;
-                index_t load_perM    = 0;
-
-                // Calculate ds_read number per M
-                if((kIter * MIterPerWarp + mIter) < (KIterPerWarp * MIterPerWarp - m_preload))
-                    dsread_perM = dsread_per_wg;
-
-                SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
-            }
-        }
-        // __builtin_amdgcn_sched_barrier(0);
+#endif
     }
 
     template <typename ADramBlockWindowTmp, typename BFlatBlockWindowTmp, typename AElementFunction>
-    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
-                                   const AElementFunction& a_element_func,
-                                   const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
-                                   index_t num_loop,
-                                   void* p_smem_ping,
-                                   void* p_smem_pong) const
+    CK_TILE_HOST_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                                        const AElementFunction& a_element_func,
+                                        const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                        index_t num_loop,
+                                        void* p_smem_ping,
+                                        void* p_smem_pong) const
     {
         static_assert(
             std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>>,
@@ -516,8 +504,9 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
         static_assert(kKPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
 
-        constexpr auto MIter_2nd_last = (MIterPerWarp >= 2) ? MIterPerWarp - 2 : MIterPerWarp - 1;
-        const index_t iMWarp          = get_warp_id() / NWarp;
+        // constexpr auto MIter_2nd_last = (MIterPerWarp >= 2) ? MIterPerWarp - 2 : MIterPerWarp -
+        // 1;
+        const index_t iMWarp = get_warp_id() / NWarp;
 
         using CWarpDstr   = typename WG::CWarpDstr;
         using CWarpTensor = typename WG::CWarpTensor;
@@ -631,7 +620,6 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
             NIterPerWarp>
             b_warp_tensor_pong;
 
-        // HEAD
         // Prefetch A0
         auto a_block_tile = load_tile(a_copy_dram_window);
         // move A window to next k
@@ -653,6 +641,7 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
 
         auto a_block_tile_tmp = tile_elementwise_in(a_element_func, a_block_tile);
         store_tile(a_copy_lds_window_ping, a_block_tile_tmp);
+
         __builtin_amdgcn_sched_barrier(0);
 
         // Prefetch A1
@@ -664,21 +653,8 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
         tile_elementwise_inout([](auto& c) { c = 0; }, c_block_tile);
 
         block_sync_lds();
-
-        // preload A00,A10... from lds
-        statically_indexed_array<decltype(load_tile(a_warp_windows_ping(number<0>{})(number<0>{}))),
-                                 m_preload>
-            a_warp_tensor;
-
-        static_for<0, m_preload, 1>{}([&](auto loadIter) {
-            constexpr auto mIter = loadIter % MIterPerWarp;
-            constexpr auto kIter = loadIter / MIterPerWarp;
-            a_warp_tensor(loadIter) =
-                load_tile(a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
-        });
         __builtin_amdgcn_sched_barrier(0);
 
-        // MAIN LOOP
         index_t iCounter = (num_loop - 1) / 2;
         while(iCounter > 0)
         {
@@ -706,19 +682,18 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
             // GEMM 2i
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    constexpr auto AwarpIter = (kIter * MIterPerWarp + mIter) % m_preload;
                     static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                         // read C warp tensor from C block tensor
                         CWarpTensor c_warp_tensor;
+
+                        auto a_warp_tensor_ping = load_tile(a_warp_windows_ping(mIter)(kIter));
 
                         c_warp_tensor.get_thread_buffer() = c_block_tile.get_y_sliced_thread_data(
                             merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         // warp GEMM
-                        WG{}(c_warp_tensor,
-                             a_warp_tensor(number<AwarpIter>{}),
-                             b_warp_tensor_ping(nIter)(kIter));
+                        WG{}(c_warp_tensor, a_warp_tensor_ping, b_warp_tensor_ping(nIter)(kIter));
 
                         // write C warp tensor into C block tensor
                         c_block_tile.set_y_sliced_thread_data(
@@ -726,38 +701,17 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
                             c_warp_tensor.get_thread_buffer());
                     });
-                    // preload next A from lds
-                    if constexpr((kIter * MIterPerWarp + mIter) <
-                                 (KIterPerWarp * MIterPerWarp - m_preload))
-                    {
-                        constexpr auto AmIter = (mIter + m_preload) % MIterPerWarp;
-                        constexpr auto AkIter = (kIter + (mIter + m_preload) / MIterPerWarp);
-                        a_warp_tensor(number<AwarpIter>{}) =
-                            load_tile(a_warp_windows_ping(number<AmIter>{})(number<AkIter>{}));
-                    }
-
-                    // barrier
-                    if constexpr((kIter == KIterPerWarp - 1) && (mIter == MIter_2nd_last))
-                    {
-                        block_sync_lds();
-                    }
                 });
             });
 
             // move B window to next flat K
             move_tile_window(b_flat_dram_window, {0, BlockGemmShape::flatKPerBlock});
+            block_sync_lds();
 
-            static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter = loadIter % MIterPerWarp;
-                constexpr auto kIter = loadIter / MIterPerWarp;
-                a_warp_tensor(loadIter) =
-                    load_tile(a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
-            });
             HotLoopScheduler();
 
             // Next K
-
-            // prefetch B(2i+2)
+            //  prefetch B(2i+2)
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                     b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
@@ -781,18 +735,18 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
             // GEMM 2i+1
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    constexpr auto AwarpIter = (kIter * MIterPerWarp + mIter) % m_preload;
                     static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                         // read C warp tensor from C block tensor
                         CWarpTensor c_warp_tensor;
+
+                        auto a_warp_tensor_pong = load_tile(a_warp_windows_pong(mIter)(kIter));
+
                         c_warp_tensor.get_thread_buffer() = c_block_tile.get_y_sliced_thread_data(
                             merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         // warp GEMM
-                        WG{}(c_warp_tensor,
-                             a_warp_tensor(number<AwarpIter>{}),
-                             b_warp_tensor_pong(nIter)(kIter));
+                        WG{}(c_warp_tensor, a_warp_tensor_pong, b_warp_tensor_pong(nIter)(kIter));
 
                         // write C warp tensor into C block tensor
                         c_block_tile.set_y_sliced_thread_data(
@@ -800,39 +754,19 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
                             c_warp_tensor.get_thread_buffer());
                     });
-                    // preload next A from lds
-                    if constexpr((kIter * MIterPerWarp + mIter) <
-                                 (KIterPerWarp * MIterPerWarp - m_preload))
-                    {
-                        constexpr auto AmIter = (mIter + m_preload) % MIterPerWarp;
-                        constexpr auto AkIter = (kIter + (mIter + m_preload) / MIterPerWarp);
-                        a_warp_tensor(number<AwarpIter>{}) =
-                            load_tile(a_warp_windows_pong(number<AmIter>{})(number<AkIter>{}));
-                    }
-
-                    // barrier
-                    if constexpr((kIter == KIterPerWarp - 1) && (mIter == MIter_2nd_last))
-                    {
-                        block_sync_lds();
-                    }
                 });
             });
 
             // move B window to next flat K
             move_tile_window(b_flat_dram_window, {0, BlockGemmShape::flatKPerBlock});
+            block_sync_lds();
 
-            static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter = loadIter % MIterPerWarp;
-                constexpr auto kIter = loadIter / MIterPerWarp;
-                a_warp_tensor(loadIter) =
-                    load_tile(a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
-            });
             HotLoopScheduler();
 
             iCounter--;
         }
 
-        // TAIL
+        // tail
         if constexpr(TailNum == TailNumber::Even)
         {
             // prefetch B(loopK)
@@ -854,19 +788,18 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
             // GEMM loopK-1
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    constexpr auto AwarpIter = (kIter * MIterPerWarp + mIter) % m_preload;
                     static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                         // read C warp tensor from C block tensor
                         CWarpTensor c_warp_tensor;
+
+                        auto a_warp_tensor_ping = load_tile(a_warp_windows_ping(mIter)(kIter));
 
                         c_warp_tensor.get_thread_buffer() = c_block_tile.get_y_sliced_thread_data(
                             merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         // warp GEMM
-                        WG{}(c_warp_tensor,
-                             a_warp_tensor(number<AwarpIter>{}),
-                             b_warp_tensor_ping(nIter)(kIter));
+                        WG{}(c_warp_tensor, a_warp_tensor_ping, b_warp_tensor_ping(nIter)(kIter));
 
                         // write C warp tensor into C block tensor
                         c_block_tile.set_y_sliced_thread_data(
@@ -874,49 +807,27 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
                             c_warp_tensor.get_thread_buffer());
                     });
-                    // preload next A from lds
-                    if constexpr((kIter * MIterPerWarp + mIter) <
-                                 (KIterPerWarp * MIterPerWarp - m_preload))
-                    {
-                        constexpr auto AmIter = (mIter + m_preload) % MIterPerWarp;
-                        constexpr auto AkIter = (kIter + (mIter + m_preload) / MIterPerWarp);
-                        a_warp_tensor(number<AwarpIter>{}) =
-                            load_tile(a_warp_windows_ping(number<AmIter>{})(number<AkIter>{}));
-                    }
-
-                    // barrier
-                    if constexpr((kIter == KIterPerWarp - 1) && (mIter == MIter_2nd_last))
-                    {
-                        block_sync_lds();
-                    }
                 });
             });
 
-            static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter = loadIter % MIterPerWarp;
-                constexpr auto kIter = loadIter / MIterPerWarp;
-                a_warp_tensor(loadIter) =
-                    load_tile(a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
-            });
-
-            Last2ndHotLoopScheduler();
+            block_sync_lds();
+            TailHotLoopScheduler();
 
             // GEMM loopK
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    constexpr auto AwarpIter = (kIter * MIterPerWarp + mIter) % m_preload;
                     static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                         // read C warp tensor from C block tensor
                         CWarpTensor c_warp_tensor;
+
+                        auto a_warp_tensor_pong = load_tile(a_warp_windows_pong(mIter)(kIter));
 
                         c_warp_tensor.get_thread_buffer() = c_block_tile.get_y_sliced_thread_data(
                             merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         // warp GEMM
-                        WG{}(c_warp_tensor,
-                             a_warp_tensor(number<AwarpIter>{}),
-                             b_warp_tensor_pong(nIter)(kIter));
+                        WG{}(c_warp_tensor, a_warp_tensor_pong, b_warp_tensor_pong(nIter)(kIter));
 
                         // write C warp tensor into C block tensor
                         c_block_tile.set_y_sliced_thread_data(
@@ -924,41 +835,27 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
                             c_warp_tensor.get_thread_buffer());
                     });
-                    if constexpr((kIter * MIterPerWarp + mIter) <
-                                 (KIterPerWarp * MIterPerWarp - m_preload))
-                    {
-                        constexpr auto AmIter = (mIter + m_preload) % MIterPerWarp;
-                        constexpr auto AkIter = (kIter + (mIter + m_preload) / MIterPerWarp);
-                        a_warp_tensor(number<AwarpIter>{}) =
-                            load_tile(a_warp_windows_pong(number<AmIter>{})(number<AkIter>{}));
-                    }
-                    // barrier
-                    if constexpr((kIter == KIterPerWarp - 1) && (mIter == MIter_2nd_last))
-                    {
-                        block_sync_lds();
-                    }
                 });
             });
-            LastHotLoopScheduler();
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
             // GEMM loopK
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    constexpr auto AwarpIter = (kIter * MIterPerWarp + mIter) % m_preload;
+                    // constexpr auto AwarpIter = (kIter * MIterPerWarp + mIter) % m_preload;
                     static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                         // read C warp tensor from C block tensor
                         CWarpTensor c_warp_tensor;
+
+                        auto a_warp_tensor_ping = load_tile(a_warp_windows_ping(mIter)(kIter));
 
                         c_warp_tensor.get_thread_buffer() = c_block_tile.get_y_sliced_thread_data(
                             merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         // warp GEMM
-                        WG{}(c_warp_tensor,
-                             a_warp_tensor(number<AwarpIter>{}),
-                             b_warp_tensor_ping(nIter)(kIter));
+                        WG{}(c_warp_tensor, a_warp_tensor_ping, b_warp_tensor_ping(nIter)(kIter));
 
                         // write C warp tensor into C block tensor
                         c_block_tile.set_y_sliced_thread_data(
@@ -966,24 +863,8 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
                             c_warp_tensor.get_thread_buffer());
                     });
-                    // preload next A from lds
-                    if constexpr((kIter * MIterPerWarp + mIter) <
-                                 (KIterPerWarp * MIterPerWarp - m_preload))
-                    {
-                        constexpr auto AmIter = (mIter + m_preload) % MIterPerWarp;
-                        constexpr auto AkIter = (kIter + (mIter + m_preload) / MIterPerWarp);
-                        a_warp_tensor(number<AwarpIter>{}) =
-                            load_tile(a_warp_windows_ping(number<AmIter>{})(number<AkIter>{}));
-                    }
-
-                    // barrier
-                    if constexpr((kIter == KIterPerWarp - 1) && (mIter == MIter_2nd_last))
-                    {
-                        block_sync_lds();
-                    }
                 });
             });
-            LastHotLoopScheduler();
         }
 
         return c_block_tile;

@@ -13,15 +13,15 @@
 
 namespace ck_tile {
 
-template <typename TilePartitioner_, typename FlatmmPipeline_, typename EpiloguePipeline_>
-struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, EpiloguePipeline_>
+template <typename TilePartitioner_, typename MXFlatmmPipeline_, typename EpiloguePipeline_>
+struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, EpiloguePipeline_>
 {
-    using Underlying = FlatmmKernel<TilePartitioner_, FlatmmPipeline_, EpiloguePipeline_>;
+    using Underlying = FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, EpiloguePipeline_>;
 
     using TilePartitioner = remove_cvref_t<TilePartitioner_>;
-    using FlatmmPipeline  = remove_cvref_t<FlatmmPipeline_>;
+    using FlatmmPipeline  = remove_cvref_t<MXFlatmmPipeline_>;
     using BlockGemmShape =
-        remove_cvref_t<typename FlatmmPipeline::BlockGemmShape>; // TileFlatmmShape
+        remove_cvref_t<typename MXFlatmmPipeline_::BlockGemmShape>; // TileFlatmmShape
     using EpiloguePipeline              = remove_cvref_t<EpiloguePipeline_>;
     using ALayout                       = remove_cvref_t<typename FlatmmPipeline::ALayout>;
     using BLayout                       = remove_cvref_t<typename FlatmmPipeline::BLayout>;
@@ -36,8 +36,16 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
     // Below type is actually accumulation data type - the output of block GEMM.
     using EDataType = remove_cvref_t<typename EpiloguePipeline::ODataType>;
 
-    static constexpr int QuantPackedSize = numeric_traits<BDataType>::PackedSize;
-    static constexpr int N_Pack          = 2;
+    static constexpr int MThreadPerXdl = BlockGemmShape::WarpTile::at(number<0>{});
+    static constexpr int NThreadPerXdl = BlockGemmShape::WarpTile::at(number<1>{});
+    static constexpr int KThreadPerXdl = 64 / MThreadPerXdl;
+
+    static constexpr int APackedSize = numeric_traits<ADataType>::PackedSize;
+    static constexpr int BPackedSize = numeric_traits<BDataType>::PackedSize;
+
+    static constexpr int MXdlPack = FlatmmPipeline::MXdlPack;
+    static constexpr int NXdlPack = FlatmmPipeline::NXdlPack;
+    static constexpr int KXdlPack = FlatmmPipeline::KXdlPack;
 
     static constexpr index_t NumDTensor = DsDataType::size();
 
@@ -46,6 +54,7 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
     static constexpr auto I2 = number<2>();
     static constexpr auto I3 = number<3>();
     static constexpr auto I4 = number<4>();
+    static constexpr auto I5 = number<5>();
 
     static_assert(DsLayout::size() == DsDataType::size(),
                   "The size of DsLayout and DsDataType should be the same");
@@ -54,7 +63,7 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
-        return concat('_', "mixed_prec_gemm", gemm_prec_str<ADataType, BDataType>, FlatmmPipeline::GetName());
+        return concat('_', "mx_flatmm_gemm", gemm_prec_str<ADataType, BDataType>, FlatmmPipeline::GetName());
         // clang-format on
     }
 
@@ -67,20 +76,27 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
             hipDeviceProp_t prop;
             int deviceId = 0; // default device
 
-            constexpr int block_size = F16xMXF4FlatmmKernel::BlockSize().x;
+            constexpr int block_size = MXFlatmmKernel::BlockSize().x;
             int dync_smem_size       = 0;
             int maxActiveBlocksPerCU = 0;
 
-            [[maybe_unused]] auto e = hipGetDeviceProperties(&prop, deviceId);
+            hipError_t e = hipGetDeviceProperties(&prop, deviceId);
+            if(e != hipSuccess)
+                throw std::runtime_error(std::string("hipGetDeviceProperties failed: ") +
+                                         hipGetErrorName(e));
 
             e = hipOccupancyMaxActiveBlocksPerMultiprocessor(
                 &maxActiveBlocksPerCU,
                 reinterpret_cast<void*>(
                     kentry2<block_size,
-                            F16xMXF4FlatmmKernel,
+                            MXFlatmmKernel,
                             FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>>),
                 block_size,
                 dync_smem_size);
+            if(e != hipSuccess)
+                throw std::runtime_error(
+                    std::string("hipOccupancyMaxActiveBlocksPerMultiprocessor failed: ") +
+                    hipGetErrorName(e));
 
             const int persistent_block_size = prop.multiProcessorCount * maxActiveBlocksPerCU;
             const int total_work_tile_cnt   = TilePartitioner::GridSize(kargs.M, kargs.N);
@@ -89,7 +105,8 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
             //           << ", persistent_block_size: " << persistent_block_size
             //           << ", total_work_tile_cnt: " << total_work_tile_cnt << std::endl;
 
-            assert(kargs.k_batch == 1);
+            if(kargs.k_batch != 1)
+                throw std::runtime_error("Wrong! k_batch != 1 not supported in persistent kernel");
             return dim3(min(persistent_block_size, total_work_tile_cnt), 1, kargs.k_batch);
         }
         else
@@ -189,21 +206,72 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
             }
         }();
 
-        auto scale_n = kargs.scale_n_ptr;
+        auto scale_a = kargs.scale_m_ptr;
+        auto scale_b = kargs.scale_n_ptr;
 
-        index_t FlatScaleK =
-            (kargs.K / decltype(scale_n)::GranularityK) * N_Pack * BlockGemmShape::WarpTile::at(I1);
-        index_t FlatScaleN = kargs.N / N_Pack / BlockGemmShape::WarpTile::at(I1);
+        static constexpr int BlockScaleSize = 32; // decltype(scale_n)::GranularityK;
 
-        const auto scale_b_flat_view = make_naive_tensor_view<address_space_enum::global>(
-            reinterpret_cast<const e8m0_t*>(scale_n.ptr),
-            make_tuple(FlatScaleN, FlatScaleK),
-            make_tuple(FlatScaleK, 1),
-            number<8>{},
-            number<1>{});
+        // A scale tensor view
+        const auto& scale_a_tensor_view = [&]() {
+            // Pack 2x2 e8m0 over M/K dimension into 1 int32_t to trigger dword width load
+            const auto scale_a_naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(kargs.M / (MXdlPack * MThreadPerXdl),
+                           kargs.K / BlockScaleSize / (KXdlPack * KThreadPerXdl),
+                           KThreadPerXdl,
+                           MThreadPerXdl));
+            const auto scale_a_desc = transform_tensor_descriptor(
+                scale_a_naive_desc,
+                make_tuple(
+                    make_merge_transform(
+                        make_tuple(kargs.M / (MXdlPack * MThreadPerXdl), MThreadPerXdl)),
+                    make_merge_transform(make_tuple(
+                        kargs.K / BlockScaleSize / (KXdlPack * KThreadPerXdl), KThreadPerXdl))),
+                make_tuple(sequence<0, 3>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
 
-        return make_tuple(
-            a_tensor_view, b_flat_tensor_view, ds_tensor_view, e_tensor_view, scale_b_flat_view);
+            return make_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_a.ptr), scale_a_desc);
+        }();
+
+        // B scale tensor view
+        const auto& scale_b_tensor_view = [&]() {
+            const auto scale_b_navie_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(kargs.N / (NXdlPack * NThreadPerXdl),
+                           kargs.K / BlockScaleSize / (KXdlPack * KThreadPerXdl),
+                           KThreadPerXdl,
+                           NThreadPerXdl));
+            const auto scale_b_desc = transform_tensor_descriptor(
+                scale_b_navie_desc,
+                make_tuple(
+                    make_merge_transform(
+                        make_tuple(kargs.N / (NXdlPack * NThreadPerXdl), NThreadPerXdl)),
+                    make_merge_transform(make_tuple(
+                        kargs.K / BlockScaleSize / (KXdlPack * KThreadPerXdl), KThreadPerXdl))),
+                make_tuple(sequence<0, 3>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+
+            return make_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_b.ptr), scale_b_desc);
+        }();
+
+        // index_t FlatScaleK =
+        //     (kargs.K / decltype(scale_n)::GranularityK) * N_Pack *
+        //     BlockGemmShape::WarpTile::at(I1);
+        // index_t FlatScaleN = kargs.N / N_Pack / BlockGemmShape::WarpTile::at(I1);
+
+        // const auto scale_b_flat_view = make_naive_tensor_view<address_space_enum::global>(
+        //     reinterpret_cast<const e8m0_t*>(scale_n.ptr),
+        //     make_tuple(FlatScaleN, FlatScaleK),
+        //     make_tuple(FlatScaleK, 1),
+        //     number<8>{},
+        //     number<1>{});
+
+        return make_tuple(a_tensor_view,
+                          b_flat_tensor_view,
+                          ds_tensor_view,
+                          e_tensor_view,
+                          scale_a_tensor_view,
+                          scale_b_tensor_view);
     }
 
     template <typename TensorView>
@@ -269,7 +337,8 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
             }
         }();
 
-        return make_tuple(a_pad_view, b_flat_tensor_view, ds_pad_view, e_pad_view, views.at(I4));
+        return make_tuple(
+            a_pad_view, b_flat_tensor_view, ds_pad_view, e_pad_view, views.at(I4), views.at(I5));
     }
 
     template <typename PadView>
@@ -329,17 +398,34 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
             make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
             {i_m, i_n});
 
-        auto scale_block_window =
-            make_tile_window(views.at(I4),
-                             make_tuple(number<FlatmmPipeline::flatNPerWarp>{},
-                                        number<FlatmmPipeline::flatKPerWarp * N_Pack * 4 / 32>{}),
-                             {i_n / BlockGemmShape::WarpTile::at(I1) / N_Pack, 0});
+        // auto scale_block_window =
+        //     make_tile_window(views.at(I4),
+        //                      make_tuple(number<FlatmmPipeline::flatNPerWarp>{},
+        //                                 number<FlatmmPipeline::flatKPerWarp * N_Pack * 4 /
+        //                                 32>{}),
+        //                      {i_n / BlockGemmShape::WarpTile::at(I1) / N_Pack, 0});
+
+        // auto scale_a                        = kargs.scale_m_ptr;
+        static constexpr int BlockScaleSize = 32;
+
+        auto scale_a_block_window = make_tile_window(
+            views.at(I4),
+            make_tuple(number<TilePartitioner::MPerBlock / MXdlPack>{},
+                       number<TilePartitioner::KPerBlock / (BlockScaleSize * KXdlPack)>{}),
+            {i_m / MXdlPack, 0});
+
+        auto scale_b_block_window = make_tile_window(
+            views.at(I5),
+            make_tuple(number<TilePartitioner::NPerBlock / NXdlPack>{},
+                       number<TilePartitioner::KPerBlock / (BlockScaleSize * KXdlPack)>{}),
+            {i_n / NXdlPack, 0});
 
         return make_tuple(a_block_window,
                           b_flat_block_window,
                           ds_block_window,
                           e_block_window,
-                          scale_block_window);
+                          scale_a_block_window,
+                          scale_b_block_window);
     }
 
     template <class ScaleM, class ScaleN, bool UseDefaultScheduler = true>
@@ -365,10 +451,11 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
         const index_t num_loop = TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k);
 
         // Run GEMM cooperatively by whole workgroup.
-        const auto& a_block_window      = gemm_tile_windows.at(I0);
-        const auto& b_flat_block_window = gemm_tile_windows.at(I1);
-        const auto& d_block_window      = gemm_tile_windows.at(I2);
-        const auto& scale_block_window  = gemm_tile_windows.at(I4);
+        const auto& a_block_window       = gemm_tile_windows.at(I0);
+        const auto& b_flat_block_window  = gemm_tile_windows.at(I1);
+        const auto& d_block_window       = gemm_tile_windows.at(I2);
+        const auto& scale_a_block_window = gemm_tile_windows.at(I4);
+        const auto& scale_b_block_window = gemm_tile_windows.at(I5);
 
         static_assert(ScaleM::GranularityK == ScaleN::GranularityK // have the same granK
                           || ScaleM::GranularityMN == -1           // or ScaleA is disable
@@ -385,7 +472,8 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
                                       FlatmmPipeline::GetADramTileDistribution());
         const auto& c_block_tile = FlatmmPipeline{}(a_block_window_with_distr,
                                                     b_flat_block_window,
-                                                    scale_block_window,
+                                                    scale_a_block_window,
+                                                    scale_b_block_window,
                                                     num_loop,
                                                     smem_ptr_ping,
                                                     smem_ptr_pong);
@@ -424,10 +512,10 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
 
             const SplitKBatchOffset splitk_batch_offset(kargs);
             // options
-            const ADataType* a_ptr =
-                static_cast<const ADataType*>(kargs.a_ptr) + splitk_batch_offset.a_k_split_offset;
+            const ADataType* a_ptr = static_cast<const ADataType*>(kargs.a_ptr) +
+                                     splitk_batch_offset.a_k_split_offset / APackedSize;
             const BDataType* b_flat_ptr = static_cast<const BDataType*>(kargs.b_ptr) +
-                                          splitk_batch_offset.b_k_split_offset / QuantPackedSize;
+                                          splitk_batch_offset.b_k_split_offset / BPackedSize;
             EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
 
             // allocate LDS
@@ -449,6 +537,11 @@ struct F16xMXF4FlatmmKernel : FlatmmKernel<TilePartitioner_, FlatmmPipeline_, Ep
                                                           splitk_batch_offset,
                                                           i_m,
                                                           i_n);
+            }
+            else
+            {
+                static_assert(false,
+                              "Unimplemented: atomic_add with odd vector size for fp16/bf16");
             }
             partition_idx += gridDim.x;
         } while(UsePersistentKernel && partition_idx < total_work_tile_cnt);
