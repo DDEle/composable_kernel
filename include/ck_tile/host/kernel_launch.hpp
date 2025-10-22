@@ -31,7 +31,11 @@ __launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
 template <int MaxThreadPerBlock, typename Kernel, typename... Args>
 __launch_bounds__(MaxThreadPerBlock) __global__ void kentry2(Args... args)
 {
+#if defined(__HIP_DEVICE_COMPILE__)
     Kernel{}(args...);
+#else
+    (..., (ignore = args, 0));
+#endif
 }
 //
 // return a anonymous functor(lambda) to be called later
