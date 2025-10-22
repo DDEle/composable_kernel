@@ -1404,11 +1404,13 @@ CK_TILE_DEVICE thread_buffer<T, N> amd_buffer_load_impl(int32x4_t src_wave_buffe
              (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same<T, fp8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same<T, bf8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
-            (std::is_same<T, int8_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
-            (std::is_same<T, pk_fp4_raw_t>::value &&
+            ((std::is_same<T, int8_t>::value || std::is_same<T, e8m0_t>::value ||
+              std::is_same<T, pk_fp4_raw_t>::value) &&
              (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same<T, pk_int4_t>::value &&
-             (N == 1 || N == 2 || N == 4 || N == 8 || N == 16 || N == 32)),
+                 (N == 1 || N == 2 || N == 4 || N == 8 || N == 16 || N == 32) ||
+             (std::is_same<T, pk_fp4_t>::value &&
+              (N == 1 || N == 2 || N == 4 || N == 8 || N == 16))),
         "wrong! not implemented");
 
     using rtn_type = thread_buffer<T, N>;
@@ -2047,6 +2049,7 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
 {
     static_assert((std::is_same<T, float>::value && (N == 1 || N == 2 || N == 4)) ||
                       (std::is_same<T, fp16_t>::value && (N == 2 || N == 4 || N == 8)) ||
+                      (std::is_same<T, bf16_t>::value && (N == 2 || N == 4 || N == 8)) ||
                       (std::is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4)),
                   "wrong! not implemented");
 
@@ -2136,6 +2139,40 @@ CK_TILE_DEVICE void amd_buffer_atomic_add_impl(const thread_buffer<T, N>& src_th
                     dst_wave_buffer_resource,
                     dst_thread_addr_offset,
                     dst_wave_addr_offset + i * sizeof(fp16x2_t),
+                    0);
+            });
+        }
+    }
+    else if constexpr(std::is_same<T, bf16_t>::value)
+    {
+        if constexpr(N == 2)
+        {
+            llvm_amdgcn_raw_buffer_atomic_add_bf16x2(
+                bit_cast<cktile_llvm_bf16x2_t>(src_thread_data),
+                dst_wave_buffer_resource,
+                dst_thread_addr_offset,
+                dst_wave_addr_offset,
+                0);
+        }
+        else if constexpr(N == 4)
+        {
+            static_for<0, 2, 1>{}([&](auto i) {
+                llvm_amdgcn_raw_buffer_atomic_add_bf16x2(
+                    src_thread_data.template get_as<cktile_llvm_bf16x2_t>()[i],
+                    dst_wave_buffer_resource,
+                    dst_thread_addr_offset,
+                    dst_wave_addr_offset + i * sizeof(bf16x2_t),
+                    0);
+            });
+        }
+        else if constexpr(N == 8)
+        {
+            static_for<0, 4, 1>{}([&](auto i) {
+                llvm_amdgcn_raw_buffer_atomic_add_bf16x2(
+                    src_thread_data.template get_as<cktile_llvm_bf16x2_t>()[i],
+                    dst_wave_buffer_resource,
+                    dst_thread_addr_offset,
+                    dst_wave_addr_offset + i * sizeof(bf16x2_t),
                     0);
             });
         }

@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
+
+#pragma once
+
+#include "ck_tile/ops/moe_flatmm/kernel/moe_flatmm_kernel.hpp"
+#include "ck_tile/ops/moe_flatmm/pipeline/moe_flatmm_pipeline_agmem_bgmem_creg.hpp"
+#include "ck_tile/ops/common/generic_2d_block_shape.hpp"
+#include "ck_tile/ops/common/load_interleaved_pk_type.hpp"
+#include "ck_tile/ops/common/streamk_common.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
+#include "ck_tile/ops/common/utils.hpp"
