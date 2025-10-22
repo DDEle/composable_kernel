@@ -145,10 +145,16 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                   0);
 
     static constexpr index_t dsread_num_perK  = dsread_per_wg * MIterPerWarp;
-    static constexpr index_t dswrite_num_perK = dsread_num_perK / (MWarp * NWarp);
+    static constexpr index_t dswrite_num_perK = dsread_num_perK / NWarp;
     static constexpr index_t dswrite_rep    = (dswrite_num_perK + MIterPerWarp - 1) / MIterPerWarp;
     static constexpr index_t Aload_num_perK = dswrite_num_perK;
     static constexpr index_t Aload_rep      = dswrite_rep;
+
+    // using a = decltype(CK_PRINT<dsread_num_perK,
+    //                             dswrite_num_perK,
+    //                             dswrite_rep,
+    //                             Aload_num_perK,
+    //                             Aload_rep>());
 
     static constexpr index_t Bload_num_perK = kNPerBlock * WG::kK / NWarp / BK1 / WaveSize;
     static constexpr index_t ScaleBload_K1  = NXdlPack * KXdlPack; // fixed for fp4
@@ -181,17 +187,17 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         index_t index = 0;
         _Pragma("unroll") for(int j = 0; j < max_data_inst; j++)
         {
-            if(dswrite_perM > j)
+            if(j < dswrite_perM)
             {
                 inst_order[index] = 1;
                 index++;
             }
-            if(load_perM > j)
+            if(j < load_perM)
             {
                 inst_order[index] = 2;
                 index++;
             }
-            if(dsread_perM > j)
+            if(j < dsread_perM)
             {
                 inst_order[index] = 3;
                 index++;
@@ -219,7 +225,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                 {
                     if(inst_order[inst_idx + r * mfma_perM_perK] == 1)
                     {
-                        __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
+                        // __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
                     }
                     if(inst_order[inst_idx + r * mfma_perM_perK] == 2)
                     {
@@ -234,7 +240,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                 {
                     if(inst_order[(r + 1) * mfma_perM_perK - 1 - inst_idx] == 1)
                     {
-                        __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
+                        // __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
                     }
                     if(inst_order[(r + 1) * mfma_perM_perK - 1 - inst_idx] == 2)
                     {
@@ -652,7 +658,6 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         // Prefetch A0
         async_load_tile(a_store_lds_window_ping, a_dram_window);
         move_tile_window(a_dram_window, {0, kKPerBlock});
-        // s_waitcnt_barrier<0,0,0>();
 
         // prefetch B
         static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
@@ -703,12 +708,12 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
 
         // Prefetch A1
         async_load_tile(a_store_lds_window_pong, a_dram_window);
-        // s_waitcnt_barrier<0,0,0>();
         move_tile_window(a_dram_window, {0, kKPerBlock});
 
         // initialize C
         clear_tile(c_block_tile);
 
+        s_waitcnt_barrier<dsread_per_wg * MIterPerWarp * KIterPerWarp>();
         block_sync_lds();
 
         using MXFP4_A_Buffer_ping =
@@ -795,15 +800,17 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                         static_for<0, KXdlPack, 1>{}([&](auto ikxdl) {
                             static_for<0, MXdlPack, 1>{}([&](auto imxdl) {
                                 constexpr auto AwarpIter = imxdl + ikxdl * MXdlPack;
+                                constexpr auto m_iter    = mIter_pack * MXdlPack + imxdl;
+                                constexpr auto k_iter    = kIter_pack * KXdlPack + ikxdl;
                                 static_for<0, NXdlPack, 1>{}([&](auto inxdl) {
+                                    constexpr auto n_iter = nIter_pack * NXdlPack + inxdl;
+
                                     // read C warp tensor from C block tensor
                                     CWarpTensor c_warp_tensor;
                                     c_warp_tensor.get_thread_buffer() =
                                         c_block_tile.get_y_sliced_thread_data(
-                                            merge_sequences(
-                                                sequence<mIter_pack * MXdlPack + imxdl,
-                                                         nIter_pack * NXdlPack + inxdl>{},
-                                                c_warp_y_index_zeros),
+                                            merge_sequences(sequence<m_iter, n_iter>{},
+                                                            c_warp_y_index_zeros),
                                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                                     UnionBuf_A_ping ua_compute;
@@ -826,17 +833,14 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
 
                                     // write C warp tensor into C block tensor
                                     c_block_tile.set_y_sliced_thread_data(
-                                        merge_sequences(sequence<mIter_pack * MXdlPack + imxdl,
-                                                                 nIter_pack * NXdlPack + inxdl>{},
+                                        merge_sequences(sequence<m_iter, n_iter>{},
                                                         c_warp_y_index_zeros),
                                         merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
                                         c_warp_tensor.get_thread_buffer());
                                 });
                                 // preload next A from lds
-                                constexpr auto addr = (mIter_pack * MXdlPack + imxdl) % 2 +
-                                                      (kIter_pack * KXdlPack + ikxdl) * 2 +
-                                                      (mIter_pack * MXdlPack + imxdl) / 2 * 4 +
-                                                      m_preload;
+                                constexpr auto addr =
+                                    m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
                                 if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
                                              (nIter_pack == NIterPerWarp / NXdlPack - 1))
                                 {
@@ -848,8 +852,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                                 }
 
                                 // barrier
-                                if constexpr(kIter_pack * KXdlPack + ikxdl == KIterPerWarp - 1 &&
-                                             mIter_pack * MXdlPack + imxdl == MIter_2nd_last)
+                                if constexpr(k_iter == KIterPerWarp - 1 && m_iter == MIter_2nd_last)
                                 {
                                     block_sync_lds();
                                 }

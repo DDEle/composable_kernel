@@ -20,7 +20,7 @@ if(has_supported_gpu)
     set(EXAMPLE_MOE_FLATMM_COMPILE_OPTIONS)
 
     if(CK_USE_OCP_FP8)
-        list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
+        list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8 --save-temps -Wno-nrvo)
     endif()
 
     target_compile_options(tile_example_flatmm_basic PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS})
