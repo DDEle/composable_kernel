@@ -1,6 +1,172 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 #pragma once
+#include <type_traits>
+#include "ck_tile/utility/json_dump.hpp"
+template <typename T>
+constexpr const char* DataTypeToString()
+{
+    if constexpr(std::is_same_v<T, ck_tile::half_t>)
+    {
+        return "fp16";
+    }
+    else if constexpr(std::is_same_v<T, ck_tile::fp8_t>)
+    {
+        return "fp8";
+    }
+    else if constexpr(std::is_same_v<T, ck_tile::bf8_t>)
+    {
+        return "bf8";
+    }
+    else if constexpr(std::is_same_v<T, ck_tile::bf16_t>)
+    {
+        return "bf16";
+    }
+    else
+    {
+        return "unknown";
+    }
+}
+
+template <typename Layout>
+static constexpr inline auto is_row_major(Layout layout_)
+{
+    return ck_tile::bool_constant<std::is_same_v<ck_tile::remove_cvref_t<decltype(layout_)>,
+                                                 ck_tile::tensor_layout::gemm::RowMajor>>{};
+}
+
+// mfma_type, 0:32x32, 1:16x16
+template <typename FlatmmConfig, typename T>
+auto shuffle_b(const ck_tile::HostTensor<T>& t)
+{
+    assert(t.get_lengths().size() == 2);
+    int n_ = t.get_lengths()[1];
+    int k_ = t.get_lengths()[0];
+
+    if(ck_tile::is_gfx12_supported())
+    {
+        constexpr int divisor      = 2;
+        constexpr int kABK1PerLane = 8;
+        constexpr int kABK0PerLane = FlatmmConfig::K_Warp_Tile / divisor / kABK1PerLane;
+        ck_tile::HostTensor<T> t_view({n_ / FlatmmConfig::N_Warp_Tile,
+                                       FlatmmConfig::N_Warp_Tile,
+                                       k_ / FlatmmConfig::K_Warp_Tile,
+                                       kABK0PerLane,
+                                       divisor,
+                                       kABK1PerLane});
+        std::copy(t.begin(), t.end(), t_view.begin());
+        return ck_tile::reference_permute(t_view, {0, 2, 4, 1, 3, 5});
+    }
+    else
+    {
+        int divisor = 1;
+        if(ck_tile::is_gfx11_supported())
+        {
+            divisor = 1;
+        }
+        else
+        {
+            assert(is_wave32() == false);
+            divisor = FlatmmConfig::N_Warp_Tile == 32 ? 2 : 4;
+        }
+        ck_tile::HostTensor<T> t_view({n_ / FlatmmConfig::N_Warp_Tile,
+                                       FlatmmConfig::N_Warp_Tile,
+                                       k_ / FlatmmConfig::K_Warp_Tile,
+                                       divisor,
+                                       FlatmmConfig::K_Warp_Tile / divisor});
+        std::copy(t.begin(), t.end(), t_view.begin());
+        return ck_tile::reference_permute(t_view, {0, 2, 3, 1, 4});
+    }
+}
+
+template <typename ADataType, typename BDataType, typename AccDataType, typename CDataType>
+auto calculate_rtol_atol(const ck_tile::index_t K,
+                         const ck_tile::index_t kbatch,
+                         const float max_accumulated_value)
+{
+    using ComputeType =
+        std::conditional_t<sizeof(ADataType) < sizeof(BDataType), ADataType, BDataType>;
+    // Calculate thresholds
+    const auto rtol = ck_tile::get_relative_threshold<ComputeType, CDataType, AccDataType>(
+        ck_tile::integer_divide_ceil(K, kbatch));
+    const auto atol = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
+        max_accumulated_value / kbatch, ck_tile::integer_divide_ceil(K, kbatch));
+    // Calculate error due to split_k accumulation
+    const auto rtol_split_k =
+        ck_tile::get_relative_threshold<CDataType, CDataType, CDataType>(kbatch);
+    const auto atol_split_k = ck_tile::get_absolute_threshold<CDataType, CDataType, CDataType>(
+        max_accumulated_value, kbatch);
+    // Use higher threshold
+    return ck_tile::make_tuple(std::max(rtol, rtol_split_k), std::max(atol, atol_split_k));
+}
+
+template <typename FlatmmConfig,
+          typename ADataType,
+          typename BDataType,
+          typename DsDatatype,
+          typename AccDataType,
+          typename CDataType,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          bool persistent,
+          typename CDEElementWise>
+float flatmm_calc(const ck_tile::FlatmmHostArgs<>& args, const ck_tile::stream_config& s);
+
+template <typename FlatmmConfig,
+          typename ADataType,
+          typename BDataType,
+          typename DsDatatype,
+          typename AccDataType,
+          typename CDataType,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename CLayout,
+          typename CDEElementWise = ck_tile::element_wise::PassThrough>
+float invoke_flatmm(ck_tile::DeviceMem& a_dev_buf,
+                    ck_tile::DeviceMem& b_shuffle_dev_buf,
+                    ck_tile::DeviceMem& c_dev_buf,
+                    ck_tile::index_t M,
+                    ck_tile::index_t N,
+                    ck_tile::index_t K,
+                    ck_tile::index_t stride_A,
+                    ck_tile::index_t stride_B,
+                    ck_tile::index_t stride_C,
+                    ck_tile::index_t kbatch,
+                    int n_warmup,
+                    int n_repeat)
+{
+    ck_tile::FlatmmHostArgs<> args = {a_dev_buf.GetDeviceBuffer(),
+                                      b_shuffle_dev_buf.GetDeviceBuffer(),
+                                      {},
+                                      c_dev_buf.GetDeviceBuffer(),
+                                      kbatch,
+                                      M,
+                                      N,
+                                      K,
+                                      stride_A,
+                                      stride_B,
+                                      {},
+                                      stride_C};
+
+    float ave_time = flatmm_calc<FlatmmConfig,
+                                 ADataType,
+                                 BDataType,
+                                 DsDatatype,
+                                 AccDataType,
+                                 CDataType,
+                                 ALayout,
+                                 BLayout,
+                                 DsLayout,
+                                 CLayout,
+                                 false,
+                                 CDEElementWise>(
+        args, ck_tile::stream_config{nullptr, true, 1, n_warmup, n_repeat, true, true, 50});
+
+    return ave_time;
+}
 
 template <typename PrecType,
           typename FlatmmConfig,

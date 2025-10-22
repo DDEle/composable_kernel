@@ -9,11 +9,11 @@
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
 #include <optional>
+#include <type_traits>
 
 namespace ck_tile {
-
-template <typename ADataType_,
-          typename BDataType_,
+template <typename AsDataType_,
+          typename BsDataType_,
           typename DsDataType_,
           typename AccDataType_,
           typename ODataType_,
@@ -37,8 +37,8 @@ template <typename ADataType_,
           index_t BlockedXDLN_PerWarp_ = 1> // The number of continuous xdl_output per warp
 struct CShuffleEpilogueProblem
 {
-    using ADataType                                        = remove_cvref_t<ADataType_>;
-    using BDataType                                        = remove_cvref_t<BDataType_>;
+    using AsDataType                                       = remove_cvref_t<AsDataType_>;
+    using BsDataType                                       = remove_cvref_t<BsDataType_>;
     using AccDataType                                      = remove_cvref_t<AccDataType_>;
     using ODataType                                        = remove_cvref_t<ODataType_>;
     using DsDataType                                       = remove_cvref_t<DsDataType_>;
@@ -70,12 +70,27 @@ template <typename Problem_, typename Policy_ = void>
 struct CShuffleEpilogue
 {
     using Problem     = remove_cvref_t<Problem_>;
-    using ADataType   = remove_cvref_t<typename Problem::ADataType>;
-    using BDataType   = remove_cvref_t<typename Problem::BDataType>;
+    using AsDataType  = remove_cvref_t<typename Problem::AsDataType>;
+    using BsDataType  = remove_cvref_t<typename Problem::BsDataType>;
     using AccDataType = remove_cvref_t<typename Problem::AccDataType>;
     using ODataType   = remove_cvref_t<typename Problem::ODataType>;
     using DsDataType  = remove_cvref_t<typename Problem::DsDataType>;
     using DsLayout    = remove_cvref_t<typename Problem::DsLayout>;
+
+    static constexpr bool ADataTypeIsTuple = is_detected<is_tuple, AsDataType>::value;
+    static constexpr bool BDataTypeIsTuple = is_detected<is_tuple, BsDataType>::value;
+
+    using AsDataTypeTuple = std::conditional_t<ADataTypeIsTuple,
+                                               remove_cvref_t<AsDataType>,
+                                               remove_cvref_t<tuple<AsDataType>>>;
+
+    using BsDataTypeTuple = std::conditional_t<BDataTypeIsTuple,
+                                               remove_cvref_t<BsDataType>,
+                                               remove_cvref_t<tuple<BsDataType>>>;
+
+    using ADataType = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
+    using BDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
+
     using ATypeToUse =
         std::conditional_t<std::is_same_v<ADataType, pk_int4_t>, BDataType, ADataType>;
     // Used for weight-only quantization kernel, B would be dequantized to the same data type as A
