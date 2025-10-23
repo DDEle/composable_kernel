@@ -985,14 +985,7 @@ struct Silu
                           std::is_same_v<T, int32_t>,
                       "Data type is not supported by this operation!");
         constexpr T one = type_convert<T>(1);
-        if constexpr(std::is_same_v<T, float>)
-        {
-            y = x * __builtin_amdgcn_rcpf(one + ck_tile::exp(-x));
-        }
-        else
-        {
-            y = x * (one / (one + ck_tile::exp(-x)));
-        }
+        y               = x * (one / (one + ck_tile::exp(-x)));
     };
 
     template <>

@@ -425,8 +425,6 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
 
                 auto a_f4x2  = a_m_k(m, k);
                 auto a_scale = ck_tile::type_convert<AccDataType>(scale_a(m, k / ScaleBlockSize));
-                // auto f4_lo   = ck_tile::type_convert<AccDataType>(f4x2)[0];
-                // auto f4_hi   = ck_tile::type_convert<AccDataType>(f4x2)[1];
                 auto a_f4_lo =
                     ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<0>{}));
                 auto a_f4_hi =
@@ -449,8 +447,6 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
 
                 auto b_f4x2  = b_k_n(k, n);
                 auto b_scale = ck_tile::type_convert<AccDataType>(scale_b(k / ScaleBlockSize, n));
-                // auto f4_lo   = ck_tile::type_convert<AccDataType>(f4x2)[0];
-                // auto f4_hi   = ck_tile::type_convert<AccDataType>(f4x2)[1];
                 auto b_f4_lo =
                     ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<0>{}));
                 auto b_f4_hi =

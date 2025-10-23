@@ -136,10 +136,10 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
     static constexpr bool HasHotLoop = Problem::HasHotLoop;
     static constexpr auto TailNum    = Problem::TailNum;
 
-#ifdef __gfx942__
-    static constexpr index_t mfma_per_wg = 2;
-#else
+#ifdef __gfx950__
     static constexpr index_t mfma_per_wg = 1;
+#else
+    static_assert(false, "Only gfx950 is supported for MXFP4 flatmm pipeline now.");
 #endif
     static constexpr index_t dsread_per_wg =
         WG::kM * WG::kK * sizeof(ADataType) / APackedSize / WaveSize / Problem::VectorLoadSize;

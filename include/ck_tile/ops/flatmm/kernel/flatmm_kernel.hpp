@@ -35,44 +35,29 @@ struct FlatmmScalePointer
     static constexpr int GranularityK  = SharedGranularityK;
 
     const float* ptr;
-    index_t scale_stride = 1;
 
     CK_TILE_HOST_DEVICE FlatmmScalePointer() = default;
     CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_) : ptr(ptr_) {}
-    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_, index_t stride)
-        : ptr(ptr_), scale_stride(stride)
+    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_, [[maybe_unused]] index_t length_)
+        : ptr(ptr_)
     {
     }
 
     CK_TILE_HOST_DEVICE FlatmmScalePointer operator+(index_t offset) const
     {
         FlatmmScalePointer ret;
-        // if constexpr(GranularityMN == 0)
-        // {
-        //     ret.scalar = scalar;
-        // }
-        // else if constexpr(GranularityMN == 1)
-        // {
-        //     ret.ptr = ptr + offset;
-        // }
-        // else
-        // {
-        //     ret.ptr = ptr + offset / GranularityMN;
-        // }
-        return ret;
-    }
-
-    CK_TILE_HOST_DEVICE float operator[](index_t i) const
-    {
-        if constexpr(GranularityMN == 1)
+        if constexpr(GranularityMN == 0)
         {
-            return ptr[i];
+            ret.ptr = ptr + offset / GranularityK;
         }
         else
         {
-            return ptr[i / GranularityMN];
+            ret.ptr = ptr + offset / GranularityMN / GranularityK;
         }
+        return ret;
     }
+
+    CK_TILE_HOST_DEVICE float operator[](index_t i) const = delete;
 };
 
 template <int SharedGranularityMN>
@@ -83,54 +68,39 @@ struct FlatmmScalePointer<SharedGranularityMN, 0>
 
     static_assert(GranularityMN != 0);
 
-    union
-    {
-        const float* ptr;
-        float scalar; // if shared granularity is 0, all rows/columns use the same scale value
-    };
+    const float* ptr;
+    index_t length;
 
     CK_TILE_HOST_DEVICE FlatmmScalePointer() = default;
-    CK_TILE_HOST_DEVICE FlatmmScalePointer(float scalar_) : scalar(scalar_) {}
-    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_) : ptr(ptr_) {}
-    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_, [[maybe_unused]] index_t stride)
-        : ptr(ptr_)
+    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_) : ptr(ptr_), length(1) {}
+    CK_TILE_HOST_DEVICE FlatmmScalePointer(const float* ptr_, index_t length_)
+        : ptr(ptr_), length(length_)
     {
     }
 
     CK_TILE_HOST_DEVICE FlatmmScalePointer operator+(index_t offset) const
     {
         FlatmmScalePointer ret;
-        if constexpr(GranularityMN == 0)
+        if constexpr(GranularityMN == 1)
         {
-            ret.scalar = scalar;
-        }
-        else if constexpr(GranularityMN == 1)
-        {
-            ret.ptr = ptr + offset;
+            ret.ptr    = ptr + offset;
+            ret.length = length - offset;
         }
         else
         {
-            ret.ptr = ptr + offset / GranularityMN;
+            ret.ptr    = ptr + offset / GranularityMN;
+            ret.length = length - offset / GranularityMN;
         }
         return ret;
     }
 
-    CK_TILE_HOST_DEVICE FlatmmScalePointer& advance() { return *this; }
-
     CK_TILE_HOST_DEVICE float operator[](index_t i) const
     {
-        if constexpr(GranularityMN == 0)
-        {
-            return scalar;
-        }
-        else if constexpr(GranularityMN == 1)
-        {
-            return ptr[i];
-        }
+        // with additional oob check
+        if constexpr(GranularityMN == 1)
+            return i < length ? ptr[i] : 0;
         else
-        {
-            return ptr[i / GranularityMN];
-        }
+            return i / GranularityMN < length ? ptr[i / GranularityMN] : 0;
     }
 };
 
@@ -141,14 +111,11 @@ struct FlatmmScalePointer<-1, 0>
     static constexpr int GranularityMN = -1;
     static constexpr int GranularityK  = 0;
 
-    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer() = default;
-    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(float) {}
-    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(const float*) {}
-    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(const float*, [[maybe_unused]] index_t stride)
-    {
-    }
+    const float* ptr = nullptr;
 
-    CK_TILE_HOST_DEVICE FlatmmScalePointer& advance() { return *this; }
+    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer() = default;
+    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(const float*) {}
+    CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer(const float*, index_t) {}
 
     CK_TILE_HOST_DEVICE constexpr FlatmmScalePointer operator+(index_t) const
     {
@@ -284,13 +251,13 @@ struct FlatmmKernel
     using FlatmmPipeline  = remove_cvref_t<FlatmmPipeline_>;
     using BlockGemmShape =
         remove_cvref_t<typename FlatmmPipeline::BlockGemmShape>; // TileFlatmmShape
-    using EpiloguePipeline = remove_cvref_t<EpiloguePipeline_>;
-    using ALayout          = remove_cvref_t<typename FlatmmPipeline::ALayout>;
-    using BLayout          = remove_cvref_t<typename FlatmmPipeline::BLayout>;
-    using ELayout          = remove_cvref_t<typename FlatmmPipeline::CLayout>;
-    using DsLayout         = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
-    using DsDataType       = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
-    static constexpr index_t KernelBlockSize  = FlatmmPipeline::BlockSize;
+    using EpiloguePipeline              = remove_cvref_t<EpiloguePipeline_>;
+    using ALayout                       = remove_cvref_t<typename FlatmmPipeline::ALayout>;
+    using BLayout                       = remove_cvref_t<typename FlatmmPipeline::BLayout>;
+    using ELayout                       = remove_cvref_t<typename FlatmmPipeline::CLayout>;
+    using DsLayout                      = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
+    using DsDataType                    = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
+    static constexpr index_t kBlockSize = FlatmmPipeline::BlockSize;
     static constexpr bool UsePersistentKernel = FlatmmPipeline::UsePersistentKernel;
 
     using ADataType = remove_cvref_t<typename FlatmmPipeline::ADataType>;
@@ -360,45 +327,7 @@ struct FlatmmKernel
         }
     }
 
-    template <class ScaleM, class ScaleN>
-    CK_TILE_HOST static constexpr auto
-    GridSize(const FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>& kargs)
-    {
-        if constexpr(UsePersistentKernel)
-        {
-            hipDeviceProp_t prop;
-            int deviceId = 0; // default device
-
-            constexpr int block_size = FlatmmKernel::BlockSize().x;
-            int dync_smem_size       = 0;
-            int maxActiveBlocksPerCU = 0;
-
-            [[maybe_unused]] auto e = hipGetDeviceProperties(&prop, deviceId);
-
-            e = hipOccupancyMaxActiveBlocksPerMultiprocessor(
-                &maxActiveBlocksPerCU,
-                reinterpret_cast<void*>(
-                    kentry2<block_size,
-                            FlatmmKernel,
-                            FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>>),
-                block_size,
-                dync_smem_size);
-
-            const int persistent_block_size = prop.multiProcessorCount * maxActiveBlocksPerCU;
-            const int total_work_tile_cnt   = TilePartitioner::GridSize(kargs.M, kargs.N);
-
-            // std::cout << "maxActiveBlocksPerCU: " << maxActiveBlocksPerCU
-            //           << ", persistent_block_size: " << persistent_block_size
-            //           << ", total_work_tile_cnt: " << total_work_tile_cnt << std::endl;
-
-            assert(kargs.k_batch == 1);
-            return dim3(min(persistent_block_size, total_work_tile_cnt), 1, kargs.k_batch);
-        }
-        else
-        {
-            return dim3(TilePartitioner::GridSize(kargs.M, kargs.N), 1, kargs.k_batch);
-        }
-    }
+    CK_TILE_HOST static constexpr auto BlockSize() { return dim3(kBlockSize); }
 
     template <class ScaleM, class ScaleN>
     CK_TILE_HOST static constexpr FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>
@@ -937,6 +866,9 @@ struct FlatmmKernel
         const auto& c_block_tile        = FlatmmPipeline{}.template operator()(
             a_block_window, b_flat_block_window, num_loop, smem_ptr_ping, smem_ptr_pong);
 
+        auto scale_m_window = gemm_tile_windows.at(number<4>{});
+        auto scale_n_window = gemm_tile_windows.at(number<5>{});
+
         // Run Epilogue Pipeline
         if constexpr(ScaleM::GranularityMN != -1 || ScaleN::GranularityMN != -1)
         {
@@ -947,8 +879,8 @@ struct FlatmmKernel
                 c_block_tile,
                 d_block_window,
                 smem_ptr_ping,
-                kargs.scale_m_ptr + block_idx_m,
-                kargs.scale_n_ptr + block_idx_n);
+                scale_m_window,
+                scale_n_window);
         }
         else if(UseDefaultScheduler || (get_warp_id() == 0))
         {

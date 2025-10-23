@@ -162,9 +162,6 @@ struct sequence
         return sequence<Is..., Xs...>{};
     }
 
-    CK_TILE_HOST_DEVICE static constexpr auto sum() { return (Is + ... + 0); }
-    CK_TILE_HOST_DEVICE static constexpr auto product() { return (Is * ... * 1); }
-
     // pickup element at index <Ids...>
     template <index_t... Ids>
     CK_TILE_HOST_DEVICE static constexpr auto extract(number<Ids>...)

@@ -37,7 +37,9 @@ struct BaseFlatmmPipelineAGmemBGmemCRegV1
             return run_func(bool_constant<true>{},
                             integral_constant<TailNumber, TailNumber::Odd>{});
         }
-        return run_func(bool_constant<true>{}, integral_constant<TailNumber, TailNumber::Empty>{});
+        throw std::runtime_error("Error: Unsupported TailNumber!");
+        // return run_func(bool_constant<true>{}, integral_constant<TailNumber,
+        // TailNumber::Empty>{});
     }
 };
 
@@ -500,12 +502,12 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
     }
 
     template <typename ADramBlockWindowTmp, typename BFlatBlockWindowTmp, typename AElementFunction>
-    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
-                                   const AElementFunction& a_element_func,
-                                   const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
-                                   index_t num_loop,
-                                   void* p_smem_ping,
-                                   void* p_smem_pong) const
+    CK_TILE_HOST_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                                        const AElementFunction& a_element_func,
+                                        const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                        index_t num_loop,
+                                        void* p_smem_ping,
+                                        void* p_smem_pong) const
     {
         static_assert(
             std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>>,
@@ -564,13 +566,13 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
             make_tile_window(a_lds_block_ping,
                              make_tuple(number<WG::kM>{}, number<WG::kK>{}),
                              {iMWarp * WG::kM, 0},
-                             make_static_tile_distribution(typename WG::AWarpDstrEncoding{}));
+                             PipelinePolicy::template MakeALDS_WarpTileDistribution<Problem>());
 
         auto a_warp_window_pong_tmp =
             make_tile_window(a_lds_block_pong,
                              make_tuple(number<WG::kM>{}, number<WG::kK>{}),
                              {iMWarp * WG::kM, 0},
-                             make_static_tile_distribution(typename WG::AWarpDstrEncoding{}));
+                             PipelinePolicy::template MakeALDS_WarpTileDistribution<Problem>());
 
         statically_indexed_array<
             statically_indexed_array<decltype(a_warp_window_ping_tmp), KIterPerWarp>,
@@ -585,16 +587,10 @@ defined(USING_MFMA_32x32x64) && defined(ENABLE_FP4) // mi350 fp4 32c 1*K1
         static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 a_warp_windows_ping(mIter)(kIter) = a_warp_window_ping_tmp;
+                a_warp_windows_pong(mIter)(kIter) = a_warp_window_pong_tmp;
 
                 move_tile_window(a_warp_windows_ping(mIter)(kIter),
                                  {mIter * MPerBlockPerIter, kIter * KPerBlockPerIter});
-            });
-        });
-
-        static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                a_warp_windows_pong(mIter)(kIter) = a_warp_window_pong_tmp;
-
                 move_tile_window(a_warp_windows_pong(mIter)(kIter),
                                  {mIter * MPerBlockPerIter, kIter * KPerBlockPerIter});
             });

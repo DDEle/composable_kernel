@@ -14,8 +14,6 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     static constexpr auto I2 = number<2>{};
 
     static constexpr index_t KBPerLoad = 32;
-    // static constexpr index_t N_Pack    = 2; // it's fixed for fp4
-    // static constexpr index_t K_Pack    = 2; // it's fixed for fp4
 
     static constexpr int MXdlPack = 2;
     static constexpr int NXdlPack = 2;

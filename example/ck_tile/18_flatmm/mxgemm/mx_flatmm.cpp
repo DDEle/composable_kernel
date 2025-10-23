@@ -120,7 +120,6 @@ float mx_flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
                                              DsLayout,
                                              ELayout,
                                              CDEElementWise,
-                                             CodegenPipelineProblem::kBlockSize,
                                              TilePartitioner::MPerBlock,
                                              TilePartitioner::NPerBlock,
                                              FlatmmConfig::M_Warp,
@@ -365,7 +364,6 @@ void preShuffleWeight(const IterSrc src, IterDst dst, int N, int K)
     }
 }
 
-#if 1
 template <class FlatmmConfig, bool KLast, class IterSrc, class IterDst>
 void preShuffleScale(const IterSrc src, IterDst dst, int MN, int K)
 {
@@ -413,36 +411,6 @@ void preShuffleScale(const IterSrc src, IterDst dst, int MN, int K)
         }
     }
 }
-#else
-template <class FlatmmConfig, class T>
-auto preShuffleScale(const ck_tile::HostTensor<T>& scale)
-{
-    assert(scale.get_lengths().size() == 2);
-    int n_ = scale.get_lengths()[1];
-    int k_ = scale.get_lengths()[0];
-
-    constexpr int K_Pack       = 2;  // fixed for mxfp4
-    constexpr int N_Pack       = 2;  // fixed for mxfp4
-    constexpr int GranularityK = 32; // fixed for mxfp4
-
-    constexpr int K_Lane = 64 / FlatmmConfig::N_Warp_Tile; // 4
-
-    static_assert(FlatmmConfig::N_Warp_Tile == 16, "only support XDL_N == 16");
-    static_assert(FlatmmConfig::N_Repeat % N_Pack == 0);
-    static_assert(FlatmmConfig::K_Tile % (K_Pack * K_Lane * GranularityK) == 0);
-
-    ck_tile::HostTensor<T> shfl_scale({
-        k_ / K_Pack / K_Lane,
-        K_Pack,
-        K_Lane,
-        n_ / FlatmmConfig::N_Warp_Tile / N_Pack,
-        N_Pack,
-        FlatmmConfig::N_Warp_Tile,
-    });
-    std::copy(scale.begin(), scale.end(), shfl_scale.begin());
-    return ck_tile::reference_permute(shfl_scale, {3, 0, 2, 5, 1, 4});
-}
-#endif
 
 #include "run_mx_flatmm.inc"
 

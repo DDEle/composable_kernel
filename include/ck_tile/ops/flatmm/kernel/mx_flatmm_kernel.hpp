@@ -22,13 +22,13 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
     using FlatmmPipeline  = remove_cvref_t<MXFlatmmPipeline_>;
     using BlockGemmShape =
         remove_cvref_t<typename MXFlatmmPipeline_::BlockGemmShape>; // TileFlatmmShape
-    using EpiloguePipeline              = remove_cvref_t<EpiloguePipeline_>;
-    using ALayout                       = remove_cvref_t<typename FlatmmPipeline::ALayout>;
-    using BLayout                       = remove_cvref_t<typename FlatmmPipeline::BLayout>;
-    using ELayout                       = remove_cvref_t<typename FlatmmPipeline::CLayout>;
-    using DsLayout                      = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
-    using DsDataType                    = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
-    static constexpr index_t kBlockSize = FlatmmPipeline::BlockSize;
+    using EpiloguePipeline = remove_cvref_t<EpiloguePipeline_>;
+    using ALayout          = remove_cvref_t<typename FlatmmPipeline::ALayout>;
+    using BLayout          = remove_cvref_t<typename FlatmmPipeline::BLayout>;
+    using ELayout          = remove_cvref_t<typename FlatmmPipeline::CLayout>;
+    using DsLayout         = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
+    using DsDataType       = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
+    static constexpr index_t KernelBlockSize  = FlatmmPipeline::BlockSize;
     static constexpr bool UsePersistentKernel = FlatmmPipeline::UsePersistentKernel;
 
     using ADataType = remove_cvref_t<typename FlatmmPipeline::ADataType>;
@@ -80,23 +80,19 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             int dync_smem_size       = 0;
             int maxActiveBlocksPerCU = 0;
 
-            hipError_t e = hipGetDeviceProperties(&prop, deviceId);
-            if(e != hipSuccess)
+            if(hipGetDeviceProperties(&prop, deviceId) != hipSuccess)
                 throw std::runtime_error(std::string("hipGetDeviceProperties failed: ") +
-                                         hipGetErrorName(e));
+                                         hipGetErrorName(hipGetLastError()));
 
-            e = hipOccupancyMaxActiveBlocksPerMultiprocessor(
-                &maxActiveBlocksPerCU,
-                reinterpret_cast<void*>(
-                    kentry2<block_size,
-                            MXFlatmmKernel,
-                            FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>>),
-                block_size,
-                dync_smem_size);
-            if(e != hipSuccess)
+            if(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+                   &maxActiveBlocksPerCU,
+                   reinterpret_cast<void*>(
+                       kentry<1, MXFlatmmKernel, remove_cvref_t<decltype(kargs)>>),
+                   block_size,
+                   dync_smem_size) != hipSuccess)
                 throw std::runtime_error(
                     std::string("hipOccupancyMaxActiveBlocksPerMultiprocessor failed: ") +
-                    hipGetErrorName(e));
+                    hipGetErrorName(hipGetLastError()));
 
             const int persistent_block_size = prop.multiProcessorCount * maxActiveBlocksPerCU;
             const int total_work_tile_cnt   = TilePartitioner::GridSize(kargs.M, kargs.N);
@@ -254,18 +250,6 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                 reinterpret_cast<const int32_t*>(scale_b.ptr), scale_b_desc);
         }();
 
-        // index_t FlatScaleK =
-        //     (kargs.K / decltype(scale_n)::GranularityK) * N_Pack *
-        //     BlockGemmShape::WarpTile::at(I1);
-        // index_t FlatScaleN = kargs.N / N_Pack / BlockGemmShape::WarpTile::at(I1);
-
-        // const auto scale_b_flat_view = make_naive_tensor_view<address_space_enum::global>(
-        //     reinterpret_cast<const e8m0_t*>(scale_n.ptr),
-        //     make_tuple(FlatScaleN, FlatScaleK),
-        //     make_tuple(FlatScaleK, 1),
-        //     number<8>{},
-        //     number<1>{});
-
         return make_tuple(a_tensor_view,
                           b_flat_tensor_view,
                           ds_tensor_view,
@@ -398,14 +382,6 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             make_tuple(number<TilePartitioner::MPerBlock>{}, number<TilePartitioner::NPerBlock>{}),
             {i_m, i_n});
 
-        // auto scale_block_window =
-        //     make_tile_window(views.at(I4),
-        //                      make_tuple(number<FlatmmPipeline::flatNPerWarp>{},
-        //                                 number<FlatmmPipeline::flatKPerWarp * N_Pack * 4 /
-        //                                 32>{}),
-        //                      {i_n / BlockGemmShape::WarpTile::at(I1) / N_Pack, 0});
-
-        // auto scale_a                        = kargs.scale_m_ptr;
         static constexpr int BlockScaleSize = 32;
 
         auto scale_a_block_window = make_tile_window(

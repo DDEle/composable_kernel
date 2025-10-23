@@ -374,7 +374,7 @@ struct UniversalFlatmmPipelineAgBgCrPolicy
     }
 
     template <typename Problem>
-    CK_TILE_DEVICE static constexpr auto MakeADramDistribution()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeADramDistribution()
     {
         using ADataType = remove_cvref_t<typename Problem::ADataType>;
 
@@ -404,7 +404,7 @@ struct UniversalFlatmmPipelineAgBgCrPolicy
     }
 
     template <typename Problem>
-    CK_TILE_DEVICE static constexpr auto MakeBFlatDramTileDistribution()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBFlatDramTileDistribution()
     {
         using TileShape = typename Problem::BlockGemmShape; // ck_tile::TileFlatmmShape
 

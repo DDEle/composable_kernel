@@ -28,11 +28,6 @@ __launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
 #endif
 }
 
-template <int MaxThreadPerBlock, typename Kernel, typename... Args>
-__launch_bounds__(MaxThreadPerBlock) __global__ void kentry2(Args... args)
-{
-    Kernel{}(args...);
-}
 //
 // return a anonymous functor(lambda) to be called later
 // the KernelImpl should be a class without non-static data member, or let's say
