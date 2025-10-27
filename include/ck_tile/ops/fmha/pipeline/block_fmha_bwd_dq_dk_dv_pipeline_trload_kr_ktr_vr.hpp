@@ -14,6 +14,12 @@ namespace ck_tile {
 template <typename Problem, typename Policy = BlockFmhaBwdPipelineTrLoadDefaultPolicy>
 struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 {
+    struct aaaaa_t
+    {
+        static constexpr bool has_pre_compute_warp_coords = true;
+    };
+    static inline constexpr aaaaa_t OPT_WINDOW_TRATIS = {};
+
     using QDataType             = remove_cvref_t<typename Problem::QDataType>;
     using KDataType             = remove_cvref_t<typename Problem::KDataType>;
     using VDataType             = remove_cvref_t<typename Problem::VDataType>;
@@ -232,12 +238,13 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         auto dk_acc = decltype(gemm_3.MakeCBlockTile()){};
 
         // K, HBM ->LDS ->Reg
-        auto k_dram_window =
-            make_tile_window(Policy::template TransformXDramTensorView<KDataType>(
-                                 k_dram_block_window_tmp.get_bottom_tensor_view()),
-                             k_dram_block_window_tmp.get_window_lengths(),
-                             k_dram_block_window_tmp.get_window_origin(),
-                             Policy::template MakeKDramTileDistribution<Problem>());
+        auto k_dram_window = make_tile_window(Policy::template TransformXDramTensorView<KDataType>(
+                                                  k_dram_block_window_tmp.get_bottom_tensor_view()),
+                                              k_dram_block_window_tmp.get_window_lengths(),
+                                              k_dram_block_window_tmp.get_window_origin(),
+                                              Policy::template MakeKDramTileDistribution<Problem>(),
+                                              number<1>{},
+                                              OPT_WINDOW_TRATIS);
 
         const auto k_origin = k_dram_window.get_window_origin();
 
@@ -265,13 +272,14 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
 
         //------------------------------------------------------------------
         // V, HBM ->LDS ->Reg
-        auto v_dram_window =
-            make_tile_window(Policy::template TransformXDramTensorView<VDataType>(
-                                 v_dram_block_window_tmp.get_bottom_tensor_view()),
-                             v_dram_block_window_tmp.get_window_lengths(),
-                             v_dram_block_window_tmp.get_window_origin(),
-                             Policy::template MakeVDramTileDistribution<Problem>());
-        auto v_lds = make_tensor_view<address_space_enum::lds>(
+        auto v_dram_window = make_tile_window(Policy::template TransformXDramTensorView<VDataType>(
+                                                  v_dram_block_window_tmp.get_bottom_tensor_view()),
+                                              v_dram_block_window_tmp.get_window_lengths(),
+                                              v_dram_block_window_tmp.get_window_origin(),
+                                              Policy::template MakeVDramTileDistribution<Problem>(),
+                                              number<1>{},
+                                              OPT_WINDOW_TRATIS);
+        auto v_lds         = make_tensor_view<address_space_enum::lds>(
             v_lds_ptr, Policy::template MakeVLdsWriteBlockDescriptor<Problem>());
         auto v_lds_write_window =
             make_tile_window(v_lds, make_tuple(number<kN0>{}, number<kVHeaddim>{}), {0, 0});
@@ -315,12 +323,13 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
         block_sync_lds();
         //---------------------------- Loop Load in ----------------------------//
         // Q: HBM -->LDS
-        auto q_dram_window =
-            make_tile_window(Policy::template TransformXDramTensorView<QDataType>(
-                                 q_dram_block_window_tmp.get_bottom_tensor_view()),
-                             q_dram_block_window_tmp.get_window_lengths(),
-                             {seqlen_q_start, 0},
-                             Policy::template MakeQDramTileDistribution<Problem>());
+        auto q_dram_window = make_tile_window(Policy::template TransformXDramTensorView<QDataType>(
+                                                  q_dram_block_window_tmp.get_bottom_tensor_view()),
+                                              q_dram_block_window_tmp.get_window_lengths(),
+                                              {seqlen_q_start, 0},
+                                              Policy::template MakeQDramTileDistribution<Problem>(),
+                                              number<1>{},
+                                              OPT_WINDOW_TRATIS);
 
         auto q_lds = make_tensor_view<address_space_enum::lds>(
             q_lds_ptr0, Policy::template MakeQLdsWriteBlockDescriptor<Problem>());
@@ -347,7 +356,9 @@ struct BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR
                                  do_dram_block_window_tmp.get_bottom_tensor_view()),
                              do_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_q_start, 0},
-                             Policy::template MakeOGradDramTileDistribution<Problem>());
+                             Policy::template MakeOGradDramTileDistribution<Problem>(),
+                             number<1>{},
+                             OPT_WINDOW_TRATIS);
 
         auto do_lds = make_tensor_view<address_space_enum::lds>(
             do_lds_ptr0, Policy::template MakeOGradLdsWriteBlockDescriptor<Problem>());

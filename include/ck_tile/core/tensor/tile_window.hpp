@@ -18,6 +18,12 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 
 namespace ck_tile {
+template <typename T, typename = void>
+inline constexpr bool has_pre_compute_warp_coords_v = false;
+template <typename T>
+inline constexpr bool
+    has_pre_compute_warp_coords_v<T, std::void_t<decltype(T::has_pre_compute_warp_coords)>> =
+        T::has_pre_compute_warp_coords;
 
 /**
  * @brief This class provides tile (windowed) view and access to the device memory.
@@ -33,7 +39,8 @@ namespace ck_tile {
 template <typename BottomTensorView_,
           typename WindowLengths_,
           typename StaticTileDistribution_,
-          index_t NumCoord>
+          index_t NumCoord,
+          typename TileWindowTraits = std::false_type>
 struct tile_window_with_static_distribution
     : public tile_window_with_tile_dstr_base<
           tile_window_with_static_distribution<BottomTensorView_,
@@ -63,6 +70,9 @@ struct tile_window_with_static_distribution
 
     CK_TILE_DEVICE constexpr tile_window_with_static_distribution() = default;
 
+    static constexpr bool has_pre_compute_warp_coords_ =
+        has_pre_compute_warp_coords_v<TileWindowTraits>;
+
     CK_TILE_DEVICE constexpr tile_window_with_static_distribution(
         const typename Base::BottomTensorView& bottom_tensor_view,
         const typename Base::WindowLengths& window_lengths,
@@ -71,14 +81,49 @@ struct tile_window_with_static_distribution
         : pre_computed_coords_{}
     {
 
-        this->window_origin_                       = window_origin;
-        this->window_lengths_                      = window_lengths;
-        this->bottom_tensor_view_                  = bottom_tensor_view;
-        this->tile_dstr_                           = tile_distribution;
+        this->window_origin_      = window_origin;
+        this->window_lengths_     = window_lengths;
+        this->bottom_tensor_view_ = bottom_tensor_view;
+        this->tile_dstr_          = tile_distribution;
+
+        pre_computed_coords_.thread =
+            prepare_coords(bottom_tensor_view, window_origin, tile_distribution);
+        if constexpr(has_pre_compute_warp_coords_)
+        {
+            pre_computed_coords_.warp = prepare_coords(
+                bottom_tensor_view, window_origin, tile_distribution, sequence<-1, 0>{});
+        }
+    }
+
+    template <typename NewReplacementPartitionIndex = sequence<-1, -1>>
+    CK_TILE_DEVICE constexpr auto
+    prepare_coords(const typename Base::BottomTensorView& bottom_tensor_view,
+                   const typename Base::BottomTensorIndex& window_origin,
+                   const typename Base::TileDstr& tile_distribution,
+                   NewReplacementPartitionIndex = {}) const
+    {
+        array<tuple<typename Base::WindowAdaptorCoord, typename Base::BottomTensorCoord>, NumCoord>
+            coords;
+        auto partition_index = detail::get_partition_index(tile_distribution);
+
         const auto window_adaptor_thread_coord_tmp = make_tensor_adaptor_coordinate(
             tile_distribution.get_ps_ys_to_xs_adaptor(),
-            container_concat(detail::get_partition_index(tile_distribution),
-                             array<index_t, Base::NDimY>{0}));
+            container_concat(
+                // Override partition_index with the corresponding non-negative elements (if
+                // any) from NewReplacementPartitionIndex
+                [&] {
+                    static_for<0,
+                               ck_tile::min(partition_index.size(),
+                                            NewReplacementPartitionIndex::size()),
+                               1>{}([&](auto idx) {
+                        if constexpr(0 <= NewReplacementPartitionIndex{}[idx])
+                        {
+                            partition_index[idx] = NewReplacementPartitionIndex{}[idx];
+                        }
+                    });
+                    return partition_index;
+                }(),
+                multi_index<Base::NDimY>{0}));
 
         typename Base::BottomTensorIndex bottom_tensor_thread_origin_idx_tmp =
             window_origin + window_adaptor_thread_coord_tmp.get_bottom_index();
@@ -105,9 +150,10 @@ struct tile_window_with_static_distribution
             Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
                 window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
 
-            pre_computed_coords_(iCoord) =
-                make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+            coords(iCoord) = make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
         });
+
+        return coords;
     }
 
     template <index_t i_access_unsupport_ = -1, bool oob_conditional_check = true>
@@ -171,9 +217,9 @@ struct tile_window_with_static_distribution
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
             auto window_adaptor_thread_coord =
-                tile_window[number<0>{}].pre_computed_coords_[iCoord][I0];
+                tile_window[number<0>{}].pre_computed_coords_.thread[iCoord][I0];
             auto bottom_tensor_thread_coord =
-                tile_window[number<0>{}].pre_computed_coords_[iCoord][I1];
+                tile_window[number<0>{}].pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -246,8 +292,8 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -317,8 +363,8 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -414,8 +460,8 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -469,15 +515,27 @@ struct tile_window_with_static_distribution
         auto smem_base_ptr             = bottom_tensor_view.get_buffer_view().p_data_;
 
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+            auto [window_adaptor_warp_coord, bottom_tensor_warp_coord] = [&]() {
+                if constexpr(has_pre_compute_warp_coords_)
+                    return make_tuple(pre_computed_coords_.warp[iCoord][I0],
+                                      pre_computed_coords_.warp[iCoord][I1]);
+                else
+                    return make_tuple(0, 0);
+            }();
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
                 // Use precomputed window origin
-                auto lds_bottom_tensor_thread_idx =
-                    window_origin + window_adaptor_thread_coord.get_bottom_index();
+                auto lds_bottom_tensor_thread_idx = window_origin + [&]() {
+                    if constexpr(has_pre_compute_warp_coords_)
+                        return window_adaptor_warp_coord.get_bottom_index();
+                    else
+                        return window_adaptor_thread_coord.get_bottom_index();
+                }();
 
                 // Use precomputed tensor descriptor
                 const auto lds_coord =
@@ -503,6 +561,9 @@ struct tile_window_with_static_distribution
 
                     Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
                         window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    if constexpr(has_pre_compute_warp_coords_)
+                        Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                            window_adaptor_warp_coord, bottom_tensor_warp_coord, idx_diff_ps_ys);
                 }
             });
         });
@@ -537,8 +598,8 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -599,8 +660,8 @@ struct tile_window_with_static_distribution
 
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -670,8 +731,8 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -733,8 +794,8 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -802,8 +863,8 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
+            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -859,7 +920,7 @@ struct tile_window_with_static_distribution
     {
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             move_tensor_coordinate(this->bottom_tensor_view_.get_tensor_descriptor(),
-                                   pre_computed_coords_(iCoord)(I1),
+                                   pre_computed_coords_.thread(iCoord)(I1),
                                    step);
         });
     }
@@ -898,7 +959,7 @@ struct tile_window_with_static_distribution
             Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
                 window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
 
-            pre_computed_coords_(iCoord) =
+            pre_computed_coords_.thread(iCoord) =
                 make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
         });
     }
@@ -906,7 +967,22 @@ struct tile_window_with_static_distribution
     // this contains:
     //   per-thread coordinate for window adaptor
     //   per-thread coordinate for bottom tensor
-    array<tuple<typename Base::WindowAdaptorCoord, typename Base::BottomTensorCoord>, NumCoord>
+    using pre_computed_coords_t_ =
+        array<tuple<typename Base::WindowAdaptorCoord, typename Base::BottomTensorCoord>, NumCoord>;
+
+    struct pre_computed_coords_t_0_
+    {
+        pre_computed_coords_t_ thread;
+    };
+    struct pre_computed_coords_t_1_
+    {
+        pre_computed_coords_t_ thread;
+        pre_computed_coords_t_ warp;
+    };
+
+    std::conditional_t<has_pre_compute_warp_coords_,
+                       pre_computed_coords_t_1_,
+                       pre_computed_coords_t_0_>
         pre_computed_coords_;
 };
 
@@ -914,13 +990,15 @@ struct tile_window_with_static_distribution
 template <typename TensorView_,
           typename WindowLengths_,
           typename StaticTileDistribution_,
-          index_t NumCoord = 1>
+          index_t NumCoord = 1,
+          typename Traits  = std::false_type>
 CK_TILE_DEVICE constexpr auto
 make_tile_window(const TensorView_& tensor_view,
                  const WindowLengths_& window_lengths,
                  const multi_index<TensorView_::get_num_of_dimension()>& origin,
                  const StaticTileDistribution_& tile_distribution,
-                 number<NumCoord> = {})
+                 number<NumCoord> = {},
+                 Traits           = {})
 {
     return tile_window_with_static_distribution<remove_cvref_t<TensorView_>,
                                                 remove_cvref_t<WindowLengths_>,
