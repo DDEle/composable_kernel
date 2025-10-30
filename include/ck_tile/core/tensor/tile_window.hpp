@@ -16,6 +16,7 @@
 #include "ck_tile/core/tensor/tile_window_base.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/core/utility/debug.hpp"
 
 namespace ck_tile {
 template <typename T, typename = void>
@@ -283,6 +284,8 @@ struct tile_window_with_static_distribution
                              number<i_access_unsupport_>          = {},
                              bool_constant<oob_conditional_check> = {}) const
     {
+        constexpr bool is_lds =
+            BottomTensorView_::buffer_view::get_address_space() == address_space_enum::lds;
         using Traits   = typename Base::Traits;
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
@@ -297,14 +300,35 @@ struct tile_window_with_static_distribution
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                if constexpr(is_lds)
+                    CK_PRINT<number<NumAccessPerCoord>, vector_t>();
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
 
+                constexpr index_t linear_offset = !is_lds ? 0 : [&]() {
+                    static_assert(Base::has_static_tile_distribution(), "wrong!");
+                    static_assert(Base::BottomTensorDesc::is_static(), "wrong!");
+                    constexpr auto zero_ps =
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{});
+                    constexpr auto step_diff_ps_ys =
+                        container_concat(zero_ps, SFC_Ys::get_step_between(number<0>{}, iAccess));
+                    constexpr auto tile_distr          = typename Base::TileDstr{};
+                    constexpr auto ps_ys_to_xs_adaptor = tile_distr.get_ps_ys_to_xs_adaptor();
+                    constexpr auto diff_adaptor_coord =
+                        make_tensor_adaptor_coordinate(ps_ys_to_xs_adaptor, step_diff_ps_ys);
+                    constexpr auto diff_bottom_idx = diff_adaptor_coord.get_bottom_index();
+                    constexpr auto diff_tensor_coord =
+                        make_tensor_coordinate(typename Base::BottomTensorDesc{}, diff_bottom_idx);
+                    return diff_tensor_coord.get_offset();
+                }();
+
                 // read from bottom tensor
                 const vector_t vec_value =
                     this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
-                        bottom_tensor_thread_coord, 0, bool_constant<oob_conditional_check>{});
+                        bottom_tensor_thread_coord,
+                        linear_offset,
+                        bool_constant<oob_conditional_check>{});
                 // write into distributed tensor
                 static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
                     constexpr auto idx_ys = generate_tuple(
@@ -323,7 +347,7 @@ struct tile_window_with_static_distribution
                             .template get_as<typename Base::DataType>()[j / Traits::PackedSize];
                 });
                 // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
+                if constexpr(!is_lds && iCoordAccess != (NumAccessPerCoord - 1))
                 {
                     constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
 
@@ -587,6 +611,8 @@ struct tile_window_with_static_distribution
                                        number<i_access_unsupport_>          = {},
                                        bool_constant<oob_conditional_check> = {}) const
     {
+        static_assert(Base::has_static_tile_distribution(), "wrong!");
+        static_assert(Base::BottomTensorDesc::is_static(), "wrong!");
         using Traits   = typename Base::Traits;
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
@@ -598,20 +624,56 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+            auto coord_groups = generate_tuple(
+                [&](auto) {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys = SFC_Ys::get_step_between(number<0>{}, number<2>{});
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                },
+                number<2>{});
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
-                constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                constexpr auto group_id = number<iAccess / 2 % 2>{};
+                auto window_adaptor_thread_coord = coord_groups[group_id][I0];
+                auto bottom_tensor_thread_coord  = coord_groups[group_id][I1];
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
 
+                constexpr index_t linear_offset = [&]() {
+                    static_assert(Base::has_static_tile_distribution(), "wrong!");
+                    static_assert(Base::BottomTensorDesc::is_static(), "wrong!");
+                    constexpr auto zero_ps =
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{});
+                    constexpr auto step_diff_ps_ys =
+                        container_concat(zero_ps, SFC_Ys::get_step_between(number<group_id * 2>{}, iAccess));
+                    constexpr auto tile_distr          = typename Base::TileDstr{};
+                    constexpr auto ps_ys_to_xs_adaptor = tile_distr.get_ps_ys_to_xs_adaptor();
+                    constexpr auto diff_adaptor_coord =
+                        make_tensor_adaptor_coordinate(ps_ys_to_xs_adaptor, step_diff_ps_ys);
+                    constexpr auto diff_bottom_idx = diff_adaptor_coord.get_bottom_index();
+                    constexpr auto diff_tensor_coord =
+                        make_tensor_coordinate(typename Base::BottomTensorDesc{}, diff_bottom_idx);
+                    CK_PRINT<decltype(step_diff_ps_ys),
+                             decltype(diff_bottom_idx),
+                             decltype(diff_tensor_coord),
+                             number<diff_tensor_coord.get_offset()>>();
+                    return diff_tensor_coord.get_offset();
+                }();
                 // read from bottom tensor
                 const vector_t vec_value =
                     this->get_bottom_tensor_view()
                         .template get_transpose_vectorized_elements<vector_t>(
-                            bottom_tensor_thread_coord, 0);
+                            bottom_tensor_thread_coord, linear_offset);
                 // write into distributed tensor
                 static_for<0, Traits::ScalarPerVector, 1>{}([&](auto j) {
                     constexpr auto orig_idx_ys = generate_tuple(
@@ -629,18 +691,6 @@ struct tile_window_with_static_distribution
                     dst_tensor.get_thread_buffer().template at<linear_distributed_index>() =
                         vec_value.template get_as<typename Base::DataType>()[j];
                 });
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
