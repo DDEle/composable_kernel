@@ -16,6 +16,7 @@
 #include "ck_tile/core/tensor/tile_window_base.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/core/utility/debug.hpp"
 
 namespace ck_tile {
 template <typename T, typename = void>
@@ -216,13 +217,26 @@ struct tile_window_with_static_distribution
         //  loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord =
-                tile_window[number<0>{}].pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord =
-                tile_window[number<0>{}].pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord =
+                        tile_window[number<0>{}].pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord =
+                        tile_window[number<0>{}].pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -260,18 +274,6 @@ struct tile_window_with_static_distribution
                         },
                         idx_vec_value);
                 });
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
@@ -292,11 +294,24 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -322,18 +337,6 @@ struct tile_window_with_static_distribution
                         vec_value
                             .template get_as<typename Base::DataType>()[j / Traits::PackedSize];
                 });
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
@@ -363,12 +366,25 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
-                constexpr auto iAccess  = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
-                constexpr auto pre_nop_ = [&]() {
+                constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
+                constexpr auto pre_nop_                = [&]() {
                     if constexpr(pre_nop && iCoord == 0 && iCoordAccess == 0)
                         return bool_constant<true>{};
                     else
@@ -393,18 +409,6 @@ struct tile_window_with_static_distribution
                 asm volatile(
                     ""); // this is starting from rocm-6.2, but same sympton, reuse this flag
 #endif
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
@@ -515,19 +519,45 @@ struct tile_window_with_static_distribution
         auto smem_base_ptr             = bottom_tensor_view.get_buffer_view().p_data_;
 
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
-
-            auto [window_adaptor_warp_coord, bottom_tensor_warp_coord] = [&]() {
-                if constexpr(has_pre_compute_warp_coords_)
-                    return make_tuple(pre_computed_coords_.warp[iCoord][I0],
-                                      pre_computed_coords_.warp[iCoord][I1]);
-                else
-                    return make_tuple(0, 0);
-            }();
-
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
+
+                auto [window_adaptor_warp_coord, bottom_tensor_warp_coord] = [&]() {
+                    if constexpr(has_pre_compute_warp_coords_)
+                    {
+                        auto window_adaptor_warp_coord = pre_computed_coords_.warp[iCoord][I0];
+                        auto bottom_tensor_warp_coord  = pre_computed_coords_.warp[iCoord][I1];
+
+                        constexpr auto idx_diff_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                        constexpr auto idx_diff_ps_ys =
+                            container_concat(generate_tuple([&](auto) { return number<0>{}; },
+                                                            number<Base::NDimP>{}),
+                                             idx_diff_ys);
+
+                        Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                            window_adaptor_warp_coord, bottom_tensor_warp_coord, idx_diff_ps_ys);
+                        return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                    }
+                    else
+                    {
+                        return make_tuple(0, 0);
+                    }
+                }();
 
                 // Use precomputed window origin
                 auto lds_bottom_tensor_thread_idx = window_origin + [&]() {
@@ -550,21 +580,6 @@ struct tile_window_with_static_distribution
                     bottom_tensor_thread_coord,
                     number<0>{},
                     bool_constant<oob_conditional_check>{});
-
-                // Move thread coordinate if not last access
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys    = SFC_Ys::get_forward_step(iAccess);
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                    if constexpr(has_pre_compute_warp_coords_)
-                        Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                            window_adaptor_warp_coord, bottom_tensor_warp_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
@@ -598,11 +613,25 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -629,18 +658,6 @@ struct tile_window_with_static_distribution
                     dst_tensor.get_thread_buffer().template at<linear_distributed_index>() =
                         vec_value.template get_as<typename Base::DataType>()[j];
                 });
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
@@ -660,11 +677,23 @@ struct tile_window_with_static_distribution
 
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
-
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -697,19 +726,6 @@ struct tile_window_with_static_distribution
                     0,
                     vec_value,
                     bool_constant<oob_conditional_check>{});
-
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
@@ -731,11 +747,24 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -760,19 +789,6 @@ struct tile_window_with_static_distribution
                 this->get_bottom_tensor_view()
                     .template set_vectorized_elements_raw<vector_t, oob_conditional_check>(
                         bottom_tensor_thread_coord, 0, vec_value);
-
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
@@ -794,11 +810,24 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -828,19 +857,6 @@ struct tile_window_with_static_distribution
                     0,
                     vec_value,
                     bool_constant<oob_conditional_check>{});
-
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
@@ -863,11 +879,24 @@ struct tile_window_with_static_distribution
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
-            auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
-            auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                const auto coord_group = [&]() {
+                    auto window_adaptor_thread_coord = pre_computed_coords_.thread[iCoord][I0];
+                    auto bottom_tensor_thread_coord  = pre_computed_coords_.thread[iCoord][I1];
+
+                    constexpr auto idx_diff_ys    = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto idx_diff_ps_ys = container_concat(
+                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                        idx_diff_ys);
+
+                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+                    return make_tuple(window_adaptor_thread_coord, bottom_tensor_thread_coord);
+                }();
+                const auto window_adaptor_thread_coord = coord_group[I0];
+                const auto bottom_tensor_thread_coord  = coord_group[I1];
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -898,19 +927,6 @@ struct tile_window_with_static_distribution
                     vec_value,
                     bool_constant<oob_conditional_check>{},
                     bool_constant<pre_nop>{});
-
-                // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
-                {
-                    constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
-
-                    constexpr auto idx_diff_ps_ys = container_concat(
-                        generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
-                        idx_diff_ys);
-
-                    Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
-                        window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
-                }
             });
         });
     }
