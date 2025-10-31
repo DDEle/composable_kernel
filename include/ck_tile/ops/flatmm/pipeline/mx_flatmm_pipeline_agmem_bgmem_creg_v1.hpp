@@ -500,7 +500,8 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                       "wrong!");
 
         constexpr auto MIter_2nd_last = (MIterPerWarp >= 2) ? MIterPerWarp - 2 : MIterPerWarp - 1;
-        const index_t iMWarp          = get_warp_id() / NWarp;
+        static_assert(NWarp == 4);
+        // const index_t iMWarp          = get_warp_id() / NWarp;
         // const index_t iNWarp          = get_warp_id() % NWarp;
 
         using CWarpDstr   = typename WG::CWarpDstr;
@@ -510,16 +511,15 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
             to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
+        auto a_dram_window =
+            make_tile_window(a_copy_dram_window_tmp.get_bottom_tensor_view(),
+                             a_copy_dram_window_tmp.get_window_lengths(),
+                             a_copy_dram_window_tmp.get_window_origin(),
+                             PipelinePolicy::template MakeMXFP4_ADramTileDistribution<Problem>());
+
         __builtin_amdgcn_sched_barrier(0);
 
         // A tile in LDS
-        auto a_dram_window = make_tile_window(
-            PipelinePolicy::template MakeMXFP4_AsyncLoadDramTensorViewA<Problem>(
-                a_copy_dram_window_tmp.get_bottom_tensor_view()),
-            a_copy_dram_window_tmp.get_window_lengths(),
-            a_copy_dram_window_tmp.get_window_origin(),
-            PipelinePolicy::template MakeMXFP4_AsyncLoadATileDistribution<Problem>());
-
         ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem_ping);
         ADataType* p_a_lds_pong = static_cast<ADataType*>(p_smem_pong);
 
@@ -537,45 +537,16 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
             a_lds_block_pong, make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}), {0, 0});
 
         // ping-pong window for A LDS
-        auto a_warp_window_ping_tmp =
+        auto a_warp_window_ping =
             make_tile_window(a_lds_block_ping,
                              make_tuple(number<WG::kM>{}, number<WG::kK>{}),
-                             {iMWarp * WG::kM, 0},
+                             {0, 0},
                              PipelinePolicy::template MakeMXF4_ALDS_TileDistribution<Problem>());
-        auto a_warp_window_pong_tmp =
+        auto a_warp_window_pong =
             make_tile_window(a_lds_block_pong,
                              make_tuple(number<WG::kM>{}, number<WG::kK>{}),
-                             {iMWarp * WG::kM, 0},
+                             {0, 0},
                              PipelinePolicy::template MakeMXF4_ALDS_TileDistribution<Problem>());
-
-        statically_indexed_array<
-            statically_indexed_array<decltype(a_warp_window_ping_tmp), KIterPerWarp>,
-            MIterPerWarp>
-            a_warp_windows_ping;
-
-        statically_indexed_array<
-            statically_indexed_array<decltype(a_warp_window_pong_tmp), KIterPerWarp>,
-            MIterPerWarp>
-            a_warp_windows_pong;
-
-        static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                a_warp_windows_ping(mIter)(kIter) = a_warp_window_ping_tmp;
-                a_warp_windows_pong(mIter)(kIter) = a_warp_window_pong_tmp;
-
-                auto packed_m_idx  = mIter / number<MXdlPack>{};
-                auto packed_m_rank = mIter % number<MXdlPack>{};
-
-                move_tile_window(
-                    a_warp_windows_ping(mIter)(kIter),
-                    {packed_m_idx * MXdlPack * MPerBlockPerIter + packed_m_rank * WG::kM,
-                     kIter * KPerBlockPerIter});
-                move_tile_window(
-                    a_warp_windows_pong(mIter)(kIter),
-                    {packed_m_idx * MXdlPack * MPerBlockPerIter + packed_m_rank * WG::kM,
-                     kIter * KPerBlockPerIter});
-            });
-        });
 
         // Block GEMM
         auto block_flatmm = BlockFlatmm();
@@ -716,22 +687,18 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         s_waitcnt_barrier<dsread_per_wg * MIterPerWarp * KIterPerWarp>();
         block_sync_lds();
 
-        using MXFP4_A_Buffer_ping =
-            decltype(load_tile(a_warp_windows_ping(number<0>{})(number<0>{})));
         // use v4i32 as the data type between basicblock to avoid unpack and repack operation.
         using V4UInt_A_Buffer = thread_buffer<uint32_t, 4>;
         union UnionBuf_A_ping
         {
             V4UInt_A_Buffer u = 0;
-            MXFP4_A_Buffer_ping mxfp4;
+            decltype(load_tile(a_warp_window_ping)) mxfp4;
         } ua_ping;
 
-        using MXFP4_A_Buffer_pong =
-            decltype(load_tile(a_warp_windows_pong(number<0>{})(number<0>{})));
         union UnionBuf_A_pong
         {
             V4UInt_A_Buffer u = 0;
-            MXFP4_A_Buffer_pong mxfp4;
+            decltype(load_tile(a_warp_window_pong)) mxfp4;
         } ua_pong;
 
         // preload A00,A10... from lds
@@ -740,8 +707,10 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         static_for<0, m_preload, 1>{}([&](auto loadIter) {
             constexpr auto mIter = loadIter % MXdlPack;
             constexpr auto kIter = loadIter / MXdlPack;
-
-            ua_ping.mxfp4 = load_tile(a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
+            // auto tmp             = a_warp_window_ping;
+            // move_tile_window(tmp, {number<mIter * WG::kM>{}, number<>{}});
+            ua_ping.mxfp4 = load_tile_with_offset(
+                a_warp_window_ping, tuple<number<mIter * WG::kM>, number<kIter * WG::kK>>{});
             a_warp_tensor(loadIter) = ua_ping.u;
         });
         __builtin_amdgcn_sched_barrier(0);
@@ -846,8 +815,9 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                                 {
                                     constexpr auto AmIter = addr % 2 + addr / 4 * 2;
                                     constexpr auto AkIter = addr / 2 % 2;
-                                    ua_ping.mxfp4         = load_tile(
-                                        a_warp_windows_ping(number<AmIter>{})(number<AkIter>{}));
+                                    ua_ping.mxfp4         = load_tile_with_offset(
+                                        a_warp_window_ping,
+                                        tuple<number<AmIter * WG::kM>, number<AkIter * WG::kK>>{});
                                     a_warp_tensor(number<AwarpIter>{}) = ua_ping.u;
                                 }
 
@@ -870,7 +840,8 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MXdlPack;
                 constexpr auto kIter = loadIter / MXdlPack;
-                ua_pong.mxfp4 = load_tile(a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
+                ua_pong.mxfp4        = load_tile_with_offset(
+                    a_warp_window_pong, tuple<number<mIter * WG::kM>, number<kIter * WG::kK>>{});
                 a_warp_tensor(loadIter) = ua_pong.u; // reload a_warp_tensor with pong buffer
             });
             // HotLoopScheduler();
@@ -977,8 +948,9 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                                 {
                                     constexpr auto AmIter = addr % 2 + addr / 4 * 2;
                                     constexpr auto AkIter = addr / 2 % 2;
-                                    ua_pong.mxfp4         = load_tile(
-                                        a_warp_windows_pong(number<AmIter>{})(number<AkIter>{}));
+                                    ua_pong.mxfp4         = load_tile_with_offset(
+                                        a_warp_window_pong,
+                                        tuple<number<AmIter * WG::kM>, number<AkIter * WG::kK>>{});
                                     a_warp_tensor(number<AwarpIter>{}) = ua_pong.u;
                                 }
 
@@ -1002,7 +974,8 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MXdlPack;
                 constexpr auto kIter = loadIter / MXdlPack;
-                ua_ping.mxfp4 = load_tile(a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
+                ua_ping.mxfp4        = load_tile_with_offset(
+                    a_warp_window_ping, tuple<number<mIter * WG::kM>, number<kIter * WG::kK>>{});
                 a_warp_tensor(loadIter) = ua_ping.u; // reload a_warp_tensor with ping buffer
             });
             // HotLoopScheduler();
@@ -1117,8 +1090,11 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                                 {
                                     constexpr auto AmIter = addr % 2 + addr / 4 * 2;
                                     constexpr auto AkIter = addr / 2 % 2;
-                                    ua_ping.mxfp4         = load_tile(
-                                        a_warp_windows_ping(number<AmIter>{})(number<AkIter>{}));
+                                    auto tmp              = a_warp_window_ping;
+                                    move_tile_window(
+                                        tmp,
+                                        {number<AmIter * WG::kM>{}, number<AkIter * WG::kK>{}});
+                                    ua_ping.mxfp4                      = load_tile(tmp);
                                     a_warp_tensor(number<AwarpIter>{}) = ua_ping.u;
                                 }
 
@@ -1137,7 +1113,9 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MXdlPack;
                 constexpr auto kIter = loadIter / MXdlPack;
-                ua_pong.mxfp4 = load_tile(a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
+                auto tmp             = a_warp_window_pong;
+                move_tile_window(tmp, {number<mIter * WG::kM>{}, number<kIter * WG::kK>{}});
+                ua_pong.mxfp4           = load_tile(tmp);
                 a_warp_tensor(loadIter) = ua_pong.u; // reload a_warp_tensor with pong buffer
             });
 
@@ -1197,8 +1175,11 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                                 {
                                     constexpr auto AmIter = addr % 2 + addr / 4 * 2;
                                     constexpr auto AkIter = addr / 2 % 2;
-                                    ua_pong.mxfp4         = load_tile(
-                                        a_warp_windows_pong(number<AmIter>{})(number<AkIter>{}));
+                                    auto tmp              = a_warp_window_pong;
+                                    move_tile_window(
+                                        tmp,
+                                        {number<AmIter * WG::kM>{}, number<AkIter * WG::kK>{}});
+                                    ua_pong.mxfp4                      = load_tile(tmp);
                                     a_warp_tensor(number<AwarpIter>{}) = ua_pong.u;
                                 }
 
@@ -1272,8 +1253,11 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                                 {
                                     constexpr auto AmIter = addr % 2 + addr / 4 * 2;
                                     constexpr auto AkIter = addr / 2 % 2;
-                                    ua_ping.mxfp4         = load_tile(
-                                        a_warp_windows_ping(number<AmIter>{})(number<AkIter>{}));
+                                    auto tmp              = a_warp_window_ping;
+                                    move_tile_window(
+                                        tmp,
+                                        {number<AmIter * WG::kM>{}, number<AkIter * WG::kK>{}});
+                                    ua_ping.mxfp4                      = load_tile(tmp);
                                     a_warp_tensor(number<AwarpIter>{}) = ua_ping.u;
                                 }
 
