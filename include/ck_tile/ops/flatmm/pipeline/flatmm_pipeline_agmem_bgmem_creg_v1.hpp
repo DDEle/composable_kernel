@@ -36,6 +36,8 @@ struct BaseFlatmmPipelineAGmemBGmemCRegV1
         {
             return run_func(bool_constant<true>{},
                             integral_constant<TailNumber, TailNumber::Odd>{});
+        } else {
+            throw std::runtime_error("Wrong TailNumber!");
         }
         // return run_func(bool_constant<true>{}, integral_constant<TailNumber,
         // TailNumber::Empty>{});

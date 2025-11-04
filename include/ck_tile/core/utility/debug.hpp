@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
 
 namespace ck_tile {
 template <auto... val>
@@ -79,17 +80,29 @@ struct CK_PRINTF<ConvertTo,
                  str_literal<SUFFIXChars...>>
 {
     template <typename T>
-    CK_TILE_HOST_DEVICE static constexpr auto default_format()
+    CK_TILE_HOST_DEVICE static constexpr auto default_format_and_type()
     {
         if constexpr(std::is_same_v<T, float>)
-            return make_str_literal("%8.3f");
+            return std::make_tuple(make_str_literal("%8.3f"), T{});
         else if constexpr(std::is_same_v<T, int>)
-            return make_str_literal("%5d");
+            return std::make_tuple(make_str_literal("%5d"), T{});
         else if constexpr(std::is_same_v<T, unsigned int>)
-            return make_str_literal("%5u");
+            return std::make_tuple(make_str_literal("%5u"), T{});
+        else if constexpr(sizeof(T) == 1)
+            return std::make_tuple(make_str_literal("0x%02x"), uint8_t{});
+        else if constexpr(sizeof(T) == 2)
+            return std::make_tuple(make_str_literal("0x%04x"), uint16_t{});
+        else if constexpr(sizeof(T) == 4)
+            return std::make_tuple(make_str_literal("0x%08x"), uint32_t{});
         else
-            return make_str_literal("0x%08x");
+            static_assert(false, "Unsupported type");
     }
+    template <typename T>
+    using default_format_t =
+        std::remove_reference_t<decltype(std::get<0>(default_format_and_type<T>()))>;
+    template <typename T>
+    using default_type_t =
+        std::remove_reference_t<decltype(std::get<1>(default_format_and_type<T>()))>;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_prefix()
     {
@@ -112,15 +125,17 @@ struct CK_PRINTF<ConvertTo,
     CK_TILE_HOST_DEVICE void impl(const thread_buffer<T, N>& buf,
                                   std::integer_sequence<index_t, Is...>) const
     {
-        using FMT1                = std::conditional_t<sizeof...(FMTChars) == 0,
-                                                       decltype(default_format<Y>()),
-                                                       str_literal<FMTChars...>>;
+        using FMT1 = std::
+            conditional_t<sizeof...(FMTChars) == 0, default_format_t<Y>, str_literal<FMTChars...>>;
         constexpr auto fmt_v      = FMT1::template duplicate_n<N>(make_str_literal(" "));
         constexpr auto fmt_wrap_v = get_prefix() + fmt_v + get_suffix();
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
-        printf(fmt_wrap_v.data, get_thread_id(), N, type_convert<Y>(buf[Is])...);
+        printf(fmt_wrap_v.data,
+               get_thread_id(),
+               N,
+               bit_cast<default_type_t<Y>>(type_convert<Y>(buf[Is]))...);
 #pragma clang diagnostic pop
     }
 

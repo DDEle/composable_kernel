@@ -488,6 +488,7 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             // allocate LDS
             __shared__ char smem_ptr_ping[Underlying::GetSmemPingSize()];
             __shared__ char smem_ptr_pong[Underlying::GetSmemPongSize()];
+            CK_PRINT<Underlying::GetSmemPingSize(), Underlying::GetSmemPongSize()>();
 
             if constexpr(!(EpiloguePipeline::MemoryOperation == memory_operation_enum::atomic_add &&
                            EpiloguePipeline::GetVectorSizeC() % 2 != 0 &&
