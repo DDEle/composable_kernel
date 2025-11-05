@@ -47,8 +47,9 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<1>,
-                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1, K2>>,
-                                       tuple<sequence<1>, sequence<2, 1, 2>>, // M1 K0,M2,K1
+                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1, K2>>, // 1,4,8
+                                                                                          // 2,4,32
+                                       tuple<sequence<1>, sequence<2, 1, 2>>, // M1  K0,M2,K1
                                        tuple<sequence<1>, sequence<0, 2, 1>>,
                                        sequence<1, 2>, // M0,K2
                                        sequence<0, 2>>{});

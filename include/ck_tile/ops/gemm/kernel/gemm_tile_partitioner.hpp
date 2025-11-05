@@ -262,6 +262,7 @@ struct GemmSpatiallyLocalTilePartitioner
      */
     CK_TILE_HOST_DEVICE static auto GetLoopNum(index_t K) noexcept -> index_t
     {
+        printf("GetLoopNum K: %d KPerBlock: %d \n", K, KPerBlock);
         return integer_divide_ceil(K, KPerBlock);
     }
 

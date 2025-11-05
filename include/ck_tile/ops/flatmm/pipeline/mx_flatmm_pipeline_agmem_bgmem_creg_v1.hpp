@@ -150,12 +150,6 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
     static constexpr index_t Aload_num_perK = dswrite_num_perK;
     static constexpr index_t Aload_rep      = dswrite_rep;
 
-    // using a = decltype(CK_PRINT<dsread_num_perK,
-    //                             dswrite_num_perK,
-    //                             dswrite_rep,
-    //                             Aload_num_perK,
-    //                             Aload_rep>());
-
     static constexpr index_t Bload_num_perK = kNPerBlock * WG::kK / NWarp / BK1 / WaveSize;
     static constexpr index_t ScaleBload_K1  = NXdlPack * KXdlPack; // fixed for fp4
     static constexpr index_t ScaleBload_num =
@@ -707,8 +701,7 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         static_for<0, m_preload, 1>{}([&](auto loadIter) {
             constexpr auto mIter = loadIter % MXdlPack;
             constexpr auto kIter = loadIter / MXdlPack;
-            // auto tmp             = a_warp_window_ping;
-            // move_tile_window(tmp, {number<mIter * WG::kM>{}, number<>{}});
+
             ua_ping.mxfp4 = load_tile_with_offset(
                 a_warp_window_ping, tuple<number<mIter * WG::kM>, number<kIter * WG::kK>>{});
             a_warp_tensor(loadIter) = ua_ping.u;
@@ -982,14 +975,12 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         };
 
         index_t iCounter = (num_loop - 1) / 2;
-        // if(iCounter > 0)
-        {
+        if(iCounter > 0)
             do
             {
                 main_body_implx2();
                 iCounter--;
-            } while(iCounter > 1);
-        }
+            } while(iCounter > 0);
 
         // TAIL
         if constexpr(TailNum == TailNumber::Even)
@@ -1090,11 +1081,9 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                                 {
                                     constexpr auto AmIter = addr % 2 + addr / 4 * 2;
                                     constexpr auto AkIter = addr / 2 % 2;
-                                    auto tmp              = a_warp_window_ping;
-                                    move_tile_window(
-                                        tmp,
-                                        {number<AmIter * WG::kM>{}, number<AkIter * WG::kK>{}});
-                                    ua_ping.mxfp4                      = load_tile(tmp);
+                                    ua_ping.mxfp4         = load_tile_with_offset(
+                                        a_warp_window_ping,
+                                        tuple<number<AmIter * WG::kM>, number<AkIter * WG::kK>>{});
                                     a_warp_tensor(number<AwarpIter>{}) = ua_ping.u;
                                 }
 
@@ -1113,9 +1102,8 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MXdlPack;
                 constexpr auto kIter = loadIter / MXdlPack;
-                auto tmp             = a_warp_window_pong;
-                move_tile_window(tmp, {number<mIter * WG::kM>{}, number<kIter * WG::kK>{}});
-                ua_pong.mxfp4           = load_tile(tmp);
+                ua_pong.mxfp4        = load_tile_with_offset(
+                    a_warp_window_pong, tuple<number<mIter * WG::kM>, number<kIter * WG::kK>>{});
                 a_warp_tensor(loadIter) = ua_pong.u; // reload a_warp_tensor with pong buffer
             });
 
@@ -1175,11 +1163,9 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
                                 {
                                     constexpr auto AmIter = addr % 2 + addr / 4 * 2;
                                     constexpr auto AkIter = addr / 2 % 2;
-                                    auto tmp              = a_warp_window_pong;
-                                    move_tile_window(
-                                        tmp,
-                                        {number<AmIter * WG::kM>{}, number<AkIter * WG::kK>{}});
-                                    ua_pong.mxfp4                      = load_tile(tmp);
+                                    ua_pong.mxfp4         = load_tile_with_offset(
+                                        a_warp_window_pong,
+                                        tuple<number<AmIter * WG::kM>, number<AkIter * WG::kK>>{});
                                     a_warp_tensor(number<AwarpIter>{}) = ua_pong.u;
                                 }
 
@@ -1198,6 +1184,8 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
+            // if(get_thread_id() < 64)
+            //     printf("MXF4FlatmmPipelineAGmemBGmemCRegV1 odd tail\n");
             // GEMM loopK
             static_for<0, KIterPerWarp / KXdlPack, 1>{}([&](auto kIter_pack) {
                 static_for<0, MIterPerWarp / MXdlPack, 1>{}([&](auto mIter_pack) {
@@ -1218,7 +1206,21 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
 
                                     UnionBuf_A_ping ua_compute;
                                     ua_compute.u = a_warp_tensor(number<AwarpIter>{});
-                                    CK_PRINTF<>{}(ua_compute.mxfp4);
+
+                                    // auto aa =
+                                    //     make_str_literal(" %2d %2d %2d %2d%2d%2d %2d %2d %2d ");
+
+                                    // CK_PRINTF_WARP0<void, str_literal<>, decltype(aa)>{}(
+                                    //     ua_compute.mxfp4,
+                                    //     int(kIter_pack.value),
+                                    //     int(mIter_pack.value),
+                                    //     int(nIter_pack.value),
+                                    //     1,
+                                    //     1,
+                                    //     1,
+                                    //     int(ikxdl.value),
+                                    //     int(imxdl.value),
+                                    //     int(inxdl.value));
 
                                     UnionBuf ub_compute;
                                     ub_compute.u =
@@ -1275,7 +1277,10 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
             });
             // LastHotLoopScheduler();
         }
-
+        else
+        {
+            static_assert(false, "Wrong TailNum");
+        }
         return c_block_tile;
     }
 };

@@ -259,8 +259,7 @@ struct tile_window_with_static_distribution
         constexpr auto bottom_tensor_idx_off = to_multi_index(BottomTensorOffset{});
         constexpr auto bottom_tensor_coord_off =
             make_tensor_coordinate(typename Base::BottomTensorDesc{}, bottom_tensor_idx_off);
-        constexpr index_t linear_off =
-            bottom_tensor_coord_off.get_offset() / Base::BottomTensorView::PackedSize;
+        constexpr index_t linear_off = bottom_tensor_coord_off.get_offset();
 
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
@@ -269,6 +268,11 @@ struct tile_window_with_static_distribution
             auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
+                // if(get_thread_id() == 0)
+                // {
+                //     print(bottom_tensor_thread_coord);
+                //     printf("linear_off=%d\n", static_cast<int>(linear_off));
+                // }
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
 
                 // data index [y0, y1, ...]
@@ -499,21 +503,106 @@ struct tile_window_with_static_distribution
                 // Use precomputed window origin
                 auto lds_bottom_tensor_thread_idx =
                     window_origin + window_adaptor_thread_coord.get_bottom_index();
+                // if(get_thread_id() < 64)
+                {
+                    // Use precomputed tensor descriptor
+                    const auto lds_coord =
+                        make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
-                // Use precomputed tensor descriptor
-                const auto lds_coord =
-                    make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
+                    // Calculate SMEM address using base pointer
+                    CK_TILE_LDS_ADDR LdsDataType* smem =
+                        smem_base_ptr +
+                        __builtin_amdgcn_readfirstlane(lds_coord.get_offset() / Traits::PackedSize);
+                    // print_warp0(bottom_tensor_thread_coord);
+                    // s_waitcnt<0>();
+                    // auto smem_ = reinterpret_cast<uint8_t*>((smem)) + get_thread_id() * 16;
+                    // printf("tid %03d before async load SMEM data: "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "\n",
+                    //        get_thread_id(),
+                    //        smem_[0],
+                    //        smem_[1],
+                    //        smem_[2],
+                    //        smem_[3],
+                    //        smem_[4],
+                    //        smem_[5],
+                    //        smem_[6],
+                    //        smem_[7],
+                    //        smem_[8],
+                    //        smem_[9],
+                    //        smem_[10],
+                    //        smem_[11],
+                    //        smem_[12],
+                    //        smem_[13],
+                    //        smem_[14],
+                    //        smem_[15]);
 
-                // Calculate SMEM address using base pointer
-                CK_TILE_LDS_ADDR LdsDataType* smem =
-                    smem_base_ptr + lds_coord.get_offset() / Traits::PackedSize;
+                    // s_waitcnt<0>();
 
-                // Write into bottom tensor
-                this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
-                    smem,
-                    bottom_tensor_thread_coord,
-                    number<0>{},
-                    bool_constant<oob_conditional_check>{});
+                    // auto dram = reinterpret_cast<const uint8_t*>(
+                    //                 this->get_bottom_tensor_view().buf_.p_data_) +
+                    //             bottom_tensor_thread_coord.get_offset() / 2;
+                    // printf("tid %03d before async load DRAM data: "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "\n",
+                    //        get_thread_id(),
+                    //        dram[0],
+                    //        dram[1],
+                    //        dram[2],
+                    //        dram[3],
+                    //        dram[4],
+                    //        dram[5],
+                    //        dram[6],
+                    //        dram[7],
+                    //        dram[8],
+                    //        dram[9],
+                    //        dram[10],
+                    //        dram[11],
+                    //        dram[12],
+                    //        dram[13],
+                    //        dram[14],
+                    //        dram[15]);
+
+                    // printf("tid %03d -> SMEM addr: %p\n", get_thread_id(), smem);
+                    // Write into bottom tensor
+                    // CK_PRINT<vector_t>();
+                    this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
+                        smem,
+                        bottom_tensor_thread_coord,
+                        number<0>{},
+                        bool_constant<oob_conditional_check>{});
+
+                    // s_waitcnt<0>();
+                    // printf("tid %03d after async load SMEM data: "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
+                    //        "\n",
+                    //        get_thread_id(),
+                    //        smem_[0],
+                    //        smem_[1],
+                    //        smem_[2],
+                    //        smem_[3],
+                    //        smem_[4],
+                    //        smem_[5],
+                    //        smem_[6],
+                    //        smem_[7],
+                    //        smem_[8],
+                    //        smem_[9],
+                    //        smem_[10],
+                    //        smem_[11],
+                    //        smem_[12],
+                    //        smem_[13],
+                    //        smem_[14],
+                    //        smem_[15]);
+                }
 
                 // Move thread coordinate if not last access
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))

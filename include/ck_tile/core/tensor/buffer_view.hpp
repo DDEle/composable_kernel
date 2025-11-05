@@ -429,6 +429,17 @@ struct buffer_view<address_space_enum::global,
         constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
         const int32x4_t src_wave_buffer_resource =
             make_wave_buffer_resource(p_data_, (buffer_size_) * sizeof(type));
+        // if (get_thread_id() < 64)
+        // {
+        //     printf("tid %03d: p_data_ = %p, buffer_size_ = %u, i = %d, linear_offset = %d,
+        //     is_valid_element = %d\n",
+        //            get_thread_id(),
+        //            p_data_,
+        //            static_cast<uint32_t>(buffer_size_* sizeof(type)),
+        //            static_cast<int>(i),
+        //            static_cast<int>(linear_offset),
+        //            static_cast<int>(is_valid_element));
+        // }
 
         amd_async_buffer_load_with_oob<remove_cvref_t<T>, t_per_x, Coherence>(
             smem,

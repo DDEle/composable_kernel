@@ -282,19 +282,19 @@ int run_mx_flatmm_example(int argc, char* argv[])
         {
             if(persistent_opt == 0)
             {
-                run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
-                                           ck_tile::pk_fp4_t,
-                                           ck_tile::fp16_t,
-                                           FlatmmConfig,
-                                           false>(argc, argv, Row{}, Col{}, Row{});
+                return run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
+                                                  ck_tile::pk_fp4_t,
+                                                  ck_tile::fp16_t,
+                                                  FlatmmConfig,
+                                                  false>(argc, argv, Row{}, Col{}, Row{});
             }
             else
             {
-                run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
-                                           ck_tile::pk_fp4_t,
-                                           ck_tile::fp16_t,
-                                           FlatmmConfig,
-                                           true>(argc, argv, Row{}, Col{}, Row{});
+                return run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
+                                                  ck_tile::pk_fp4_t,
+                                                  ck_tile::fp16_t,
+                                                  FlatmmConfig,
+                                                  true>(argc, argv, Row{}, Col{}, Row{});
             }
         }
         else if(mx_prec == "fp6xfp6")
@@ -327,7 +327,7 @@ int main(int argc, char* argv[])
         int warp_tile = arg_parser.get_int("warp_tile");
         if(warp_tile == 0)
         {
-            return !run_mx_flatmm_example<MXfp4_FlatmmConfig16>(argc, argv);
+            return run_mx_flatmm_example<MXfp4_FlatmmConfig16>(argc, argv);
         }
         else if(warp_tile == 1)
         {
