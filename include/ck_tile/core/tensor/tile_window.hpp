@@ -142,10 +142,11 @@ struct tile_window_with_static_distribution
               typename ElementWise_,
               index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true>
-    CK_TILE_DEVICE auto load(const TileWindow_& tile_window,
-                             ElementWise_ elementwise,
-                             number<i_access_unsupport_>          = {},
-                             bool_constant<oob_conditional_check> = {}) const
+    CK_TILE_DEVICE auto
+    load(const TileWindow_& tile_window,
+         std::enable_if_t<!is_constant_v<ElementWise_>, ElementWise_> elementwise,
+         number<i_access_unsupport_>          = {},
+         bool_constant<oob_conditional_check> = {}) const
     {
         constexpr auto tile_dstr = typename Base::TileDstr{};
         auto dst_tensor = make_static_distributed_tensor<typename Base::DataType>(tile_dstr);
@@ -157,6 +158,7 @@ struct tile_window_with_static_distribution
         return dst_tensor;
     }
 
+#if 0
     template <typename DistributedTensor,
               typename TileWindow_,
               typename ElementWise_,
@@ -237,6 +239,7 @@ struct tile_window_with_static_distribution
             });
         });
     }
+#endif
 
     template <typename DistributedTensor,
               index_t i_access_unsupport_ = -1,
@@ -253,14 +256,20 @@ struct tile_window_with_static_distribution
 
         constexpr auto tile_dstr = typename Base::TileDstr{};
 
-        constexpr bool is_zero_offset = std::is_same_v<BottomTensorOffset, ZeroBottomTensorOffset_>;
-        static_assert(is_static_v<typename Base::BottomTensorDesc> || is_zero_offset,
-                      "Only static tensor desc supported with non-zero offset");
-        constexpr auto bottom_tensor_idx_off = to_multi_index(BottomTensorOffset{});
-        constexpr auto bottom_tensor_coord_off =
-            make_tensor_coordinate(typename Base::BottomTensorDesc{}, bottom_tensor_idx_off);
-        constexpr index_t linear_off = bottom_tensor_coord_off.get_offset();
-
+        const index_t linear_off = [&]() {
+            if constexpr(std::is_integral_v<BottomTensorOffset> ||
+                         is_constant_v<BottomTensorOffset>)
+            {
+                return BottomTensorOffset::value;
+            }
+            else
+            {
+                auto bottom_tensor_idx_off   = to_multi_index(BottomTensorOffset{});
+                auto bottom_tensor_coord_off = make_tensor_coordinate(
+                    this->bottom_tensor_view_.get_tensor_descriptor(), bottom_tensor_idx_off);
+                return bottom_tensor_coord_off.get_offset();
+            }
+        }();
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
@@ -503,106 +512,19 @@ struct tile_window_with_static_distribution
                 // Use precomputed window origin
                 auto lds_bottom_tensor_thread_idx =
                     window_origin + window_adaptor_thread_coord.get_bottom_index();
-                // if(get_thread_id() < 64)
-                {
-                    // Use precomputed tensor descriptor
-                    const auto lds_coord =
-                        make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
+                // Use precomputed tensor descriptor
+                const auto lds_coord =
+                    make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
-                    // Calculate SMEM address using base pointer
-                    CK_TILE_LDS_ADDR LdsDataType* smem =
-                        smem_base_ptr +
-                        __builtin_amdgcn_readfirstlane(lds_coord.get_offset() / Traits::PackedSize);
-                    // print_warp0(bottom_tensor_thread_coord);
-                    // s_waitcnt<0>();
-                    // auto smem_ = reinterpret_cast<uint8_t*>((smem)) + get_thread_id() * 16;
-                    // printf("tid %03d before async load SMEM data: "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "\n",
-                    //        get_thread_id(),
-                    //        smem_[0],
-                    //        smem_[1],
-                    //        smem_[2],
-                    //        smem_[3],
-                    //        smem_[4],
-                    //        smem_[5],
-                    //        smem_[6],
-                    //        smem_[7],
-                    //        smem_[8],
-                    //        smem_[9],
-                    //        smem_[10],
-                    //        smem_[11],
-                    //        smem_[12],
-                    //        smem_[13],
-                    //        smem_[14],
-                    //        smem_[15]);
-
-                    // s_waitcnt<0>();
-
-                    // auto dram = reinterpret_cast<const uint8_t*>(
-                    //                 this->get_bottom_tensor_view().buf_.p_data_) +
-                    //             bottom_tensor_thread_coord.get_offset() / 2;
-                    // printf("tid %03d before async load DRAM data: "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "\n",
-                    //        get_thread_id(),
-                    //        dram[0],
-                    //        dram[1],
-                    //        dram[2],
-                    //        dram[3],
-                    //        dram[4],
-                    //        dram[5],
-                    //        dram[6],
-                    //        dram[7],
-                    //        dram[8],
-                    //        dram[9],
-                    //        dram[10],
-                    //        dram[11],
-                    //        dram[12],
-                    //        dram[13],
-                    //        dram[14],
-                    //        dram[15]);
-
-                    // printf("tid %03d -> SMEM addr: %p\n", get_thread_id(), smem);
-                    // Write into bottom tensor
-                    // CK_PRINT<vector_t>();
-                    this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
-                        smem,
-                        bottom_tensor_thread_coord,
-                        number<0>{},
-                        bool_constant<oob_conditional_check>{});
-
-                    // s_waitcnt<0>();
-                    // printf("tid %03d after async load SMEM data: "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "0x%02x 0x%02x 0x%02x 0x%02x "
-                    //        "\n",
-                    //        get_thread_id(),
-                    //        smem_[0],
-                    //        smem_[1],
-                    //        smem_[2],
-                    //        smem_[3],
-                    //        smem_[4],
-                    //        smem_[5],
-                    //        smem_[6],
-                    //        smem_[7],
-                    //        smem_[8],
-                    //        smem_[9],
-                    //        smem_[10],
-                    //        smem_[11],
-                    //        smem_[12],
-                    //        smem_[13],
-                    //        smem_[14],
-                    //        smem_[15]);
-                }
+                // Calculate SMEM address using base pointer
+                CK_TILE_LDS_ADDR LdsDataType* smem =
+                    smem_base_ptr +
+                    __builtin_amdgcn_readfirstlane(lds_coord.get_offset() / Traits::PackedSize);
+                this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
+                    smem,
+                    bottom_tensor_thread_coord,
+                    number<0>{},
+                    bool_constant<oob_conditional_check>{});
 
                 // Move thread coordinate if not last access
                 if constexpr(iCoordAccess != (NumAccessPerCoord - 1))

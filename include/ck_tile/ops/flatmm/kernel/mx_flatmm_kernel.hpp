@@ -143,16 +143,24 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             }
         }();
 
-        index_t kFlatK = kargs.K * BlockGemmShape::WarpTile::at(I1);
-        index_t kFlatN = kargs.N * kargs.K / kFlatK;
-
-        const auto& b_flat_tensor_view = [&]() {
-            return make_naive_tensor_view<address_space_enum::global>(
-                b_flat_ptr,
-                make_tuple(kFlatN, kFlatK),
-                make_tuple(kFlatK, 1),
-                number<FlatmmPipeline::GetVectorSizeB()>{},
-                number<1>{});
+        constexpr index_t kKPerBlock    = FlatmmPipeline::kKPerBlock;
+        constexpr index_t kNWaprTile    = BlockGemmShape::WarpTile::at(I1);
+        constexpr index_t flatKPerBlock = kKPerBlock * kNWaprTile;
+        const index_t kFlatKBlocks      = kargs.K / kKPerBlock;
+        const index_t kFlatN            = kargs.N / kNWaprTile;
+        const auto& b_flat_tensor_view  = [&]() {
+            static_assert(flatKPerBlock % FlatmmPipeline::GetVectorSizeB() == 0,
+                          "wrong! vector size for B tensor");
+            auto&& naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(kFlatN, kFlatKBlocks, number<flatKPerBlock>{}));
+            auto&& desc = transform_tensor_descriptor(
+                naive_desc,
+                make_tuple(make_pass_through_transform(kFlatN),
+                           make_merge_transform_v3_division_mod(
+                               make_tuple(kFlatKBlocks, number<flatKPerBlock>{}))),
+                make_tuple(sequence<0>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+            return make_tensor_view<address_space_enum::global>(b_flat_ptr, desc);
         }();
 
         const auto& ds_tensor_view = generate_tuple(
@@ -341,7 +349,9 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                                         {0, i_m});
             }
         }();
-
+        // printf("flatNPerWarp: %d, flatKPerWarp: %d\n",
+        //    FlatmmPipeline::flatNPerWarp,
+        //    FlatmmPipeline::flatKPerWarp);
         const auto& b_flat_block_window =
             make_tile_window(b_flat_pad_view,
                              make_tuple(number<FlatmmPipeline::flatNPerWarp>{},
@@ -488,7 +498,7 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             // allocate LDS
             __shared__ char smem_ptr_ping[Underlying::GetSmemPingSize()];
             __shared__ char smem_ptr_pong[Underlying::GetSmemPongSize()];
-            CK_PRINT<Underlying::GetSmemPingSize(), Underlying::GetSmemPongSize()>();
+            // CK_PRINT<Underlying::GetSmemPingSize(), Underlying::GetSmemPongSize()>();
 
             if constexpr(!(EpiloguePipeline::MemoryOperation == memory_operation_enum::atomic_add &&
                            EpiloguePipeline::GetVectorSizeC() % 2 != 0 &&

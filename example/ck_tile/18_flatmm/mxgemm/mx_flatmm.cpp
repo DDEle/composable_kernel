@@ -94,7 +94,7 @@ float invoke_mx_flatmm(ck_tile::DeviceMem& a_dev_buf,
     const bool has_hot_loop            = BaseGemmPipeline::BlockHasHotloop(num_loop);
     const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
 
-    float ave_time = BaseGemmPipeline::TailHandler(
+    float ave_time = BaseGemmPipeline::template TailHandler<true>(
         [&](auto has_hot_loop_, auto tail_num_) {
             constexpr auto has_hot_loop_v = has_hot_loop_.value;
             constexpr auto tail_num_v     = tail_num_.value;
@@ -290,11 +290,12 @@ int run_mx_flatmm_example(int argc, char* argv[])
             }
             else
             {
-                return run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
-                                                  ck_tile::pk_fp4_t,
-                                                  ck_tile::fp16_t,
-                                                  FlatmmConfig,
-                                                  true>(argc, argv, Row{}, Col{}, Row{});
+                throw std::runtime_error("Only support non-persistent kernel now!");
+                // return run_mx_flatmm_with_layouts<ck_tile::pk_fp4_t,
+                //                                   ck_tile::pk_fp4_t,
+                //                                   ck_tile::fp16_t,
+                //                                   FlatmmConfig,
+                //                                   true>(argc, argv, Row{}, Col{}, Row{});
             }
         }
         else if(mx_prec == "fp6xfp6")

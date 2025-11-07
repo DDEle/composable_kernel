@@ -151,17 +151,14 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t WaveRepeat = WaveNum / TileShape::flatNPerWarp;
 
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<WaveRepeat>,
-                tuple<sequence<NWavePerBlk, NXdlPack>,
-                      sequence<KWavePerBlk, KThdPerWave, KBPerLoad>>, // first  direction
-                // wave in blk,     // thd in wave
-                // <M, K>           // <M, K>
-                tuple<sequence<0, 1, 2>, sequence<2>>, // which direction
-                tuple<sequence<0, 0, 0>, sequence<1>>, // which index
-                // <repeat, vec_load>
-                sequence<2>,
-                sequence<2>>{});
+            tile_distribution_encoding<sequence<WaveRepeat>,
+                                       tuple<sequence<NWavePerBlk, NXdlPack>,                // 4 2
+                                             sequence<KWavePerBlk, KThdPerWave, KBPerLoad>>, // 1 64
+                                                                                             // 32
+                                       tuple<sequence<0, 1, 2>, sequence<2>>,
+                                       tuple<sequence<0, 0, 0>, sequence<1>>,
+                                       sequence<2>,
+                                       sequence<2>>{});
     }
 
     template <typename Problem>
