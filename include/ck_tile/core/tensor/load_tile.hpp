@@ -39,6 +39,19 @@ CK_TILE_DEVICE auto load_tile(const TileWindow_& tile_window,
     return tile_window.load(number<i_access>{}, bool_constant<oob_conditional_check>{});
 }
 
+template <typename TileWindow_,
+          index_t i_access = -1,
+          typename offset_t,
+          bool oob_conditional_check = true>
+CK_TILE_DEVICE auto load_tile_with_offset(const TileWindow_& tile_window,
+                                          offset_t offset,
+                                          number<i_access>                     = {},
+                                          bool_constant<oob_conditional_check> = {})
+{
+    return tile_window.load_with_offset(
+        offset, number<i_access>{}, bool_constant<oob_conditional_check>{});
+}
+
 /**
  * @brief Load tile with elementwise function
  *
@@ -67,11 +80,12 @@ template <typename DistributedTensor_,
           typename TileWindow_,
           index_t i_access           = -1,
           bool oob_conditional_check = true,
+          typename offset_t,
           typename = std::enable_if_t<std::is_class_v<std::remove_cv_t<DistributedTensor_>> &&
                                       std::is_class_v<TileWindow_>>>
 CK_TILE_DEVICE auto load_tile_with_offset(DistributedTensor_& dst_tile,
                                           const TileWindow_& tile_window,
-                                          index_t offset,
+                                          offset_t offset,
                                           number<i_access>                     = {},
                                           bool_constant<oob_conditional_check> = {})
 {
