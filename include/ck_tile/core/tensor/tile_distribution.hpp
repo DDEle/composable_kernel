@@ -17,7 +17,7 @@
 
 namespace ck_tile {
 
-template <typename Distribution>
+template <typename Distribution, bool FirstLaneOnly = false>
 CK_TILE_HOST_DEVICE auto get_partition_index(Distribution)
 {
     return Distribution::get_partition_index();
@@ -89,19 +89,22 @@ struct tile_distribution
     CK_TILE_HOST_DEVICE static constexpr index_t get_num_of_dimension_p() { return NDimP; }
     CK_TILE_HOST_DEVICE static constexpr index_t get_num_of_dimension_r() { return NDimR; }
 
+    template <bool FirstLaneOnly = false>
     CK_TILE_HOST_DEVICE static auto get_partition_index()
     {
         // only support warp-tile and block-tile
         static_assert(NDimP == 1 or NDimP == 2, "wrong!");
 
-        if constexpr(NDimP == 1)
-        {
+        if constexpr(NDimP == 1 && FirstLaneOnly)
+            return array<index_t, 1>{0};
+        else if constexpr(NDimP == 1)
             return array<index_t, 1>{get_lane_id()};
-        }
+        else if constexpr(NDimP == 2 && FirstLaneOnly)
+            return array<index_t, 2>{get_warp_id(), 0};
         else if constexpr(NDimP == 2)
-        {
             return array<index_t, 2>{get_warp_id(), get_lane_id()};
-        }
+        else // should not be here
+            static_assert(false, "wrong!");
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto get_lengths()
