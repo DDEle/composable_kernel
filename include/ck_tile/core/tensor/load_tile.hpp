@@ -26,6 +26,18 @@ CK_TILE_DEVICE auto load_tile(const TileWindow_& tile_window,
     return tile_window.load(number<i_access>{}, bool_constant<oob_conditional_check>{});
 }
 
+template <typename TileWindow_,
+          typename Offset,
+          index_t i_access           = -1,
+          bool oob_conditional_check = true>
+CK_TILE_DEVICE auto load_tile_with_offset(const TileWindow_& tile_window,
+                                          Offset,
+                                          number<i_access>                     = {},
+                                          bool_constant<oob_conditional_check> = {})
+{
+    return tile_window.load(number<i_access>{}, bool_constant<oob_conditional_check>{}, Offset{});
+}
+
 /**
  * @brief Load tile with elementwise function
  *

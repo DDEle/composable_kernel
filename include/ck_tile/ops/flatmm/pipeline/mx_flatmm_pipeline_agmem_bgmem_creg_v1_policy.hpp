@@ -13,21 +13,56 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     static constexpr auto I1 = number<1>{};
     static constexpr auto I2 = number<2>{};
 
-    static constexpr index_t KBPerLoad = 32;
+    static constexpr index_t KBPerLoad          = 32;
+    static constexpr index_t kDramLoadPackBytes = 128;
 
     static constexpr int MXdlPack = 2;
     static constexpr int NXdlPack = 2;
     static constexpr int KXdlPack = 2;
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeMXFP4_ALdsBlockDescriptor()
+    CK_TILE_DEVICE static constexpr auto MakeMXFP4_ADramTileDistribution()
     {
-        using namespace ck_tile;
 
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+        using ALayout   = remove_cvref_t<typename Problem::ALayout>;
+        static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>);
+
+        constexpr index_t BlockSize   = Problem::kBlockSize;
+        constexpr index_t MPerBlock   = Problem::BlockGemmShape::kM;
+        constexpr index_t KPerBlock   = Problem::BlockGemmShape::kK;
+        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+        constexpr index_t KPerXdl     = Problem::BlockGemmShape::WarpTile::at(I2);
+
+        constexpr index_t K2 = Problem::VectorLoadSize / sizeof(ADataType) * APackedSize; // 32
+        constexpr index_t K1 = KPerXdl / K2; // 128/32=4
+        constexpr index_t K0 = KPerBlock / KPerXdl;
+        static_assert(K0 == KXdlPack, "K0 must equal to KXdlPack!");
+
+        constexpr index_t M2 = get_warp_size() / K0 / K1;
+        constexpr index_t M1 = BlockSize / get_warp_size();
+        constexpr index_t M0 = MPerBlock / (M2 * M1);
+        static_assert(M0 * M1 * M2 == MPerBlock, "M0, M1, M2 must cover whole MPerBlock!");
+        static_assert(K0 * K1 * K2 == KPerBlock, "K0, K1, K2 must cover whole KPerBlock!");
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<1>,
+                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1, K2>>, // 1,4,8
+                                                                                          // 2,4,32
+                                       tuple<sequence<1>, sequence<2, 1, 2>>, // M1  K0,M2,K1
+                                       tuple<sequence<1>, sequence<0, 2, 1>>,
+                                       sequence<1, 2>, // M0,K2
+                                       sequence<0, 2>>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeMXFP4_ALdsBlockDescriptor()
+    {
         using ADataType           = remove_cvref_t<typename Problem::ADataType>;
         using ALayout             = remove_cvref_t<typename Problem::ALayout>;
         constexpr index_t MPerXdl = Problem::BlockGemmShape::WarpTile::at(I0);
         constexpr index_t NPerXdl = Problem::BlockGemmShape::WarpTile::at(I1);
+        constexpr index_t KPerXdl = Problem::BlockGemmShape::WarpTile::at(I2);
 
         static_assert(MPerXdl == 16 && NPerXdl == 16);
         static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>);
@@ -36,63 +71,39 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t MPerBlock   = Problem::BlockGemmShape::kM;
         constexpr index_t KPerBlock   = Problem::BlockGemmShape::kK;
         constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
-        constexpr index_t KPack       = GetSmemPackA<Problem>() * APackedSize;
+        constexpr index_t KPack       = GetSmemPackA<Problem>() * APackedSize; // 32
+        constexpr index_t K2          = KPerXdl;                               // 128
+        constexpr index_t K1          = kDramLoadPackBytes * APackedSize / K2; // 2
+        constexpr index_t K0          = KPerBlock / (K1 * K2);                 // KPerBlock/256
+        constexpr index_t M2          = get_warp_size() / (KPerBlock / KPack); // 64/(256/32) = 8
+        constexpr index_t M1          = MPerXdl / M2;                          // 2
+        constexpr index_t M0          = MPerBlock / (M1 * M2);                 // MPerBlock/16
+        constexpr index_t Pad         = K1 * KPack;                            // 2 * 32
+        static_assert(M0 * M1 * M2 == MPerBlock, "M0, M1, M2 must cover whole MPerBlock!");
+        static_assert(K0 * K1 * K2 == KPerBlock, "K0, K1, K2 must cover whole KPerBlock!");
 
-        constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
-            make_tuple(number<KPerBlock / KPack>{}, number<MPerBlock>{}, number<KPack>{}),
-            make_tuple(number<KPack>{}, number<KPerBlock>{}, number<1>{}),
+        constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor( //
+            make_tuple(
+                number<M0>{}, number<K0>{}, number<M1>{}, number<K1>{}, number<M2>{}, number<K2>{}),
+            make_tuple(number<K0 * M1*(K1 * M2 * K2 + Pad)>{},
+                       number<M1*(K1 * M2 * K2 + Pad)>{},
+                       number<K1 * M2 * K2 + Pad>{},
+                       number<M2 * K2>{},
+                       number<K2>{},
+                       number<1>{}),
             number<KPack>{},
             number<1>{});
-
-        constexpr auto a_lds_block_desc_permuted = transform_tensor_descriptor(
+        constexpr auto a_lds_block_desc   = transform_tensor_descriptor(
             a_lds_block_desc_0,
-            make_tuple(
-                make_xor_transform(make_tuple(number<MPerBlock>{}, number<KPerBlock / KPack>{})),
-                make_pass_through_transform(number<KPack>{})),
-            make_tuple(sequence<1, 0>{}, sequence<2>{}),
-            make_tuple(sequence<1, 0>{}, sequence<2>{}));
-
-        constexpr auto a_lds_block_desc = transform_tensor_descriptor(
-            a_lds_block_desc_permuted,
-            make_tuple(make_pass_through_transform(number<MPerBlock>{}),
+            make_tuple(make_merge_transform_v3_division_mod(
+                           make_tuple(number<M0>{}, number<M1>{}, number<M2>{})),
                        make_merge_transform_v3_division_mod(
-                           make_tuple(number<KPerBlock / KPack>{}, number<KPack>{}))),
-            make_tuple(sequence<1>{}, sequence<0, 2>{}),
+                           make_tuple(number<K0>{}, number<K1>{}, number<K2>{}))),
+            make_tuple(sequence<0, 2, 4>{}, sequence<1, 3, 5>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
 
         // return a_lds_block_desc_permuted;
         return a_lds_block_desc;
-    }
-
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeMXFP4_ADramTileDistribution()
-    {
-        using ADataType = remove_cvref_t<typename Problem::ADataType>;
-
-        constexpr index_t BlockSize = Problem::kBlockSize;
-
-        constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
-        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-
-        constexpr index_t K1 = Problem::VectorLoadSize / sizeof(ADataType);
-        constexpr index_t K0 = KPerBlock / K1;
-        constexpr index_t M2 = get_warp_size() / K0;
-
-        constexpr index_t M1 = BlockSize / get_warp_size();
-        static_assert(M2 != 0, "M2 is zero, which will lead to a division by zero error.");
-        static_assert(M1 != 0, "M1 is zero, which will lead to a division by zero error.");
-        constexpr index_t M0 = MPerBlock / (M2 * M1);
-        static_assert(M0 * M1 * M2 == MPerBlock,
-                      "Incorrect M0, M2, M1 configuration! "
-                      "M0, M1, M2 must cover whole MPerBlock!");
-
-        return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<1>,
-                                       tuple<sequence<M0, M1, M2>, sequence<K0, K1>>,
-                                       tuple<sequence<1>, sequence<1, 2>>,
-                                       tuple<sequence<1>, sequence<2, 0>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 1>>{});
     }
 
     template <typename Problem>
@@ -140,17 +151,14 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t WaveRepeat = WaveNum / TileShape::flatNPerWarp;
 
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<WaveRepeat>,
-                tuple<sequence<NWavePerBlk, NXdlPack>,
-                      sequence<KWavePerBlk, KThdPerWave, KBPerLoad>>, // first  direction
-                // wave in blk,     // thd in wave
-                // <M, K>           // <M, K>
-                tuple<sequence<0, 1, 2>, sequence<2>>, // which direction
-                tuple<sequence<0, 0, 0>, sequence<1>>, // which index
-                // <repeat, vec_load>
-                sequence<2>,
-                sequence<2>>{});
+            tile_distribution_encoding<sequence<WaveRepeat>,
+                                       tuple<sequence<NWavePerBlk, NXdlPack>,                // 4 2
+                                             sequence<KWavePerBlk, KThdPerWave, KBPerLoad>>, // 1 64
+                                                                                             // 32
+                                       tuple<sequence<0, 1, 2>, sequence<2>>,
+                                       tuple<sequence<0, 0, 0>, sequence<1>>,
+                                       sequence<2>,
+                                       sequence<2>>{});
     }
 
     template <typename Problem>
@@ -269,6 +277,21 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                                        // <repeat, vec_load>
                                        sequence<2>,
                                        sequence<1>>{});
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeA()
+    {
+        using ADataType               = remove_cvref_t<typename Problem::ADataType>;
+        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+        return sizeof(typename Problem::ADataType) *
+               MakeMXFP4_ALdsBlockDescriptor<Problem>().get_element_space_size() / APackedSize;
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    {
+        return GetSmemSizeA<Problem>();
     }
 };
 

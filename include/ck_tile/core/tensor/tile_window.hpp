@@ -110,13 +110,21 @@ struct tile_window_with_static_distribution
         });
     }
 
-    template <index_t i_access_unsupport_ = -1, bool oob_conditional_check = true>
+    using ZeroBottomTensorOffset_ = tuple_array<number<0>, Base::NDimBottomTensor>;
+
+    template <index_t i_access_unsupport_ = -1,
+              bool oob_conditional_check  = true,
+              typename BottomTensorOffset = ZeroBottomTensorOffset_>
     CK_TILE_DEVICE auto load(number<i_access_unsupport_>          = {},
-                             bool_constant<oob_conditional_check> = {}) const
+                             bool_constant<oob_conditional_check> = {},
+                             BottomTensorOffset                   = {}) const
     {
         constexpr auto tile_dstr = typename Base::TileDstr{};
         auto dst_tensor = make_static_distributed_tensor<typename Base::DataType>(tile_dstr);
-        load(dst_tensor, number<i_access_unsupport_>{}, bool_constant<oob_conditional_check>{});
+        load(dst_tensor,
+             number<i_access_unsupport_>{},
+             bool_constant<oob_conditional_check>{},
+             BottomTensorOffset{});
         return dst_tensor;
     }
 
@@ -134,10 +142,11 @@ struct tile_window_with_static_distribution
               typename ElementWise_,
               index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true>
-    CK_TILE_DEVICE auto load(const TileWindow_& tile_window,
-                             ElementWise_ elementwise,
-                             number<i_access_unsupport_>          = {},
-                             bool_constant<oob_conditional_check> = {}) const
+    CK_TILE_DEVICE auto
+    load(const TileWindow_& tile_window,
+         std::enable_if_t<!is_constant_v<ElementWise_>, ElementWise_> elementwise,
+         number<i_access_unsupport_>          = {},
+         bool_constant<oob_conditional_check> = {}) const
     {
         constexpr auto tile_dstr = typename Base::TileDstr{};
         auto dst_tensor = make_static_distributed_tensor<typename Base::DataType>(tile_dstr);
@@ -149,6 +158,7 @@ struct tile_window_with_static_distribution
         return dst_tensor;
     }
 
+#if 0
     template <typename DistributedTensor,
               typename TileWindow_,
               typename ElementWise_,
@@ -229,13 +239,16 @@ struct tile_window_with_static_distribution
             });
         });
     }
+#endif
 
     template <typename DistributedTensor,
               index_t i_access_unsupport_ = -1,
-              bool oob_conditional_check  = true>
+              bool oob_conditional_check  = true,
+              typename BottomTensorOffset = ZeroBottomTensorOffset_>
     CK_TILE_DEVICE auto load(DistributedTensor& dst_tensor,
                              number<i_access_unsupport_>          = {},
-                             bool_constant<oob_conditional_check> = {}) const
+                             bool_constant<oob_conditional_check> = {},
+                             BottomTensorOffset                   = {}) const
     {
         using Traits   = typename Base::Traits;
         using vector_t = typename Traits::vector_t;
@@ -243,6 +256,20 @@ struct tile_window_with_static_distribution
 
         constexpr auto tile_dstr = typename Base::TileDstr{};
 
+        const index_t linear_off = [&]() {
+            if constexpr(std::is_integral_v<BottomTensorOffset> ||
+                         is_constant_v<BottomTensorOffset>)
+            {
+                return BottomTensorOffset::value;
+            }
+            else
+            {
+                auto bottom_tensor_idx_off   = to_multi_index(BottomTensorOffset{});
+                auto bottom_tensor_coord_off = make_tensor_coordinate(
+                    this->bottom_tensor_view_.get_tensor_descriptor(), bottom_tensor_idx_off);
+                return bottom_tensor_coord_off.get_offset();
+            }
+        }();
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
@@ -258,7 +285,9 @@ struct tile_window_with_static_distribution
                 // read from bottom tensor
                 const vector_t vec_value =
                     this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
-                        bottom_tensor_thread_coord, 0, bool_constant<oob_conditional_check>{});
+                        bottom_tensor_thread_coord,
+                        linear_off,
+                        bool_constant<oob_conditional_check>{});
                 // write into distributed tensor
                 static_for<0, Traits::ScalarPerVector, Traits::PackedSize>{}([&](auto j) {
                     constexpr auto idx_ys = generate_tuple(
@@ -463,30 +492,39 @@ struct tile_window_with_static_distribution
         using SFC_Ys   = typename Traits::SFC_Ys;
 
         // Precompute invariant values outside loops
-        const auto window_origin       = lds_tile.get_window_origin();
         const auto& bottom_tensor_view = lds_tile.get_bottom_tensor_view();
-        const auto& tensor_descriptor  = bottom_tensor_view.get_tensor_descriptor();
-        auto smem_base_ptr             = bottom_tensor_view.get_buffer_view().p_data_;
+        const auto& smem_descriptor    = bottom_tensor_view.get_tensor_descriptor();
+        const auto& smem_base_ptr      = bottom_tensor_view.get_buffer_view().p_data_;
+        const auto smem_warp_idx       = [&]() {
+            const auto& lds_origin      = lds_tile.get_window_origin();
+            const auto lds_coord_offset = make_tensor_adaptor_coordinate(
+                StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
+                container_concat(detail::get_partition_index<StaticTileDistribution_, true>({}),
+                                 array<index_t, Base::NDimY>{0}));
+            const auto lds_idx   = lds_origin + lds_coord_offset.get_bottom_index();
+            const auto lds_coord = make_tensor_coordinate(smem_descriptor, lds_idx);
+            return lds_coord.get_offset() / Traits::PackedSize;
+        }();
 
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
             auto bottom_tensor_thread_coord  = pre_computed_coords_[iCoord][I1];
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
-                constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
-
-                // Use precomputed window origin
-                auto lds_bottom_tensor_thread_idx =
-                    window_origin + window_adaptor_thread_coord.get_bottom_index();
-
-                // Use precomputed tensor descriptor
-                const auto lds_coord =
-                    make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
+                constexpr auto iAccess    = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+                constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                constexpr auto smem_adapter_ys_offset = make_tensor_adaptor_coordinate(
+                    StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
+                    container_concat(array<index_t, Base::NDimP>{},
+                                     to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
+                constexpr auto smem_idx_ys_offset = smem_adapter_ys_offset.get_bottom_index();
+                const auto smem_coord_ys_offset =
+                    make_tensor_coordinate(smem_descriptor, smem_idx_ys_offset);
+                const auto smem_ys_offset = smem_coord_ys_offset.get_offset() / Traits::PackedSize;
 
                 // Calculate SMEM address using base pointer
-                CK_TILE_LDS_ADDR LdsDataType* smem = smem_base_ptr + lds_coord.get_offset();
-
-                // Write into bottom tensor
+                CK_TILE_LDS_ADDR LdsDataType* smem =
+                    smem_base_ptr + __builtin_amdgcn_readfirstlane(smem_warp_idx + smem_ys_offset);
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                     smem,
                     bottom_tensor_thread_coord,
