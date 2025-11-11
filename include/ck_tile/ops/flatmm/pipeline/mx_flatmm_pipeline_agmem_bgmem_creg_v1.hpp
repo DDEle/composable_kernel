@@ -507,7 +507,8 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
         auto a_dram_window =
-            make_tile_window(a_copy_dram_window_tmp.get_bottom_tensor_view(),
+            make_tile_window(PipelinePolicy::template MakeMXFP4_AAsyncLoadDramDescriptor<Problem>(
+                                 a_copy_dram_window_tmp.get_bottom_tensor_view()),
                              a_copy_dram_window_tmp.get_window_lengths(),
                              a_copy_dram_window_tmp.get_window_origin(),
                              PipelinePolicy::template MakeMXFP4_ADramTileDistribution<Problem>());
@@ -658,9 +659,11 @@ struct MXF4FlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Probl
         __builtin_amdgcn_sched_barrier(0);
 
         // Prefetch A1
-        async_load_tile(a_store_lds_window_pong, a_dram_window);
-        move_tile_window(a_dram_window, {0, kKPerBlock});
-
+        if constexpr(HasHotLoop || TailNum == TailNumber::Even)
+        {
+            async_load_tile(a_store_lds_window_pong, a_dram_window);
+            move_tile_window(a_dram_window, {0, kKPerBlock});
+        }
         // initialize C
         clear_tile(c_block_tile);
 
