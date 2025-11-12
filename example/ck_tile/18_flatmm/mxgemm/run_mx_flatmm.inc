@@ -85,13 +85,22 @@ int run_mx_flatmm_with_layouts(int argc,
         ck_tile::FillUniformDistribution<ScaleType>{1.f, 1.f}(scale_b);
 #endif
         ck_tile::FillUniformDistribution<ADataType>{1.f, 1.f}(a_host);
-        a_host.ForEach([](auto& self, auto idx) {
-            float v = idx[0] % 3;
-            // if(idx[1] % 4 == 0)
-            self(idx) = ck_tile::type_convert<ADataType>(ck_tile::fp32x2_t{v, v});
-        });
-
         ck_tile::FillUniformDistribution<BDataType>{1.f, 1.f}(b_origin_host);
+        // ck_tile::FillUniformDistribution<ADataType>{0.0f, 1.0f}(a_host);
+        // ck_tile::FillUniformDistribution<BDataType>{-.5f, .5f}(b_origin_host);
+#if 1
+        a_host.ForEach([](auto& self, auto idx) {
+            float v = idx[1] % 3;
+            // if(idx[1] % 4 == 0)
+            self(idx) = ck_tile::type_convert<ADataType>(float{v});
+        });
+#endif
+#if 1
+        b_origin_host.ForEach([](auto& self, auto idx) {
+            float v   = idx[0] % 3;
+            self(idx) = ck_tile::type_convert<BDataType>(float{v});
+        });
+#endif
 
         ck_tile::FillUniformDistribution<ScaleType>{1.f, 1.f}(scale_a);
         ck_tile::FillUniformDistribution<ScaleType>{1.f, 1.f}(scale_b);
