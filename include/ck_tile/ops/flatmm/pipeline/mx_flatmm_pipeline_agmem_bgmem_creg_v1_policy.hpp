@@ -20,6 +20,43 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     static constexpr int NXdlPack = 2;
     static constexpr int KXdlPack = 2;
 
+    template <typename Problem>
+    static inline constexpr auto wg_attr_num_access =
+        std::is_same_v<remove_cvref_t<typename Problem::ADataType>, pk_fp4_t>
+            ? WGAttrNumAccessEnum::Single
+            : WGAttrNumAccessEnum::Double;
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetBlockFlatmm()
+    {
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType = remove_cvref_t<typename Problem::BDataType>;
+        static_assert(
+            sizeof(ADataType) * numeric_traits<BDataType>::PackedSize ==
+                sizeof(BDataType) * numeric_traits<ADataType>::PackedSize,
+            "sizeof(ADataType) / APackedSize must be equal to sizeof(BDataType) / BPackedSize!");
+        using BlockWarps        = typename Problem::BlockGemmShape::BlockWarps;
+        using WarpTile          = typename Problem::BlockGemmShape::WarpTile;
+        using WarpGemm          = WarpGemmDispatcher< //
+            ADataType,
+            BDataType,
+            typename Problem::CDataType,
+            WarpTile::at(I0),
+            WarpTile::at(I1),
+            WarpTile::at(I2),
+            Problem::TransposeC,
+            false,
+            false,
+            wg_attr_num_access<Problem>>;
+        using BlockFlatmmPolicy = BlockFlatmmASmemBSmemCRegV1CustomPolicy< //
+            ADataType,
+            BDataType,
+            typename Problem::CDataType,
+            BlockWarps,
+            WarpGemm>;
+        return BlockFlatmmASmemBSmemCRegV1<Problem, BlockFlatmmPolicy>{};
+    }
+
     template <typename Problem, typename TensorView>
     CK_TILE_DEVICE static constexpr auto
     MakeMXFP4_AAsyncLoadDramDescriptor(const TensorView& naive_view)
