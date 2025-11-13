@@ -287,7 +287,7 @@ int run_mx_flatmm_example(int argc, char* argv[])
                                                   FlatmmConfig,
                                                   false>(argc, argv, Row{}, Col{}, Row{});
             else
-                throw std::runtime_error("Only support non-persistent kernel now!");
+                throw std::runtime_error("Only non-persistent kernels are supported currently!");
         }
         else if(mx_prec == "fp6xfp6")
         {

@@ -8,6 +8,7 @@ function(mx_flatmm_instance_generate FILE_LIST)
     set(C_LAYOUT ROW)
 
     # foreach(PERSISTENT false true)
+    # TODO: Persistent kernels are disabled due to compilation failures with some LLVM versions.  
     foreach(PERSISTENT false)
         foreach(SPLIT_K false true)
             foreach(HAS_HOT_LOOP false true)
