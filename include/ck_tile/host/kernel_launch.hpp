@@ -17,9 +17,9 @@ namespace ck_tile {
 
 template <int MinBlockPerCu, typename Kernel, typename... Args>
 #if CK_TILE_USE_LAUNCH_BOUNDS
-__launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
+__launch_bounds__(Kernel::kBlockSize, MinBlockPerCu) __attribute__((amdgpu_waves_per_eu(1, 1)))
 #endif
-    __global__ void kentry(Args... args)
+__global__ void kentry(Args... args)
 {
 #if defined(__HIP_DEVICE_COMPILE__)
     Kernel{}(args...);
@@ -30,9 +30,9 @@ __launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
 
 template <typename Arch, int MinBlockPerCu, typename Kernel, typename... Args>
 #if CK_TILE_USE_LAUNCH_BOUNDS
-__launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
+__launch_bounds__(Kernel::kBlockSize, MinBlockPerCu) __attribute__((amdgpu_waves_per_eu(1, 1)))
 #endif
-    __global__ void kentry(Args... args)
+__global__ void kentry(Args... args)
 {
 #if defined(__HIP_DEVICE_COMPILE__)
     Kernel{}(args...);

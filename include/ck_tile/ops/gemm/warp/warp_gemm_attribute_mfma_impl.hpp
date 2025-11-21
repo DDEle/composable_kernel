@@ -13,12 +13,13 @@ namespace ck_tile {
 // because we swap the A/B pointer in _impl code (but not known this info here)
 enum class WGAttrCtlEnum
 {
-    Default_ = 0,
-    Raw_vvv  = 1, // c-vgpr, a-vgpr, b-vgpr
-    Raw_vaa  = 2, // c-vgpr, a-agpr, b-agpr
-    Raw_vav  = 3, // c-vgpr, a-agpr, b-vgpr
-    Raw_vva  = 4, // c-vgpr, a-vgpr, b-agpr
-    Raw_avv  = 5, // c-agpr, a-vgpr, b-vgpr
+    Default_     = 0,
+    Raw_vvv      = 1, // c-vgpr, a-vgpr, b-vgpr
+    Raw_vaa      = 2, // c-vgpr, a-agpr, b-agpr
+    Raw_vav      = 3, // c-vgpr, a-agpr, b-vgpr
+    Raw_vva      = 4, // c-vgpr, a-vgpr, b-agpr
+    Raw_avv      = 5, // c-agpr, a-vgpr, b-vgpr
+    Raw_accu_avv = 5, // c=d-agpr, a-vgpr, b-vgpr
     // raw_a_a_a = 3,  // c-agpr, a-agpr, b-agpr
 };
 
@@ -39,27 +40,19 @@ enum class WGAttrCtlEnum
                      :);                                        \
     }
 
-#define DISPATCH_MFMA_CTRL_(mfma_, ctrl_)              \
-    if constexpr(ctrl_ == WGAttrCtlEnum::Raw_vvv)      \
-    {                                                  \
-        DISPATCH_MFMA_(mfma_, "+v", "v", "v", "v")     \
-    }                                                  \
-    else if constexpr(ctrl_ == WGAttrCtlEnum::Raw_vaa) \
-    {                                                  \
-        DISPATCH_MFMA_(mfma_, "+v", "a", "a", "v")     \
-    }                                                  \
-    else if constexpr(ctrl_ == WGAttrCtlEnum::Raw_vav) \
-    {                                                  \
-        DISPATCH_MFMA_(mfma_, "+v", "a", "v", "v")     \
-    }                                                  \
-    else if constexpr(ctrl_ == WGAttrCtlEnum::Raw_vva) \
-    {                                                  \
-        DISPATCH_MFMA_(mfma_, "+v", "v", "a", "v")     \
-    }                                                  \
-    else if constexpr(ctrl_ == WGAttrCtlEnum::Raw_avv) \
-    {                                                  \
-        DISPATCH_MFMA_(mfma_, "+a", "v", "v", "a")     \
-    }
+#define DISPATCH_MFMA_CTRL_(mfma_, ctrl_)               \
+    if constexpr(ctrl_ == WGAttrCtlEnum::Raw_vvv)       \
+        DISPATCH_MFMA_(mfma_, "+v", "v", "v", "v")      \
+    else if constexpr(ctrl_ == WGAttrCtlEnum::Raw_vaa)  \
+        DISPATCH_MFMA_(mfma_, "+v", "a", "a", "v")      \
+    else if constexpr(ctrl_ == WGAttrCtlEnum::Raw_vav)  \
+        DISPATCH_MFMA_(mfma_, "+v", "a", "v", "v")      \
+    else if constexpr(ctrl_ == WGAttrCtlEnum::Raw_vva)  \
+        DISPATCH_MFMA_(mfma_, "+v", "v", "a", "v")      \
+    else if constexpr(ctrl_ == WGAttrCtlEnum::Raw_avv)  \
+        DISPATCH_MFMA_(mfma_, "+a", "v", "v", "a")      \
+    else if constexpr(ctrl_ != WGAttrCtlEnum::Default_) \
+        static_assert(false, "Unsupported WGAttrCtlEnum!");
 
 // F32
 template <WGAttrCtlEnum Ctrl_ = WGAttrCtlEnum::Default_>
@@ -1592,10 +1585,33 @@ struct WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4
 
         auto arg_a         = bit_cast<decltype(dtype2vec(ADataType{}))>(a_vec);
         auto arg_b         = bit_cast<decltype(dtype2vec(BDataType{}))>(b_vec);
+        auto&& a256_a      = arg256(arg_a);
+        auto&& a256_b      = arg256(arg_b);
         constexpr int cbsz = decltype(dtype2code(ADataType{}))::value;
         constexpr int blgp = decltype(dtype2code(BDataType{}))::value;
-        c_vec              = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
-            arg256(arg_a), arg256(arg_b), c_vec, cbsz, blgp, opselA, a_scale, opselB, b_scale);
+        // __builtin_amdgcn_sched_barrier(0);
+        // __builtin_amdgcn_s_waitcnt(0);
+        if constexpr(Ctrl == WGAttrCtlEnum::Raw_accu_avv || 1)
+            asm volatile("v_mfma_scale_f32_16x16x128_f8f6f4 %0, %1, %2, %0, %3, %4 "
+                         "op_sel:[%5,%6,0] op_sel_hi:[%7,%8,0] cbsz:%9 blgp:%10\n"
+                         "        s_nop 7"
+                         : "+a"(c_vec)
+                         : "v"(*reinterpret_cast<const decltype(dtype2vec(ADataType{}))*>(&a_vec)),
+                           "v"(*reinterpret_cast<const decltype(dtype2vec(BDataType{}))*>(&b_vec)),
+                           "v"(a_scale),
+                           "v"(b_scale),
+                           "i"(opselA % 2),
+                           "i"(opselB % 2),
+                           "i"(opselA / 2),
+                           "i"(opselB / 2),
+                           "i"(cbsz),
+                           "i"(blgp)
+                         :);
+        else if constexpr(Ctrl == WGAttrCtlEnum::Default_)
+            c_vec = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
+                a256_a, a256_b, c_vec, cbsz, blgp, opselA, a_scale, opselB, b_scale);
+        // __builtin_amdgcn_s_waitcnt(0);
+        // __builtin_amdgcn_sched_barrier(0);
 #else
         ck_tile::ignore = c_vec;
         ck_tile::ignore = a_vec;
