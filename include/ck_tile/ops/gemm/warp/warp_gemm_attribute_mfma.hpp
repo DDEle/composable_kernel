@@ -44,7 +44,7 @@ struct WarpGemmAttributeMfma
     static_assert(Impl::kAMBlock == 1 && Impl::kBNBlock == 1,
                   "Multi-block WarpGemmAttributeMfmaImpl is not supported");
 
-    template <index_t kMNLane>
+    template <index_t kMNLane, index_t PackedSize>
     static constexpr auto get_warp_dstr_encoding()
     {
         static_assert(kKPerThread % AttrNumAccessV == 0,
@@ -52,7 +52,7 @@ struct WarpGemmAttributeMfma
         if constexpr(AttrNumAccessV == 1)
             return tile_distribution_encoding<
                 sequence<>,
-                tuple<sequence<kMNLane>, sequence<Impl::kABKLane, Impl::kABKPerLane>>,
+                tuple<sequence<kMNLane>, sequence<Impl::kABKLane, Impl::kABKPerLane / PackedSize>>,
                 tuple<sequence<2, 1>>,
                 tuple<sequence<0, 0>>,
                 sequence<2>,
@@ -61,14 +61,18 @@ struct WarpGemmAttributeMfma
             return tile_distribution_encoding<
                 sequence<>,
                 tuple<sequence<kMNLane>,
-                      sequence<AttrNumAccessV, Impl::kABKLane, Impl::kABKPerLane / AttrNumAccessV>>,
+                      sequence<AttrNumAccessV,
+                               Impl::kABKLane,
+                               Impl::kABKPerLane / AttrNumAccessV / PackedSize>>,
                 tuple<sequence<2, 1>>,
                 tuple<sequence<1, 0>>,
                 sequence<2, 2>,
                 sequence<0, 2>>{};
     }
-    using AWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kAMLane>());
-    using BWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kBNLane>());
+    using AWarpDstrEncoding =
+        decltype(get_warp_dstr_encoding<Impl::kAMLane, numeric_traits<ADataType>::PackedSize>());
+    using BWarpDstrEncoding =
+        decltype(get_warp_dstr_encoding<Impl::kBNLane, numeric_traits<BDataType>::PackedSize>());
 
     using CWarpDstrEncoding = tile_distribution_encoding<
         sequence<>,
@@ -151,7 +155,7 @@ struct WarpGemmAttributeMfmaIterateK
     static_assert(Impl::kAMBlock == 1 || Impl::kBNBlock == 1,
                   "Multi-block on both M & N directions is not supported");
 
-    template <index_t kMNLane, index_t kMNBlock, index_t kNMBlock>
+    template <index_t kMNLane, index_t kMNBlock, index_t kNMBlock, index_t PackedSize>
     CK_TILE_DEVICE static constexpr auto get_warp_dstr_encoding()
     {
         if constexpr(kMNBlock == 1 && kNMBlock == 1)
@@ -161,7 +165,8 @@ struct WarpGemmAttributeMfmaIterateK
             if constexpr(AttrNumAccessV == 1)
                 return tile_distribution_encoding<
                     sequence<>,
-                    tuple<sequence<kMNLane>, sequence<Impl::kABKLane, Impl::kABKPerLane * kKIter>>,
+                    tuple<sequence<kMNLane>,
+                          sequence<Impl::kABKLane, Impl::kABKPerLane * kKIter / PackedSize>>,
                     tuple<sequence<2, 1>>,
                     tuple<sequence<0, 0>>,
                     sequence<2>,
@@ -172,7 +177,7 @@ struct WarpGemmAttributeMfmaIterateK
                     tuple<sequence<kMNLane>,
                           sequence<AttrNumAccessV,
                                    Impl::kABKLane,
-                                   Impl::kABKPerLane * kKIter / AttrNumAccessV>>,
+                                   Impl::kABKPerLane * kKIter / AttrNumAccessV / PackedSize>>,
                     tuple<sequence<2, 1>>,
                     tuple<sequence<1, 0>>,
                     sequence<2, 2>,
@@ -186,7 +191,7 @@ struct WarpGemmAttributeMfmaIterateK
             return tile_distribution_encoding<
                 sequence<kNMBlock>,
                 tuple<sequence<Impl::kAMLane>,
-                      sequence<Impl::kABKLane, Impl::kABKPerLane * kKIter>>,
+                      sequence<Impl::kABKLane, Impl::kABKPerLane * kKIter / PackedSize>>,
                 tuple<sequence<0, 2, 1>>,
                 tuple<sequence<0, 0, 0>>,
                 sequence<2>,
@@ -200,7 +205,7 @@ struct WarpGemmAttributeMfmaIterateK
             return tile_distribution_encoding<
                 sequence<>,
                 tuple<sequence<kMNBlock, Impl::kAMLane>,
-                      sequence<Impl::kABKLane, Impl::kABKPerLane * kKIter>>,
+                      sequence<Impl::kABKLane, Impl::kABKPerLane * kKIter / PackedSize>>,
                 tuple<sequence<1, 2, 1>>,
                 tuple<sequence<0, 0, 1>>,
                 sequence<2>,
@@ -247,9 +252,15 @@ struct WarpGemmAttributeMfmaIterateK
     }
 
     using AWarpDstrEncoding =
-        decltype(get_warp_dstr_encoding<Impl::kAMLane, Impl::kAMBlock, Impl::kBNBlock>());
+        decltype(get_warp_dstr_encoding<Impl::kAMLane,
+                                        Impl::kAMBlock,
+                                        Impl::kBNBlock,
+                                        numeric_traits<ADataType>::PackedSize>());
     using BWarpDstrEncoding =
-        decltype(get_warp_dstr_encoding<Impl::kBNLane, Impl::kBNBlock, Impl::kAMBlock>());
+        decltype(get_warp_dstr_encoding<Impl::kBNLane,
+                                        Impl::kBNBlock,
+                                        Impl::kAMBlock,
+                                        numeric_traits<BDataType>::PackedSize>());
     using CWarpDstrEncoding = decltype(get_cwarp_dstr_encoding());
 
     // c_vec += a_vec * b_vec
@@ -383,6 +394,8 @@ struct WarpGemmAttributeMfmaTransposedCDistribution_SwizzleB
 
     static_assert(Impl::kAMBlock == 1 && Impl::kBNBlock == 1,
                   "Multi-block WarpGemmAttributeMfmaImpl is not supported");
+    static_assert(numeric_traits<ADataType>::PackedSize == 1,
+                  "Only supports for non-packed DataType now");
 
     using AWarpDstrEncoding = tile_distribution_encoding<
         sequence<>,
@@ -603,6 +616,8 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution_SwizzleB
 
     static_assert(Impl::kAMBlock == 1 && Impl::kBNBlock == 1,
                   "Multi-block WarpGemmAttributeMfmaImpl is not supported");
+    static_assert(numeric_traits<ADataType>::PackedSize == 1,
+                  "Only supports for non-packed DataType now");
 
     using AWarpDstrEncoding = tile_distribution_encoding<
         sequence<>,
@@ -730,6 +745,8 @@ struct WarpGemmAttributeMfmaIterateK_SwizzleA
 
     static_assert(Impl::kAMBlock == 1 && Impl::kBNBlock == 1,
                   "Multi-block WarpGemmAttributeMfmaImpl is not supported");
+    static_assert(numeric_traits<ADataType>::PackedSize == 1,
+                  "Only supports for non-packed DataType now");
 
     using AWarpDstrEncoding = tile_distribution_encoding<
         sequence<>,

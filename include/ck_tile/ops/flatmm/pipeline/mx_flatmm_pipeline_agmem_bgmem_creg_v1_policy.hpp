@@ -28,12 +28,8 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockFlatmm()
     {
-        using ADataType = remove_cvref_t<typename Problem::ADataType>;
-        using BDataType = remove_cvref_t<typename Problem::BDataType>;
-        static_assert(
-            sizeof(ADataType) * numeric_traits<BDataType>::PackedSize ==
-                sizeof(BDataType) * numeric_traits<ADataType>::PackedSize,
-            "sizeof(ADataType) / APackedSize must be equal to sizeof(BDataType) / BPackedSize!");
+        using ADataType         = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType         = remove_cvref_t<typename Problem::BDataType>;
         using BlockWarps        = typename Problem::BlockGemmShape::BlockWarps;
         using WarpTile          = typename Problem::BlockGemmShape::WarpTile;
         using WarpGemm          = WarpGemmDispatcher< //
@@ -56,6 +52,18 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         return BlockFlatmmASmemBSmemCRegV1<Problem, BlockFlatmmPolicy>{};
     }
 
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto GetVectorSizeA()
+    {
+        return 16;
+    }
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto GetVectorSizeB()
+    {
+        return 16;
+    }
+
+
     template <typename Problem, typename TensorView>
     CK_TILE_DEVICE static constexpr auto
     MakeMXFP4_AAsyncLoadDramDescriptor(const TensorView& naive_view)
@@ -73,11 +81,10 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         const auto rows = naive_desc.get_length(number<0>{});
         const auto cols = naive_desc.get_length(number<1>{});
 
-        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
-        constexpr index_t K2          = GetSmemPackA<Problem>() * APackedSize; // f4=32; f8=16
-        constexpr index_t K1          = kDramLoadPackBytes * APackedSize / K2; // 8
-        const index_t K0              = cols / (K1 * K2);
-        const auto col_lens           = make_tuple(K0, number<K1>{}, number<K2>{});
+        constexpr index_t K2 = GetSmemPackA<Problem>(); // f4=16 (of pk); f8=16
+        constexpr index_t K1 = kDramLoadPackBytes / K2; // 8
+        const index_t K0     = cols / (K1 * K2);
+        const auto col_lens  = make_tuple(K0, number<K1>{}, number<K2>{});
 
         constexpr index_t M1 = 4; // so that we can use imm offset to load lds
         const index_t M0     = rows / M1;
@@ -114,14 +121,14 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         using ALayout   = remove_cvref_t<typename Problem::ALayout>;
         static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>);
 
-        constexpr index_t BlockSize   = Problem::kBlockSize;
-        constexpr index_t MPerBlock   = Problem::BlockGemmShape::kM;
-        constexpr index_t KPerBlock   = Problem::BlockGemmShape::kK;
-        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+        constexpr index_t BlockSize = Problem::kBlockSize;
+        constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
+        constexpr index_t KPerBlock =
+            Problem::BlockGemmShape::kK / numeric_traits<ADataType>::PackedSize;
 
-        constexpr index_t K2 = GetSmemPackA<Problem>() * APackedSize; // f4=32; f8=16
-        constexpr index_t K1 = kDramLoadPackBytes * APackedSize / K2; // 8
-        constexpr index_t K0 = KPerBlock / (K1 * K2);                 // KPerBlock/256
+        constexpr index_t K2 = GetSmemPackA<Problem>(); // f4=16 (of packs); f8=16
+        constexpr index_t K1 = kDramLoadPackBytes / K2; // 8
+        constexpr index_t K0 = KPerBlock / (K1 * K2);   // KPerBlock/128
 
         constexpr index_t M2 = get_warp_size() / K1;        // 8
         constexpr index_t M1 = BlockSize / get_warp_size(); // 4
@@ -150,13 +157,14 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>);
 
         /*reduce transform layers,compare with old ck*/
-        constexpr index_t MPerBlock   = Problem::BlockGemmShape::kM;
-        constexpr index_t KPerBlock   = Problem::BlockGemmShape::kK;
-        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
-        constexpr index_t K2          = GetSmemPackA<Problem>() * APackedSize; // f4=32; f8=16
-        constexpr index_t K1          = kDramLoadPackBytes * APackedSize / K2; // 8
-        constexpr index_t K0          = KPerBlock / (K1 * K2);                 // KPerBlock/256
-        static_assert(K0 * K1 * K2 == KPerBlock, "K0, K1, K2 must cover whole KPerBlock!");
+        constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
+        constexpr index_t KPerBlock =
+            Problem::BlockGemmShape::kK / numeric_traits<ADataType>::PackedSize;
+        constexpr index_t K2 = GetSmemPackA<Problem>(); // f4=16 (of packs); f8=16
+        constexpr index_t K1 = kDramLoadPackBytes / K2; // 8
+        constexpr index_t K0 = KPerBlock / (K1 * K2);   // KPerBlock/256
+        static_assert(K0 * K1 * K2  == KPerBlock,
+                      "K0, K1, K2 must cover whole KPerBlock!");
 
         constexpr index_t M3 = 4; // so that we can use imm offset to load lds
         constexpr index_t M2 = get_warp_size() / K1 / M3;  // 2
@@ -418,10 +426,9 @@ struct MXF4FlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeA()
     {
-        using ADataType               = remove_cvref_t<typename Problem::ADataType>;
-        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
         return sizeof(ADataType) *
-               MakeMXFP4_ALdsBlockDescriptor<Problem>().get_element_space_size() / APackedSize;
+               MakeMXFP4_ALdsBlockDescriptor<Problem>().get_element_space_size();
     }
 
     template <typename Problem>

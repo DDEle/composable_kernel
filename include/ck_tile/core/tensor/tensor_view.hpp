@@ -45,8 +45,6 @@ struct tensor_view
     using TensorIndex = array<index_t, TensorDesc::get_num_of_top_dimension()>;
     using TensorCoord = decltype(make_tensor_coordinate(TensorDesc{}, TensorIndex{}));
     static constexpr auto DstInMemOp = DstInMemOp_;
-    static constexpr index_t PackedSize =
-        ck_tile::numeric_traits<remove_cvref_t<DataType>>::PackedSize;
 
     CK_TILE_HOST_DEVICE constexpr tensor_view() = default;
 
@@ -83,8 +81,8 @@ struct tensor_view
                             bool_constant<oob_conditional_check> = {}) const
     {
         return buf_.template get<X>(
-            coord.get_offset() / PackedSize,
-            linear_offset / PackedSize,
+            coord.get_offset(),
+            linear_offset,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             bool_constant<oob_conditional_check>{});
     }
@@ -101,8 +99,8 @@ struct tensor_view
                             bool is_valid_element, // flag
                             bool_constant<oob_conditional_check> = {}) const
     {
-        return buf_.template get<X>(coord.get_offset() / PackedSize,
-                                    linear_offset / PackedSize,
+        return buf_.template get<X>(coord.get_offset(),
+                                    linear_offset,
                                     is_valid_element,
                                     bool_constant<oob_conditional_check>{});
     }
@@ -124,8 +122,8 @@ struct tensor_view
     {
         return buf_.template get_raw<X, oob_conditional_check, pre_nop>(
             dst,
-            coord.get_offset() / PackedSize,
-            linear_offset / PackedSize,
+            coord.get_offset(),
+            linear_offset,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             bool_constant<pre_nop>{});
     }
@@ -144,12 +142,8 @@ struct tensor_view
                                                          bool_constant<oob_conditional_check> = {},
                                                          bool_constant<pre_nop> = {}) const
     {
-        return buf_.template get_raw<X, oob_conditional_check, pre_nop>(dst,
-                                                                        coord.get_offset() /
-                                                                            PackedSize,
-                                                                        linear_offset / PackedSize,
-                                                                        is_valid_element,
-                                                                        bool_constant<pre_nop>{});
+        return buf_.template get_raw<X, oob_conditional_check, pre_nop>(
+            dst, coord.get_offset(), linear_offset, is_valid_element, bool_constant<pre_nop>{});
     }
 
     template <typename X,
@@ -166,7 +160,7 @@ struct tensor_view
     {
         return buf_.template async_get<X>(
             smem,
-            coord.get_offset() / PackedSize + linear_offset / PackedSize,
+            coord.get_offset() + linear_offset,
             0, // linear_offset need to be imm and is not supported currently
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             bool_constant<oob_conditional_check>{});
@@ -186,8 +180,8 @@ struct tensor_view
                                   bool_constant<oob_conditional_check> = {}) const
     {
         return buf_.template async_get<X>(smem,
-                                          coord.get_offset() / PackedSize,
-                                          linear_offset / PackedSize,
+                                          coord.get_offset(),
+                                          linear_offset,
                                           is_valid_element,
                                           bool_constant<oob_conditional_check>{});
     }
@@ -206,8 +200,8 @@ struct tensor_view
     {
         return buf_.template async_get_raw<X>(
             smem,
-            coord.get_offset() / PackedSize,
-            linear_offset / PackedSize,
+            coord.get_offset(),
+            linear_offset,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             bool_constant<pre_nop>{});
     }
@@ -227,8 +221,8 @@ struct tensor_view
     {
         return buf_.template async_get_raw<X>(
             smem,
-            (coord.get_offset() + coord_extra_offset) / PackedSize,
-            linear_offset / PackedSize,
+            (coord.get_offset() + coord_extra_offset),
+            linear_offset,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             bool_constant<pre_nop>{});
     }
@@ -246,11 +240,8 @@ struct tensor_view
                                       bool is_valid_element,
                                       bool_constant<pre_nop> = {}) const
     {
-        return buf_.template async_get_raw<X>(smem,
-                                              coord.get_offset() / PackedSize,
-                                              linear_offset / PackedSize,
-                                              is_valid_element,
-                                              bool_constant<pre_nop>{});
+        return buf_.template async_get_raw<X>(
+            smem, coord.get_offset(), linear_offset, is_valid_element, bool_constant<pre_nop>{});
     }
 
     template <typename X,
@@ -295,8 +286,8 @@ struct tensor_view
                             bool_constant<oob_conditional_check> = {})
     {
         buf_.template set<X, oob_conditional_check>(
-            coord.get_offset() / PackedSize,
-            linear_offset / PackedSize,
+            coord.get_offset(),
+            linear_offset,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             x);
     }
@@ -331,8 +322,8 @@ struct tensor_view
                                 bool_constant<oob_conditional_check> = {})
     {
         buf_.template set_raw<X, oob_conditional_check>(
-            coord.get_offset() / PackedSize,
-            linear_offset / PackedSize,
+            coord.get_offset(),
+            linear_offset,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             x);
     }
@@ -351,7 +342,7 @@ struct tensor_view
                                 bool_constant<oob_conditional_check> = {})
     {
         buf_.template set_raw<X, oob_conditional_check>(
-            coord.get_offset() / PackedSize, linear_offset / PackedSize, is_valid_element, x);
+            coord.get_offset(), linear_offset, is_valid_element, x);
     }
 
     // X is vector of DataType.
@@ -369,8 +360,8 @@ struct tensor_view
                                bool_constant<oob_conditional_check> = {})
     {
         buf_.template update<DstInMemOp, X, oob_conditional_check>(
-            coord.get_offset() / PackedSize,
-            linear_offset / PackedSize,
+            coord.get_offset(),
+            linear_offset,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             x);
     }
@@ -389,7 +380,7 @@ struct tensor_view
                                bool_constant<oob_conditional_check> = {})
     {
         buf_.template update<DstInMemOp, X, oob_conditional_check>(
-            coord.get_offset() / PackedSize, linear_offset / PackedSize, is_valid_element, x);
+            coord.get_offset(), linear_offset, is_valid_element, x);
     }
 
     // X is vector of DataType.
@@ -409,8 +400,8 @@ struct tensor_view
                                    bool_constant<pre_nop>               = {})
     {
         buf_.template update_raw<DstInMemOp, X, oob_conditional_check, pre_nop>(
-            coord.get_offset() / PackedSize,
-            linear_offset / PackedSize,
+            coord.get_offset(),
+            linear_offset,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             x);
     }
@@ -431,7 +422,7 @@ struct tensor_view
                                    bool_constant<pre_nop>               = {})
     {
         buf_.template update_raw<DstInMemOp, X, oob_conditional_check, pre_nop>(
-            coord.get_offset() / PackedSize, linear_offset / PackedSize, is_valid_element, x);
+            coord.get_offset(), linear_offset, is_valid_element, x);
     }
 
     // member
