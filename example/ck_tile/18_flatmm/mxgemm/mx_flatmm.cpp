@@ -308,6 +308,17 @@ int run_mx_flatmm_example(int argc, char* argv[])
             else
                 throw std::runtime_error("Only support non-persistent kernel now!");
         }
+        else if(mx_prec == "fp8xfp4")
+        {
+            if(persistent_opt == 0)
+                return run_mx_flatmm_with_layouts<ck_tile::fp8_t,
+                                                  ck_tile::pk_fp4_t,
+                                                  ck_tile::fp16_t,
+                                                  MXf8f4_FlatmmConfig16,
+                                                  false>(argc, argv, Row{}, Col{}, Row{});
+            else
+                throw std::runtime_error("Only support non-persistent kernel now!");
+        }
         else
         {
             throw std::runtime_error("Unsupported data_type!");

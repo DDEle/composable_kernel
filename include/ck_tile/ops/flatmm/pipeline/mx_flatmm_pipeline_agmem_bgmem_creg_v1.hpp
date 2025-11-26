@@ -21,7 +21,7 @@ template <typename ADataType_,
           TailNumber TailNum_              = TailNumber::Full,
           typename ComputeDataType_        = ADataType_>
 struct MXFlatmmPipelineProblem : FlatmmPipelineProblem<ADataType_,
-                                                       ADataType_,
+                                                       BDataType_,
                                                        CDataType_,
                                                        BlockGemmShape_,
                                                        Traits_,
@@ -634,6 +634,9 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                 b_warp_tensor_ping(nIter)(kIter) = load_tile_with_offset(
                     b_flat_dram_window,
                     b_flat_dram_offsets(nIter) + kIter * KFlatBytesPerBlockPerIter);
+
+                // if(get_thread_id() < 64)
+                //     CK_PRINTF<>{}(b_warp_tensor_ping(nIter)(kIter));
             });
             // move B window to next flat K
             b_flat_dram_offsets(nIter) += b_flat_dram_window.get_load_offset(
@@ -688,11 +691,15 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
             a_warp_tensor(loadIter) = load_tile_with_offset(
                 a_warp_window_ping, tuple<number<mIter * WG::kM>, number<kIter * WG::kK>>{});
+            // if(get_thread_id() < 64)
+            //     CK_PRINTF<>{}(a_warp_tensor(loadIter));
         });
         __builtin_amdgcn_sched_barrier(0);
 
         // MAIN LOOP
         auto main_body_implx2 = [&]() mutable {
+            if(get_thread_id() < 64)
+                printf("Main loop body x2\n");
             // prefetch B(2i+1)
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
@@ -896,6 +903,8 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         // TAIL
         if constexpr(TailNum == TailNumber::Even)
         {
+            if(get_thread_id() < 64)
+                printf("Tail even\n");
             // prefetch B(loopK)
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
                 static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
@@ -1022,6 +1031,8 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
+            if(get_thread_id() < 64)
+                printf("Tail odd\n");
             // GEMM loopK
             static_for<0, KPackIterPerWarp, 1>{}([&](auto kIter_pack) {
                 static_for<0, MPackIterPerWarp, 1>{}([&](auto mIter_pack) {
@@ -1033,6 +1044,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                                 constexpr auto k_iter    = kIter_pack * KXdlPack + ikxdl;
                                 static_for<0, NXdlPack, 1>{}([&](auto inxdl) {
                                     constexpr auto n_iter = nIter_pack * NXdlPack + inxdl;
+                                    CK_PRINT<WG>();
                                     // warp GEMM
                                     WG{}.template
                                     operator()<ikxdl * MXdlPack + imxdl, ikxdl * NXdlPack + inxdl>(
@@ -1045,6 +1057,18 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                                             .get_thread_buffer()[0], // scale A
                                         scale_b_tile_tensor_ping(nIter_pack)(kIter_pack)
                                             .get_thread_buffer()[0]); // scale B
+
+                                    if(get_thread_id() < 64)
+                                    {
+                                        // CK_PRINTF<>{}(bit_cast<typename WG::AWarpTensor>(
+                                        //     a_warp_tensor(number<AwarpIter>{})));
+                                        // CK_PRINTF<>{}(
+                                        //     bit_cast<typename
+                                        //     WG::BWarpTensor>(b_warp_tensor_ping(
+                                        //         number<n_iter>{})(number<k_iter>{})));
+                                        CK_PRINTF<>{}(
+                                            c_warp_tensors(number<m_iter>{})(number<n_iter>{}));
+                                    }
                                 });
                                 // preload next A from lds
                                 constexpr auto addr =

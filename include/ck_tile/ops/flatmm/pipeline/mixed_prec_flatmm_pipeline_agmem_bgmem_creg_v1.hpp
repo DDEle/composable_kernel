@@ -19,9 +19,9 @@ template <typename ADataType_,
           GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
           bool HasHotLoop_                 = true,
           TailNumber TailNum_              = TailNumber::Full,
-          typename ComputeDataType_        = ADataType_>
+          typename ComputeDataType_        = void>
 struct F16xMXF4FlatmmPipelineProblem : FlatmmPipelineProblem<ADataType_,
-                                                             ADataType_,
+                                                             BDataType_,
                                                              CDataType_,
                                                              BlockGemmShape_,
                                                              Traits_,

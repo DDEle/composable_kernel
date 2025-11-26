@@ -310,6 +310,12 @@ template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
 using WarpGemmMfma_f32_16x16x128_fp4 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4<pk_fp4_t, pk_fp4_t>,
                           AttrNumAccess>>;
+
+template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
+using WarpGemmMfma_f32_16x16x128_fp8xfp4 = WarpGemmImpl<
+    WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4<fp8_t, pk_fp4_t>,
+                          AttrNumAccess>>;
+
 template <WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Single>
 using WarpGemmMfma_f32_16x16x128_fp8_fp8 = WarpGemmImpl< //
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImpl_f32_16x16x128_f8f6f4<fp8_t, fp8_t>,

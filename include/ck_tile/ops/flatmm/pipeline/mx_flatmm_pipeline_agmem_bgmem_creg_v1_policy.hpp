@@ -28,14 +28,11 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockFlatmm()
     {
-        using ADataType = remove_cvref_t<typename Problem::ADataType>;
-        using BDataType = remove_cvref_t<typename Problem::BDataType>;
-        static_assert(
-            sizeof(ADataType) * numeric_traits<BDataType>::PackedSize ==
-                sizeof(BDataType) * numeric_traits<ADataType>::PackedSize,
-            "sizeof(ADataType) / APackedSize must be equal to sizeof(BDataType) / BPackedSize!");
-        using BlockWarps        = typename Problem::BlockGemmShape::BlockWarps;
-        using WarpTile          = typename Problem::BlockGemmShape::WarpTile;
+        using ADataType  = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType  = remove_cvref_t<typename Problem::BDataType>;
+        using BlockWarps = typename Problem::BlockGemmShape::BlockWarps;
+        using WarpTile   = typename Problem::BlockGemmShape::WarpTile;
+        CK_PRINT<ADataType, BDataType>();
         using WarpGemm          = WarpGemmDispatcher< //
             ADataType,
             BDataType,
