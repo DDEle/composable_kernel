@@ -581,6 +581,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             statically_indexed_array<decltype(load_tile(b_flat_dram_window)), KIterPerWarp>,
             NIterPerWarp>
             b_warp_tensor_ping, b_warp_tensor_pong;
+#if 0
 
         // pingpong buffer for Scale A and Scale B
         auto scale_a_dram_window = make_tile_window(
@@ -627,7 +628,6 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         // Prefetch A0
         async_load_tile_(a_store_lds_window_ping, a_dram_window);
         move_tile_window(a_dram_window, {0, kKPerBlock});
-
         // prefetch B
         static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
@@ -670,6 +670,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             async_load_tile_(a_store_lds_window_pong, a_dram_window);
             move_tile_window(a_dram_window, {0, kKPerBlock});
         }
+#endif
         // initialize C
         statically_indexed_array<statically_indexed_array<CWarpTensor, NIterPerWarp>, MIterPerWarp>
             c_warp_tensors;
@@ -677,6 +678,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             static_for<0, NIterPerWarp, 1>{}(
                 [&](auto nIter) { clear_tile(c_warp_tensors(mIter)(nIter)); });
         });
+#if 0
 
         statically_indexed_array<decltype(load_tile(a_warp_window_pong)), m_preload> a_warp_tensor;
 
@@ -1069,6 +1071,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         {
             static_assert(false, "Wrong TailNum");
         }
+#endif
         return c_warp_tensors;
     }
 };

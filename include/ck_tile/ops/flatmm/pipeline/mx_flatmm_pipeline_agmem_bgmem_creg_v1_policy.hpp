@@ -14,16 +14,14 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     static constexpr auto I2 = number<2>{};
 
     static constexpr index_t kDramLoadPackBytes = 128;
+    constexpr index_t Dwordx4Bytes              = 16;
 
     static constexpr int MXdlPack = 2;
     static constexpr int NXdlPack = 2;
     static constexpr int KXdlPack = 2;
 
     template <typename Problem>
-    static inline constexpr auto wg_attr_num_access =
-        std::is_same_v<remove_cvref_t<typename Problem::ADataType>, pk_fp4_t>
-            ? WGAttrNumAccessEnum::Single
-            : WGAttrNumAccessEnum::Double;
+    static inline constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Single;
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockFlatmm()
@@ -257,9 +255,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_BFlatBytesDramTileDistribution()
     {
-        using TileShape         = typename Problem::BlockGemmShape;
-        using BDataType         = remove_cvref_t<typename Problem::BDataType>;
-        constexpr index_t BPack = numeric_traits<BDataType>::PackedSize;
+        using TileShape              = typename Problem::BlockGemmShape;
+        using BDataType              = remove_cvref_t<typename Problem::BDataType>;
+        constexpr index_t PackedSize = numeric_traits<BDataType>::PackedSize;
 
         static_assert(TileShape::WarpTile::at(I1) == 16, "only for XDL_N == 16");
 
@@ -273,26 +271,26 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 
         constexpr index_t NWavePerBlk = TileShape::BlockWarps::at(number<1>{}); // N_Warp
 
-        constexpr index_t WaveRepeat   = WaveNum / TileShape::flatNPerWarp;
-        constexpr index_t kKPerThread  = 32;
-        constexpr index_t num_access_v = static_cast<index_t>(wg_attr_num_access<Problem>);
-        constexpr index_t K2           = kKPerThread / num_access_v;
+        constexpr index_t WaveRepeat  = WaveNum / TileShape::flatNPerWarp;
+        constexpr index_t kKPerThread = 32;
+        constexpr index_t num_access  = kKPerThread / PackedSize / Dwordx4Bytes;
+        constexpr index_t K2          = kKPerThread / num_access;
 
         return make_static_tile_distribution(
             std::conditional_t< //
-                num_access_v == 1,
+                PackedSize == 1,
                 tile_distribution_encoding< //
                     sequence<WaveRepeat>,
-                    tuple<sequence<NWavePerBlk, NXdlPack>, // 4 2
-                          sequence<K0, K1, K2 / BPack>>,   // 1 64 32
+                    tuple<sequence<NWavePerBlk, NXdlPack>,    // 4 2
+                          sequence<K0, K1, K2 / PackedSize>>, // 1 64 32
                     tuple<sequence<0, 1, 2>, sequence<2>>,
                     tuple<sequence<0, 0, 0>, sequence<1>>,
                     sequence<2>,
                     sequence<2>>,
                 tile_distribution_encoding< //
                     sequence<WaveRepeat>,
-                    tuple<sequence<NWavePerBlk, NXdlPack>,             // 4 2
-                          sequence<num_access_v, K0, K1, K2 / BPack>>, // 2 1 64 16
+                    tuple<sequence<NWavePerBlk, NXdlPack>,                  // 4 2
+                          sequence<num_access_v, K0, K1, K2 / PackedSize>>, // 2 1 64 16
                     tuple<sequence<0, 1, 2>, sequence<2>>,
                     tuple<sequence<0, 0, 1>, sequence<2>>,
                     sequence<2, 2>,

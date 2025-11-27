@@ -18,6 +18,14 @@
 #include "ck_tile/core/utility/ignore.hpp"
 
 namespace ck_tile {
+template <auto... val>
+[[deprecated("Help function to print value")]] inline constexpr void CK_PRINT11()
+{
+}
+template <typename... type>
+[[deprecated("Help function to print value")]] inline constexpr void CK_PRINT11()
+{
+}
 
 // T may be scalar or vector
 // X may be scalar or vector
@@ -310,6 +318,7 @@ struct buffer_view<address_space_enum::global,
 
             if constexpr(InvalidElementUseNumericalZeroValue)
             {
+                CK_PRINT11<1>();
                 return amd_buffer_load_invalid_element_return_zero<remove_cvref_t<T>,
                                                                    t_per_x,
                                                                    Coherence,
