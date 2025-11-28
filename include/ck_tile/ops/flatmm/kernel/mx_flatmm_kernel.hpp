@@ -383,8 +383,7 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
               const BDataType* b_flat_ptr,
               const std::array<const void*, NumDTensor>& ds_ptr,
               EDataType* e_ptr,
-              void* smem_ptr_ping,
-              void* smem_ptr_pong,
+              void* smem_ptr,
               const FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>& kargs,
               const SplitKBatchOffset& splitk_batch_offset,
               const index_t block_idx_m,
@@ -419,13 +418,12 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                                       a_block_window.get_window_lengths(),
                                       a_block_window.get_window_origin(),
                                       MXFlatmmPipeline::GetADramTileDistribution());
-        const auto& c_block_tile = MXFlatmmPipeline{}(a_block_window_with_distr,
+        const auto& c_block_tile = MXFlatmmPipeline{}(smem_ptr,
+                                                      a_block_window_with_distr,
                                                       b_flat_block_window,
                                                       scale_a_block_window,
                                                       scale_b_block_window,
-                                                      num_loop,
-                                                      smem_ptr_ping,
-                                                      smem_ptr_pong);
+                                                      num_loop);
 
         // Run Epilogue Pipeline
         if constexpr(DoEpiScale)
@@ -434,7 +432,7 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             EpiloguePipeline{}(c_block_window,
                                c_block_tile,
                                d_block_window,
-                               smem_ptr_ping,
+                               smem_ptr,
                                kargs.scale_m_ptr + block_idx_m,
                                kargs.scale_n_ptr + block_idx_n);
         }
@@ -442,7 +440,7 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
         {
             // Run Epilogue Pipeline
             auto& c_block_window = gemm_tile_windows.at(I3);
-            EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_ping);
+            EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr);
         }
     }
 
@@ -468,8 +466,8 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
 
             // allocate LDS
-            __shared__ char smem_ptr_ping[Underlying::GetSmemPingSize()];
-            __shared__ char smem_ptr_pong[Underlying::GetSmemPongSize()];
+            __shared__ char
+                smem_ptr[max(MXFlatmmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize())];
 
             if constexpr(!(EpiloguePipeline::MemoryOperation == memory_operation_enum::atomic_add &&
                            EpiloguePipeline::GetVectorSizeC() % 2 != 0 &&
@@ -480,8 +478,7 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                                                           b_flat_ptr,
                                                           kargs.ds_ptr,
                                                           e_ptr,
-                                                          smem_ptr_ping,
-                                                          smem_ptr_pong,
+                                                          smem_ptr,
                                                           kargs,
                                                           splitk_batch_offset,
                                                           i_m,

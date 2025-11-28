@@ -472,9 +472,13 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
     }
 
     template <typename... Args>
-    CK_TILE_DEVICE auto operator()(Args&&... args) const
+    CK_TILE_DEVICE auto operator()(void* __restrict__ smem_, Args&&... args) const
     {
-        auto c_warp_tensors = Run_(std::forward<Args>(args)...);
+        const auto smem     = static_cast<char*>(smem_);
+        auto c_warp_tensors = Run_( //
+            reinterpret_cast<ADataType*>(smem),
+            reinterpret_cast<ADataType*>(smem + PipelinePolicy::template GetSmemSizeA<Problem>()),
+            std::forward<Args>(args)...);
 
         // Block GEMM Acc register tile
         using CWarpDstr = typename WG::CWarpDstr;
@@ -497,13 +501,13 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
               typename BFlatBlockWindowTmp,
               typename ScaleADramBlockWindowTmp,
               typename ScaleBDramBlockWindowTmp>
-    CK_TILE_DEVICE auto Run_(const ADramBlockWindowTmp& a_copy_dram_window_tmp,
+    CK_TILE_DEVICE auto Run_(ADataType* __restrict__ a_smem0,
+                             ADataType* __restrict__ s_smem1,
+                             const ADramBlockWindowTmp& a_copy_dram_window_tmp,
                              const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
                              const ScaleADramBlockWindowTmp& scale_a_window,
                              const ScaleBDramBlockWindowTmp& scale_b_window,
-                             index_t num_loop,
-                             void* __restrict__ p_smem_ping,
-                             void* __restrict__ p_smem_pong) const
+                             index_t num_loop) const
     {
 #ifndef __gfx950__
         static_assert(false, "Only gfx950 is supported for MXFP4 flatmm pipeline now.");
@@ -531,17 +535,13 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
         __builtin_amdgcn_sched_barrier(0);
 
-        // A tile in LDS
-        ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem_ping);
-        ADataType* p_a_lds_pong = static_cast<ADataType*>(p_smem_pong);
-
         constexpr auto a_lds_block_desc =
             PipelinePolicy::template MakeMX_ALdsBlockDescriptor<Problem>();
 
         auto a_lds_block_ping =
-            make_tensor_view<address_space_enum::lds>(p_a_lds_ping, a_lds_block_desc);
+            make_tensor_view<address_space_enum::lds>(a_smem0, a_lds_block_desc);
         auto a_lds_block_pong =
-            make_tensor_view<address_space_enum::lds>(p_a_lds_pong, a_lds_block_desc);
+            make_tensor_view<address_space_enum::lds>(s_smem1, a_lds_block_desc);
 
         auto a_store_lds_window_ping = make_tile_window(
             a_lds_block_ping, make_tuple(number<kMPerBlock>{}, number<kKPerBlock>{}), {0, 0});

@@ -464,7 +464,7 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        return GetSmemSizeA<Problem>();
+        return GetSmemSizeA<Problem>() + GetSmemSizeA<Problem>();
     }
 };
 
