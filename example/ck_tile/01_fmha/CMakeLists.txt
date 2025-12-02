@@ -55,8 +55,8 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   --targets ${FMHA_TARGETS_ARG}
   --api bwd
   --receipt 3
-  --optdim 32,64,96,128,256
-  # --filter fmha_bwd_dot...@fmha_bwd_convert...@fmha_bwd...
+  --optdim 96
+  --filter fmha_bwd_dot_do_o_d96_bf16_b64_group_o2_psdv@fmha_bwd_convert_dq_d96_bf16_b64x0_group_o2_psd_ndeterministic@fmha_bwd_d96_bf16_group_b32x128x96x32x96x32x32x96x96_r1x4x1_r4x1x1_r2x2x1_w16x16x32_w16x16x16_o1_maxq0_pd8dv8_alibi_ndbias_mask_dropout_wg16_storerandval_ndeterministic_ntrload
 )
 
 # Reduce building time by disabling instances that are not currently used in the gtests
@@ -133,8 +133,8 @@ set(FMHA_BWD_INTERFACE_COMPILE_OPTIONS)
 
 # NOTE: we turn off undefined-func-template to let source compile without explicit declare function specializations
 #       ... because they are auto-generated
-list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template)
-list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template)
+list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template --save-temps -Wno-gnu-line-marker)
+list(APPEND FMHA_BWD_PRIVATE_COMPILE_OPTIONS -Wno-undefined-func-template --save-temps -Wno-gnu-line-marker)
 
 # Allow comparing floating points directly in order to check sentinel values
 list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -Wno-float-equal)
