@@ -83,6 +83,37 @@ int run_mx_flatmm_with_layouts(int argc,
         ck_tile::FillUniformDistribution<>{1.f, 1.f}(scale_a);
         ck_tile::FillUniformDistribution<>{1.f, 1.f}(scale_b);
     }
+    else if(init_method == 2)
+    {
+        ck_tile::FillUniformDistribution<ADataType>{0.f, 0.f}(a_host);
+        a_host.ForEach([](auto& self, auto idx) {
+            if(idx[1] % 2 == 0)
+                self(idx) = ck_tile::type_convert<ADataType>(static_cast<float>(idx[1] / 2 % 3));
+        });
+        ck_tile::FillUniformDistribution<BDataType>{0.f, 0.f}(b_origin_host);
+        b_origin_host.ForEach([](auto& self, auto idx) {
+            if(idx[0] % 2 == 0)
+                self(idx) = ck_tile::type_convert<BDataType>(static_cast<float>(idx[0] / 2 % 3));
+        });
+        ck_tile::FillUniformDistribution<ScaleType>{1.f, 1.f}(scale_a);
+        ck_tile::FillUniformDistribution<ScaleType>{1.f, 1.f}(scale_b);
+    }
+    else if(init_method == 3)
+    {
+        ck_tile::FillUniformDistribution<ADataType>{1.f, 1.f}(a_host);
+        // a_host.ForEach([](auto& self, auto idx) {
+        //     if(idx[1] % 2 == 0)
+        //         self(idx) = ck_tile::type_convert<ADataType>(static_cast<float>(idx[0] % 7
+        //         / 2.f));
+        // });
+        ck_tile::FillUniformDistribution<BDataType>{1.f, 1.f}(b_origin_host);
+        b_origin_host.ForEach([](auto& self, auto idx) {
+            if(idx[0] % 2 == 0)
+                self(idx) = ck_tile::type_convert<BDataType>(static_cast<float>(idx[1] % 5 / 2.f));
+        });
+        ck_tile::FillUniformDistribution<ScaleType>{1.f, 1.f}(scale_a);
+        ck_tile::FillUniformDistribution<ScaleType>{1.f, 1.f}(scale_b);
+    }
     else
     {
         throw std::runtime_error("wrong! Unexpected init_method");
@@ -154,6 +185,10 @@ int run_mx_flatmm_with_layouts(int argc,
 
         pass = ck_tile::check_err(
             c_rslt_host, c_m_n_host_ref, "Error: Incorrect results!", rtol, atol);
+        // if(pass)
+        // {
+        //     c_rslt_host.print_first_n(std::cout, 32);
+        // }
 
         std::cout << "Relative error threshold: " << rtol << " Absolute error threshold: " << atol
                   << std::endl;

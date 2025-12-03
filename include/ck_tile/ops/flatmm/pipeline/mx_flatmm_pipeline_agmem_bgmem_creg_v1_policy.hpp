@@ -257,46 +257,39 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_BFlatBytesDramTileDistribution()
     {
-        using TileShape         = typename Problem::BlockGemmShape;
-        using BDataType         = remove_cvref_t<typename Problem::BDataType>;
-        constexpr index_t BPack = numeric_traits<BDataType>::PackedSize;
+        using Shape                   = typename Problem::BlockGemmShape;
+        using BDataType               = remove_cvref_t<typename Problem::BDataType>;
+        constexpr index_t BPackedSize = numeric_traits<BDataType>::PackedSize;
 
-        static_assert(TileShape::WarpTile::at(I1) == 16, "only for XDL_N == 16");
+        static_assert(Shape::WarpTile::at(I1) == 16, "only for XDL_N == 16");
+
+        constexpr index_t num_access_v = static_cast<index_t>(wg_attr_num_access<Problem>);
+        constexpr index_t NPerBlock    = Problem::BlockGemmShape::kN;
+        constexpr index_t KPerBlock    = Problem::BlockGemmShape::kK;
+        constexpr index_t NXdls        = NPerBlock / Shape::WarpTile::at(I1);
+        constexpr index_t KXdls        = KPerBlock / Shape::WarpTile::at(I2);
 
         constexpr index_t BlockSize = Problem::kBlockSize;
         constexpr index_t WaveSize  = get_warp_size();
         constexpr index_t WaveNum   = BlockSize / WaveSize;
 
-        constexpr index_t K1          = WaveSize; // threads cnt in K dim
-        constexpr index_t KWavePerBlk = 1;
-        constexpr index_t K0          = KWavePerBlk;
+        constexpr index_t kKPerThread = 32;
+        constexpr index_t K2          = kKPerThread / num_access_v;
+        constexpr index_t K1          = WaveSize; // 64
+        constexpr index_t K0          = KXdls * num_access_v;
 
-        constexpr index_t NWavePerBlk = TileShape::BlockWarps::at(number<1>{}); // N_Warp
-
-        constexpr index_t WaveRepeat   = WaveNum / TileShape::flatNPerWarp;
-        constexpr index_t kKPerThread  = 32;
-        constexpr index_t num_access_v = static_cast<index_t>(wg_attr_num_access<Problem>);
-        constexpr index_t K2           = kKPerThread / num_access_v;
+        constexpr index_t N1 = WaveNum / K0;
+        constexpr index_t N0 = NXdls / N1;
+        static_assert(N0 * N1 * K0 == KXdls * NXdls * num_access_v, "wrong N0 K0 K1!");
 
         return make_static_tile_distribution(
-            std::conditional_t< //
-                num_access_v == 1,
-                tile_distribution_encoding< //
-                    sequence<WaveRepeat>,
-                    tuple<sequence<NWavePerBlk, NXdlPack>, // 4 2
-                          sequence<K0, K1, K2 / BPack>>,   // 1 64 32
-                    tuple<sequence<0, 1, 2>, sequence<2>>,
-                    tuple<sequence<0, 0, 0>, sequence<1>>,
-                    sequence<2>,
-                    sequence<2>>,
-                tile_distribution_encoding< //
-                    sequence<WaveRepeat>,
-                    tuple<sequence<NWavePerBlk, NXdlPack>,             // 4 2
-                          sequence<num_access_v, K0, K1, K2 / BPack>>, // 2 1 64 16
-                    tuple<sequence<0, 1, 2>, sequence<2>>,
-                    tuple<sequence<0, 0, 1>, sequence<2>>,
-                    sequence<2, 2>,
-                    sequence<0, 3>>>{});
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<N0, N1>, sequence<K0, K1, K2 / BPackedSize>>, // ? 2, 2 64 32
+                tuple<sequence<1, 2>, sequence<2>>,                          // N1 K0, K1
+                tuple<sequence<1, 0>, sequence<1>>,
+                sequence<1, 2>,
+                sequence<0, 2>>{});
     }
 
     template <typename Problem, typename WindowTmp>
@@ -332,6 +325,77 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
             make_tuple(number<flatNPerWarp>{}, number<flatKPerWarp / BPackedSize>{}),
             {origin_tmp[0], origin_tmp[1] / BPackedSize},
             MakeMX_BFlatBytesDramTileDistribution<Problem>());
+    }
+
+    template <typename Problem>
+    CK_TILE_DEVICE static constexpr auto MakeMX_BFlatBytesLdsBlockDescriptor()
+    {
+        using BDataType           = remove_cvref_t<typename Problem::BDataType>;
+        constexpr index_t MPerXdl = Problem::BlockGemmShape::WarpTile::at(I0);
+        constexpr index_t NPerXdl = Problem::BlockGemmShape::WarpTile::at(I1);
+        static_assert(MPerXdl == 16 && NPerXdl == 16);
+
+        using TileShape                = typename Problem::BlockGemmShape;
+        constexpr index_t num_access_v = static_cast<index_t>(wg_attr_num_access<Problem>);
+        constexpr index_t BPackedSize  = numeric_traits<BDataType>::PackedSize;
+        constexpr index_t NPerBlock    = TileShape::kN;
+        constexpr index_t KPerBlock    = TileShape::kK;
+        constexpr index_t N_Warp_Tile  = TileShape::WarpTile::at(I1);
+        constexpr index_t K_Warp_Tile  = TileShape::WarpTile::at(I2);
+        constexpr index_t NXdls        = NPerBlock / TileShape::WarpTile::at(I1);
+        constexpr index_t KXdls        = KPerBlock / TileShape::WarpTile::at(I2);
+
+        constexpr index_t K1 = N_Warp_Tile * K_Warp_Tile / num_access_v; // 1024
+        constexpr index_t K0 = KXdls * num_access_v;
+        constexpr index_t N0 = NXdls;
+
+        constexpr auto desc_0 = make_naive_tensor_descriptor( //
+            make_tuple(number<N0>{}, number<K0>{}, number<K1 / BPackedSize>{}),
+            make_tuple( //
+                number<K0 * K1 / BPackedSize>{},
+                number<K1 / BPackedSize>{},
+                number<1>{}),
+            number<16>{},
+            number<1>{});
+
+        constexpr auto desc = transform_tensor_descriptor( //
+            desc_0,
+            make_tuple(make_pass_through_transform(N0),
+                       make_merge_transform_v3_division_mod(
+                           make_tuple(number<K0>{}, number<K1 / BPackedSize>{}))),
+            make_tuple(sequence<0>{}, sequence<1, 2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+
+        return desc;
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeMX_BFlatBytesLdsTileDistribution()
+    {
+        using TileShape               = typename Problem::BlockGemmShape;
+        constexpr int N_Lane          = TileShape::WarpTile::at(I1); // 16
+        constexpr int M_warps         = TileShape::BlockWarps::at(number<0>{});
+        constexpr int N_warps         = TileShape::BlockWarps::at(number<1>{});
+        constexpr int K_Lane          = get_warp_size() / N_Lane; // 4
+        using BDataType               = remove_cvref_t<typename Problem::BDataType>;
+        constexpr index_t BPackedSize = numeric_traits<BDataType>::PackedSize;
+
+        static_assert(TileShape::WarpTile::at(I1) == 16, "only for XDL_N == 16");
+
+        constexpr index_t K1           = get_warp_size();                      // 64
+        constexpr index_t kKPerThread  = TileShape::WarpTile::at(I2) / K_Lane; // 32
+        constexpr index_t num_access_v = static_cast<index_t>(wg_attr_num_access<Problem>);
+        constexpr index_t K2           = kKPerThread / num_access_v;
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding< //
+                sequence<M_warps>,
+                tuple<sequence<N_warps, NXdlPack>,                   // 4 2
+                      sequence<num_access_v, K1, K2 / BPackedSize>>, // 2 64 16
+                tuple<sequence<0, 1>, sequence<2>>,
+                tuple<sequence<0, 0>, sequence<1>>,
+                sequence<2, 2>,
+                sequence<0, 2>>{});
     }
 
     template <typename Problem>
@@ -460,11 +524,18 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         return sizeof(ADataType) * MakeMX_ALdsBlockDescriptor<Problem>().get_element_space_size() /
                APackedSize;
     }
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeB()
+    {
+        return MakeMX_BFlatBytesLdsBlockDescriptor<Problem>().get_element_space_size();
+    }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        return GetSmemSizeA<Problem>() + GetSmemSizeA<Problem>();
+        CK_PRINT<int(GetSmemSizeA<Problem>()), int(GetSmemSizeB<Problem>())>();
+        return GetSmemSizeA<Problem>() + GetSmemSizeA<Problem>() + //
+               GetSmemSizeB<Problem>() + GetSmemSizeB<Problem>();
     }
 };
 
