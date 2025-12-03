@@ -2504,6 +2504,13 @@ CK_TILE_DEVICE void amd_async_buffer_load_with_oob(CK_TILE_LDS_ADDR T* smem,
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
     index_t src_linear_addr_offset = src_linear_element_offset * sizeof(T);
 
+    // if(threadIdx.x % 64 == 0)
+    //     printf("tid%03d amd_async_buffer_load_with_oob: smem=%p, src_thread_addr_offset = "
+    //            "%u,src_linear_addr_offset = %u\n",
+    //            threadIdx.x,
+    //            smem,
+    //            static_cast<uint32_t>(src_thread_addr_offset),
+    //            static_cast<uint32_t>(src_linear_addr_offset));
     amd_async_buffer_load<T, N, coherence>(smem,
                                            src_wave_buffer_resource,
                                            src_thread_addr_offset,

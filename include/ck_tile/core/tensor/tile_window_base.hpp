@@ -75,6 +75,15 @@ struct tile_window_base
     // Default no-op; can be overridden in child
     CK_TILE_DEVICE void move_extended(const BottomTensorIndex&) {}
 
+    template <typename offset_t>
+    CK_TILE_DEVICE constexpr auto get_load_offset(offset_t = {}) const
+    {
+        constexpr auto bottom_tensor_idx_off = to_multi_index(offset_t{});
+        const auto bottom_tensor_coord_off   = make_tensor_coordinate(
+            bottom_tensor_view_.get_tensor_descriptor(), bottom_tensor_idx_off);
+        return amd_wave_read_first_lane(bottom_tensor_coord_off.get_offset());
+    }
+
     // origin ([x0', x1', ...]) of window on bottom tensor
     BottomTensorIndex window_origin_;
 

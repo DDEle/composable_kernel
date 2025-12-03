@@ -293,15 +293,6 @@ struct tile_window_with_static_distribution
             0, dst_tensor, number<i_access_unsupport_>{}, bool_constant<oob_conditional_check>{});
     }
 
-    template <typename offset_t>
-    CK_TILE_DEVICE constexpr auto get_load_offset(offset_t = {}) const
-    {
-        constexpr auto bottom_tensor_idx_off = to_multi_index(offset_t{});
-        const auto bottom_tensor_coord_off   = make_tensor_coordinate(
-            this->bottom_tensor_view_.get_tensor_descriptor(), bottom_tensor_idx_off);
-        return amd_wave_read_first_lane(bottom_tensor_coord_off.get_offset());
-    }
-
     template <typename DataType,
               typename StaticTileDistribution,
               index_t i_access_unsupport_ = -1,
@@ -325,7 +316,7 @@ struct tile_window_with_static_distribution
             else if constexpr(is_constant_v<offset_t>)
                 return offset_t::value;
             else
-                return get_load_offset(offset_t{});
+                return this->get_load_offset(offset_t{});
         }();
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
@@ -538,8 +529,9 @@ struct tile_window_with_static_distribution
               index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true,
               bool static_move_ys         = false,
+              typename offset_t,
               typename = std::enable_if_t<std::is_class_v<remove_cvref_t<LdsTileWindow_>>>>
-    CK_TILE_DEVICE void async_load_with_offset(index_t offset,
+    CK_TILE_DEVICE void async_load_with_offset(offset_t offset,
                                                LdsTileWindow_&& lds_tile,
                                                number<i_access_unsupport_>          = {},
                                                bool_constant<oob_conditional_check> = {},
@@ -551,6 +543,18 @@ struct tile_window_with_static_distribution
 
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
+
+        const auto linear_off2 = [&]() {
+            if constexpr(std::is_integral_v<offset_t>)
+                return make_tuple(offset, 0);
+            else if constexpr(is_constant_v<offset_t>)
+                return make_tuple(offset_t::value, 0);
+            else
+                return make_tuple(this->get_load_offset(offset_t{}),
+                                  lds_tile.get_load_offset(offset_t{}));
+        }();
+        const index_t dram_off = linear_off2[number<0>{}];
+        const index_t lds_off  = linear_off2[number<1>{}];
 
         // Precompute invariant values outside loops
         const auto window_origin       = lds_tile.get_window_origin();
@@ -594,7 +598,7 @@ struct tile_window_with_static_distribution
                     make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
                 // Calculate SMEM address using base pointer
-                CK_TILE_LDS_ADDR LdsDataType* smem = lds_base_ptr +
+                CK_TILE_LDS_ADDR LdsDataType* smem = lds_base_ptr + lds_off / Traits::PackedSize +
                                                      lds_coord.get_offset() / Traits::PackedSize +
                                                      lds_ys_offset / Traits::PackedSize;
 
@@ -608,11 +612,24 @@ struct tile_window_with_static_distribution
                     else
                         return 0;
                 }();
+                // if(get_thread_id() % 64 == 0)
+                // {
+                //     printf("Async Load t%d: lds_base_ptr=%p, lds_off=%d, lds_coord_offset=%d, "
+                //            "lds_ys_offset=%d dram_off=%d dram_ys_off=%d\n",
+                //            get_thread_id(),
+                //            lds_base_ptr,
+                //            lds_off,
+                //            lds_coord.get_offset() / Traits::PackedSize,
+                //            lds_ys_offset,
+                //            dram_off,
+                //            dram_ys_offset);
+                //     print(bottom_tensor_thread_coord);
+                // }
 
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                     smem,
                     bottom_tensor_thread_coord,
-                    offset + dram_ys_offset,
+                    dram_off + dram_ys_offset,
                     bool_constant<oob_conditional_check>{});
 
                 // Move thread coordinate if not last access

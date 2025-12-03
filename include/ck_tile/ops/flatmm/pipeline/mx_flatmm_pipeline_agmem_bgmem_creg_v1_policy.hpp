@@ -114,20 +114,23 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         using ALayout   = remove_cvref_t<typename Problem::ALayout>;
         static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>);
 
-        constexpr index_t BlockSize   = Problem::kBlockSize;
-        constexpr index_t MPerBlock   = Problem::BlockGemmShape::kM;
-        constexpr index_t KPerBlock   = Problem::BlockGemmShape::kK;
-        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+        constexpr index_t M_warps       = Problem::BlockGemmShape::BlockWarps::at(number<0>{});
+        constexpr index_t MPerXdl       = Problem::BlockGemmShape::WarpTile::at(I0);
+        constexpr index_t KPerXdl       = Problem::BlockGemmShape::WarpTile::at(I2);
+        constexpr index_t BlockSize     = Problem::kBlockSize;
+        constexpr index_t MPerBlockPack = MXdlPack * MPerXdl * M_warps;
+        constexpr index_t KPerBlockPack = KXdlPack * KPerXdl;
+        constexpr index_t APackedSize   = numeric_traits<ADataType>::PackedSize;
 
         constexpr index_t K2 = GetSmemPackA<Problem>() * APackedSize; // f4=32; f8=16
         constexpr index_t K1 = kDramLoadPackBytes * APackedSize / K2; // 8
-        constexpr index_t K0 = KPerBlock / (K1 * K2);                 // KPerBlock/256
+        constexpr index_t K0 = KPerBlockPack / (K1 * K2);             // KPerBlockPack/256
 
         constexpr index_t M2 = get_warp_size() / K1;        // 8
         constexpr index_t M1 = BlockSize / get_warp_size(); // 4
-        constexpr index_t M0 = MPerBlock / (M2 * M1);
-        static_assert(M0 * M1 * M2 == MPerBlock, "M0, M1, M2 must cover whole MPerBlock!");
-        static_assert(K0 * K1 * K2 == KPerBlock, "K0, K1, K2 must cover whole KPerBlock!");
+        constexpr index_t M0 = MPerBlockPack / (M2 * M1);
+        static_assert(M0 * M1 * M2 == MPerBlockPack, "M0, M1, M2 must cover whole MPerBlockPack!");
+        static_assert(K0 * K1 * K2 == KPerBlockPack, "K0, K1, K2 must cover whole KPerBlockPack!");
 
         return make_static_tile_distribution(
             tile_distribution_encoding< //
