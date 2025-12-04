@@ -77,25 +77,20 @@ __device__ inline auto amd_wave_read_first_lane(const Object& obj)
 
 // 128 bit SGPRs to supply buffer resource in buffer instructions
 // https://rocm-documentation.readthedocs.io/en/latest/GCN_ISA_Manuals/testdocbook.html#vector-memory-buffer-instructions
-struct __attribute__((packed)) buffer_resource
+struct __attribute__((packed)) buffer_resource_raw_
 {
     const void* ptr;
     uint32_t range;
     uint32_t config;
 };
+using buffer_rsrc_t = __amdgpu_buffer_rsrc_t;
 
 template <typename ForceSGPR = std::false_type>
-CK_TILE_DEVICE int32x4_t make_wave_buffer_resource(const void* ptr,
-                                                   uint32_t size = 0xffffffff,
-                                                   ForceSGPR     = {})
+CK_TILE_DEVICE buffer_rsrc_t make_wave_buffer_resource(const void* ptr,
+                                                       uint32_t size = 0xffffffff,
+                                                       ForceSGPR     = {})
 {
-    buffer_resource res{ptr, size, CK_TILE_BUFFER_RESOURCE_3RD_DWORD};
-    int32x4_t r = __builtin_bit_cast(int32x4_t, res);
-    if constexpr(std::is_same_v<ForceSGPR, std::true_type>)
-    {
-        r = amd_wave_read_first_lane(r);
-    }
-    return r;
+    return __builtin_amdgcn_make_buffer_rsrc(ptr, 0, size, CK_TILE_BUFFER_RESOURCE_3RD_DWORD);
 }
 
 namespace impl {
@@ -129,7 +124,7 @@ struct buffer_load<16, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -157,7 +152,7 @@ struct buffer_load<8, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -185,7 +180,7 @@ struct buffer_load<4, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -213,7 +208,7 @@ struct buffer_load<2, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -241,7 +236,7 @@ struct buffer_load<1, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -272,7 +267,7 @@ struct buffer_load_if<16, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -283,22 +278,26 @@ struct buffer_load_if<16, pre_nop>
         auto saved_exec = __builtin_amdgcn_read_exec();
         using mbuf_t    = typename impl::buffer_load_trait<16, T>::payload_t;
         static_assert(sizeof(mbuf_t) == sizeof(T));
+#define v_offset_ __builtin_constant_p(i_offset) ? v_offset : v_offset + i_offset
+#define i_offset_ __builtin_constant_p(i_offset) ? i_offset : 0
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
-                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
+                         : "v"(v_offset_), "s"(res), "n"(i_offset_), "v"(flag), "s"(saved_exec)
                          : "memory");
         else
             asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
-                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
+                         : "v"(v_offset_), "s"(res), "n"(i_offset_), "v"(flag), "s"(saved_exec)
                          : "memory");
     }
+#undef v_offset_
+#undef i_offset_
 };
 
 template <bool pre_nop>
@@ -306,7 +305,7 @@ struct buffer_load_if<8, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -339,7 +338,7 @@ struct buffer_load_if<4, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -372,7 +371,7 @@ struct buffer_load_if<2, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -405,7 +404,7 @@ struct buffer_load_if<1, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -441,7 +440,7 @@ struct buffer_store<16>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -461,7 +460,7 @@ struct buffer_store<8>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -481,7 +480,7 @@ struct buffer_store<4>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -501,7 +500,7 @@ struct buffer_store<2>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -521,7 +520,7 @@ struct buffer_store<1>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -544,7 +543,7 @@ struct buffer_store_if<16>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -572,7 +571,7 @@ struct buffer_store_if<8>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -601,7 +600,7 @@ struct buffer_store_if<4>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -629,7 +628,7 @@ struct buffer_store_if<2>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -657,7 +656,7 @@ struct buffer_store_if<1>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -698,7 +697,7 @@ struct buffer_atomic_add_if<bf16_t, 2, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,
@@ -729,7 +728,7 @@ struct buffer_atomic_add<bf16_t, 2, pre_nop>
 {
     template <typename T>
     CK_TILE_DEVICE void operator()(const T& value,
-                                   int32x4_t res /*buffer resource*/,
+                                   buffer_rsrc_t res /*buffer resource*/,
                                    index_t v_offset,
                                    index_t /*s_offset*/,
                                    index_t i_offset /*max 0xFFF*/,

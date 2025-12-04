@@ -612,14 +612,14 @@ struct tile_window_with_static_distribution
                     else
                         return 0;
                 }();
-                // if(get_thread_id() % 64 == 0)
+                // if(get_thread_id() % 64 == 0 || get_thread_id() % 64 == 63)
                 // {
                 //     printf("Async Load t%d: lds_base_ptr=%p, lds_off=%d, lds_coord_offset=%d, "
                 //            "lds_ys_offset=%d dram_off=%d dram_ys_off=%d\n",
                 //            get_thread_id(),
                 //            lds_base_ptr,
                 //            lds_off,
-                //            lds_coord.get_offset() / Traits::PackedSize,
+                //            lds_coord.get_offset(),
                 //            lds_ys_offset,
                 //            dram_off,
                 //            dram_ys_offset);
