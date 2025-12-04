@@ -18,7 +18,7 @@ namespace ck_tile {
 // TODO: we have "memory" clobber here because this inline asm is used for async copy
 CK_TILE_DEVICE void m0_set_with_memory(index_t v)
 {
-    asm volatile("s_mov_b32 m0, %0" : : "s"(v) : "memory");
+    asm volatile("s_mov_b32 m0, %0" : : "s"(__builtin_amdgcn_readfirstlane(v)) : "memory");
 }
 
 // NOTE: this is an immediate value

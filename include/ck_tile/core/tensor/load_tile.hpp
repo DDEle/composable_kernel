@@ -195,7 +195,7 @@ CK_TILE_DEVICE void async_load_tile_raw(LdsTileWindow_&& lds_tile,
 
 CK_TILE_DEVICE void async_load_fence(index_t cnt = 0)
 {
-    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(__builtin_constant_p(cnt) ? cnt : 0) : "memory");
 }
 
 template <typename WindowLengths>

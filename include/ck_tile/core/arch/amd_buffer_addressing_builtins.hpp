@@ -283,22 +283,36 @@ struct buffer_load_if<16, pre_nop>
         auto saved_exec = __builtin_amdgcn_read_exec();
         using mbuf_t    = typename impl::buffer_load_trait<16, T>::payload_t;
         static_assert(sizeof(mbuf_t) == sizeof(T));
+
+        int32x4_t rsrc = {
+            __builtin_amdgcn_readfirstlane(res.x),
+            __builtin_amdgcn_readfirstlane(res.y),
+            __builtin_amdgcn_readfirstlane(res.z),
+            __builtin_amdgcn_readfirstlane(res.w),
+        };
+
+#define v_offset_ __builtin_constant_p(i_offset) ? v_offset : v_offset + i_offset
+#define i_offset_ __builtin_constant_p(i_offset) ? i_offset : 0
+#if 1
         if constexpr(pre_nop)
             asm volatile("s_nop 4\n"
                          "v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
-                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
+                         : "v"(v_offset_), "s"(rsrc), "n"(i_offset_), "v"(flag), "s"(saved_exec)
                          : "memory");
         else
             asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                          "buffer_load_dwordx4 %0, %1, %2, 0 offen offset:%3\n"
                          "s_mov_b64 exec %5"
                          : "+v"(reinterpret_cast<mbuf_t&>(value))
-                         : "v"(v_offset), "s"(res), "n"(i_offset), "v"(flag), "s"(saved_exec)
+                         : "v"(v_offset_), "s"(rsrc), "n"(i_offset_), "v"(flag), "s"(saved_exec)
                          : "memory");
+#endif
     }
+#undef v_offset_
+#undef i_offset_
 };
 
 template <bool pre_nop>
@@ -582,17 +596,24 @@ struct buffer_store_if<8>
         auto save_exec = __builtin_amdgcn_read_exec();
         // TODO: ugly. rocm-6.0/6.1 seems neet bit_cast to same base type to avoid scratch
         using mbuf_t = ext_vector_t<typename T::value_type, T::size()>;
+
+#if 0
+#define v_offset_ __builtin_constant_p(i_offset) ? v_offset : v_offset + i_offset
+#define i_offset_ __builtin_constant_p(i_offset) ? i_offset : 0
         asm volatile("v_cmpx_le_u32 exec, 1, %4\n"
                      "buffer_store_dwordx2 %0, %1, %2, 0 offen offset:%3\n"
                      "s_mov_b64 exec %5"
                      :
                      : "v"(bit_cast<mbuf_t>(value)),
-                       "v"(v_offset),
+                       "v"(v_offset_),
                        "s"(res),
-                       "n"(i_offset),
+                       "n"(i_offset_),
                        "v"(flag),
                        "s"(save_exec)
                      : "memory");
+#undef v_offset_
+#undef i_offset_
+#endif
     }
 };
 
@@ -682,12 +703,12 @@ struct buffer_store_if<1>
 
 CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0)
 {
-    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(__builtin_constant_p(cnt) ? cnt : 0) : "memory");
 }
 
 CK_TILE_DEVICE void lds_load_fence(index_t cnt = 0)
 {
-    asm volatile("s_waitcnt lgkmcnt(%0)" : : "n"(cnt) : "memory");
+    asm volatile("s_waitcnt lgkmcnt(%0)" : : "n"(__builtin_constant_p(cnt) ? cnt : 0) : "memory");
 }
 
 template <typename scalar_type, index_t N, bool pre_nop = false>
@@ -924,18 +945,18 @@ CK_TILE_DEVICE void insert_dummy_dep(Tx& bx, Ty&... by)
 template <typename... T>
 CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0, T&... o)
 {
-    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(__builtin_constant_p(cnt) ? cnt : 0) : "memory");
     impl::insert_dummy_dep(o...);
 }
 
 CK_TILE_DEVICE void buffer_store_fence(index_t cnt = 0)
 {
-    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(__builtin_constant_p(cnt) ? cnt : 0) : "memory");
 }
 
 CK_TILE_DEVICE auto async_load_fence_raw(index_t cnt = 0)
 {
-    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
+    asm volatile("s_waitcnt vmcnt(%0)" : : "n"(__builtin_constant_p(cnt) ? cnt : 0) : "memory");
 }
 
 // buffer load i8
@@ -1225,16 +1246,21 @@ CK_TILE_DEVICE void async_buffer_load_dwordxn_v(void* smem,
                                                 index_t /*flag*/       = 0,
                                                 bool_constant<pre_nop> = {})
 {
-#define CK_TILE_ASYNC_LOAD_WITH_INSTR(instr)                            \
-    if constexpr(pre_nop)                                               \
-        asm volatile("s_nop 4\n" instr " %1, %2, 0 offen offset:%3 lds" \
-                     : "=r"(smem) /*dummy dependency for smem*/         \
-                     : "v"(voffset), "s"(rsrc), "n"(ioffset)            \
-                     : "memory");                                       \
-    else                                                                \
-        asm volatile(instr " %1, %2, 0 offen offset:%3 lds"             \
-                     : "=r"(smem) /*dummy dependency for smem*/         \
-                     : "v"(voffset), "s"(rsrc), "n"(ioffset)            \
+
+#define CK_TILE_ASYNC_LOAD_WITH_INSTR(instr)                                             \
+    if constexpr(pre_nop)                                                                \
+        asm volatile("s_nop 4\n" instr " %1, %2, 0 offen offset:%3 lds"                  \
+                     : "=r"(smem) /*dummy dependency for smem*/                          \
+                     : "v"(__builtin_constant_p(ioffset) ? voffset : voffset + ioffset), \
+                       "s"(rsrc),                                                        \
+                       "n"(__builtin_constant_p(ioffset) ? ioffset : 0)                  \
+                     : "memory");                                                        \
+    else                                                                                 \
+        asm volatile(instr " %1, %2, 0 offen offset:%3 lds"                              \
+                     : "=r"(smem) /*dummy dependency for smem*/                          \
+                     : "v"(__builtin_constant_p(ioffset) ? voffset : voffset + ioffset), \
+                       "s"(rsrc),                                                        \
+                       "n"(__builtin_constant_p(ioffset) ? ioffset : 0)                  \
                      : "memory");
 
     if constexpr(num_dwords == 1)
@@ -1248,7 +1274,9 @@ CK_TILE_DEVICE void async_buffer_load_dwordxn_v(void* smem,
     }
     else if constexpr(num_dwords == 4)
     {
+#if 0
         CK_TILE_ASYNC_LOAD_WITH_INSTR("buffer_load_dwordx4");
+#endif
     }
 #endif
     else
