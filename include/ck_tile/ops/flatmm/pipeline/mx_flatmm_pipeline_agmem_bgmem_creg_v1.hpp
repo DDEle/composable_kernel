@@ -145,40 +145,30 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
     static constexpr index_t a_dsread_per_wg = WG::kM * WG::kK / AK1 / WaveSize;
     static_assert((WG::kM * WG::kK) % (AK1 * WaveSize) == 0);
+    static constexpr index_t b_dsread_per_wg = WG::kN * WG::kK / BK1 / WaveSize;
+    static_assert((WG::kN * WG::kK) % (BK1 * WaveSize) == 0);
 
-    static constexpr index_t a_dsread_num_perK  = a_dsread_per_wg * MIterPerWarp;
-    static constexpr index_t a_dswrite_num_perK = a_dsread_num_perK / NWarp;
-    static constexpr index_t dswrite_rep = (a_dswrite_num_perK + MIterPerWarp - 1) / MIterPerWarp;
-    static constexpr index_t Aload_num_perK = a_dswrite_num_perK;
-    static constexpr index_t Aload_rep      = dswrite_rep;
+    static constexpr index_t a_dsread_num = a_dsread_per_wg * KIterPerWarp * MIterPerWarp;
+    static constexpr index_t a_load_num   = a_dsread_num / NWarp;
+    static constexpr index_t b_dsread_num = b_dsread_per_wg * KIterPerWarp * NIterPerWarp;
+    static constexpr index_t b_load_num   = b_dsread_num / MWarp;
 
-    static constexpr index_t Bload_num_perK = kNPerBlock * WG::kK / NWarp / BK1 / WaveSize;
-    static constexpr index_t Bload_num      = Bload_num_perK * KIterPerWarp;
     static constexpr index_t ScaleBload_num =
         kNPerBlock * kKPerBlock / NWarp / ScaleGranularityK / NXdlPack / KXdlPack / WaveSize;
     static constexpr index_t ScaleAload_num =
         kMPerBlock * kKPerBlock / MWarp / ScaleGranularityK / MXdlPack / KXdlPack / WaveSize;
 
-    // static constexpr index_t KPerScaleLoad = KIterPerWarp / ScaleBload_num;
-    static constexpr index_t HalfMIter = (MIterPerWarp + 1) / 2;
-    static constexpr index_t Bload_rep = (Bload_num_perK + HalfMIter - 1) / HalfMIter;
-
-    static constexpr index_t mfma_perM_perK = NIterPerWarp * mfma_per_wg;
-    static constexpr index_t dswrite_mIter  = (DsWritePreIssue - 1) % MIterPerWarp;
-    static constexpr index_t dswrite_kIter  = (DsWritePreIssue - 1) / MIterPerWarp;
-
     // For the basic gemm pipelien DoubleSmemBuffer set to be false naturally.
     static constexpr bool DoubleSmemBuffer = false;
 
-    CK_TILE_HOST_DEVICE static constexpr auto
-    SchedulerPerM(index_t dsread_perM, index_t dswrite_perM, index_t load_perM)
+#if 0 
+    CK_TILE_HOST_DEVICE static constexpr auto SchedulerPerMPack(index_t dsread_perM,
+                                                                index_t load_perM)
     {
         // Init inst order
-        index_t max_data_inst   = dsread_perM > load_perM
-                                      ? (dsread_perM > dswrite_perM ? dsread_perM : dswrite_perM)
-                                      : (load_perM > dswrite_perM ? load_perM : dswrite_perM);
-        index_t sum_data_inst   = dsread_perM + load_perM + dswrite_perM;
-        index_t round_data_inst = (sum_data_inst + mfma_perM_perK - 1) / mfma_perM_perK;
+        index_t max_data_inst   = max(dsread_perM, load_perM);
+        index_t sum_data_inst   = dsread_perM + load_perM;
+        index_t round_data_inst = (sum_data_inst +  - 1) / ;
 
         index_t inst_order[NIterPerWarp * 10];
         _Pragma("unroll") for(int idx = 0; idx < NIterPerWarp * 10; idx++) { inst_order[idx] = 0; }
@@ -186,11 +176,6 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         index_t index = 0;
         _Pragma("unroll") for(int j = 0; j < max_data_inst; j++)
         {
-            if(dswrite_perM > j)
-            {
-                inst_order[index] = 1;
-                index++;
-            }
             if(load_perM > j)
             {
                 inst_order[index] = 2;
@@ -204,17 +189,17 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         }
 
         // Schedule IGLP
-        _Pragma("unroll") for(int j = 0; j < mfma_perM_perK; j++)
+        _Pragma("unroll") for(int j = 0; j < ; j++)
         {
             index_t inst_idx = 0;
             if(j == 0)
                 ;
             else if(j == 1)
-                inst_idx = mfma_perM_perK == 2 ? 1 : mfma_perM_perK - 2;
+                inst_idx =  == 2 ? 1 :  - 2;
             else if(j == 2)
-                inst_idx = mfma_perM_perK - 1;
+                inst_idx =  - 1;
             else
-                inst_idx = mfma_perM_perK - j;
+                inst_idx =  - j;
 
             __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
@@ -222,30 +207,22 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             {
                 if(r % 2 == 0)
                 {
-                    if(inst_order[inst_idx + r * mfma_perM_perK] == 1)
-                    {
-                        // __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
-                    }
-                    if(inst_order[inst_idx + r * mfma_perM_perK] == 2)
+                    if(inst_order[inst_idx + r * ] == 2)
                     {
                         __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
                     }
-                    if(inst_order[inst_idx + r * mfma_perM_perK] == 3)
+                    if(inst_order[inst_idx + r * ] == 3)
                     {
                         __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
                     }
                 }
                 else
                 {
-                    if(inst_order[(r + 1) * mfma_perM_perK - 1 - inst_idx] == 1)
-                    {
-                        // __builtin_amdgcn_sched_group_barrier(0x200, 1, 0); // DS write
-                    }
-                    if(inst_order[(r + 1) * mfma_perM_perK - 1 - inst_idx] == 2)
+                    if(inst_order[(r + 1) *  - 1 - inst_idx] == 2)
                     {
                         __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
                     }
-                    if(inst_order[(r + 1) * mfma_perM_perK - 1 - inst_idx] == 3)
+                    if(inst_order[(r + 1) *  - 1 - inst_idx] == 3)
                     {
                         __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
                     }
@@ -253,188 +230,167 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             }
         }
     }
+#endif
 
     CK_TILE_HOST_DEVICE static constexpr auto HotLoopScheduler()
     {
         // Keypoint of pipeline optimize is workload balance in time
-        // instruction schedule example(128X256X256, 1X4, 16X16X128):
-        // Iter MNK     MFMA    ds_read ds_write    A_load  b_load
-        // -1   M6N0:   57      -       8           -       -
-        // -1   M6N1:   58      1       -           -       -
-        // -1   M6N2:   59      -       -           7       -
-        // -1   M6N3:   60      2       -           -       -
-        // -1   M7N0:   61      -       -           -       -
-        // -1   M7N1:   62      3       -           -       -
-        // -1   M7N2:   63      -       -           8       -
-        // -1   M7N3:   64      4       -           -       -
-        //  0   M0N0K0:  1      -       -           -       1
-        //  0   M0N1:    2      5       -           -       -
-        //  0   M0N2:    3      -       -           -       2
-        //  0   M0N3:    4      6       -           -       -
-        //  0   M1N0:    5      -       -           -       3
-        //  0   M1N1:    6      7       -           -       -
-        //  0   M1N2:    7      -       -           -       4
-        //  0   M1N3:    8      8       -           -       -
-        //  0   M2N0:    9      -       -           -       5
-        //  0   M2N1:   10      9       -           -       -
-        //  0   M2N2:   11      -       -           -       6
-        //  0   M2N3:   12     10       -           -       -
-        //  0   M3N0:   13      -       1           -       7
-        //  0   M3N1:   14     11       -           -       -
-        //  0   M3N2:   15      -       -           -       8
-        //  0   M3N3:   16     12       -           -       -
-        //  0   M4N0:   17      -       2           -       -
-        //  0   M4N1:   18     13       -           -       -
-        //  0   M4N2:   19      -       -           1       -
-        //  0   M4N3:   20     14       -           -       -
-        //  0   M5N0:   21      -       3           -       -
-        //  0   M5N1:   22     15       -           -       -
-        //  0   M5N2:   23      -       -           2       -
-        //  0   M5N3:   24     16       -           -       -
-        //  0   M6N0:   25      -       4           -       -
-        //  0   M6N1:   26     17       -           -       -
-        //  0   M6N2:   27      -       -           3       -
-        //  0   M6N3:   28     18       -           -       -
-        //  0   M7N0:   29      -       -           -       -
-        //  0   M7N1:   30     19       -           -       -
-        //  0   M7N2:   31      -       -           4       -
-        //  0   M7N3:   32     20       -           -       -
-        //  0   M0N0K1: 33      -       -           -       9
-        //  0   M0N1:   34     21       -           -       -
-        //  0   M0N2:   35      -       -           -       10
-        //  0   M0N3:   36     22       -           -       -
-        //  0   M1N0:   37      -       -           -       11
-        //  0   M1N1:   38     23       -           -       -
-        //  0   M1N2:   39      -       -           -       12
-        //  0   M1N3:   40     24       -           -       -
-        //  0   M2N0:   41      -       -           -       13
-        //  0   M2N1:   42     25       -           -       -
-        //  0   M2N2:   43      -       -           -       14
-        //  0   M2N3:   44     26       -           -       -
-        //  0   M3N0:   45      -       5           -       15
-        //  0   M3N1:   46     27       -           -       -
-        //  0   M3N2:   47      -       -           -       16
-        //  0   M3N3:   48     28       -           -       -
-        //  0   M4N0:   49      -       6           -       -
-        //  0   M4N1:   50     29       -           -       -
-        //  0   M4N2:   51      -       -           5       -
-        //  0   M4N3:   52     30       -           -       -
-        //  0   M5N0:   53      -       7           -       -
-        //  0   M5N1:   54     31       -           -       -
-        //  0   M5N2:   55      -       -           6       -
-        //  0   M5N3:   56     32       -           -       -
-        //  0   M6N0:   57      -       8           -       -
-        //  0   M6N1:   58      1       -           -       -
-        //  0   M6N2:   59      -       -           7       -
-        //  0   M6N3:   60      2       -           -       -
-        //  0   M7N0:   61      -       -           -       -
-        //  0   M7N1:   62      3       -           -       -
-        //  0   M7N2:   63      -       -           8       -
-        //  0   M7N3:   64      4       -           -       -
+        // instruction schedule example(fp4, 128X256X256, 1X4, 16X16X128):
+        // Iter MNK     MFMA  a_dsread b_dsread  A_load  b_load scale_load
+        // -1   M6N2K0  56    -        -         -       -      -
+        // -1   M6N3K0  57    -        -         -       -      -
+        // -1   M7N2K0  58    -        -         -       -      -
+        // -1   M7N3K0  59    -        -         -       -      -
+        // -1   M6N2K1  60    -        -         -       -      -
+        // -1   M6N3K1  61   01        -         -       -      -
+        // -1   M7N2K1  62    -        -         -       -      -
+        // -1   M7N3K1  63   23        -         -       -      -
+        //  0   M0N0K0   0    -        4         0       -      -
+        //  0   M0N1K0   1    -        5         1       -      -
+        //  0   M1N0K0   2    -        -         2       -      -
+        //  0   M1N1K0   3    -        -         3       -      -
+        //  0   M0N0K1   4    -        6         -       4      -
+        //  0   M0N1K1   5    -        7         -       5      -
+        //  0   M1N0K1   6    -        -         -       6      -
+        //  0   M1N1K1   7    -        -         -       7      -
+        //  0   M0N2K0   8    -        -         -       8      -
+        //  0   M0N3K0   9    -        -         -       -      -
+        //  0   M1N2K0  10    -        -         -       9      -
+        //  0   M1N3K0  11    -        -         -       -      -
+        //  0   M0N2K1  12    -        -         -      10      -
+        //  0   M0N3K1  13   45        -         -       -      -
+        //  0   M1N2K1  14    -        -         -      11      -
+        //  0   M1N3K1  15   67        -         -       -      -
+        //  0   M2N0K0  16    -        -         -      12      -
+        //  0   M2N1K0  17    -        -         -      13      -
+        //  0   M3N0K0  18    -        -         -      14      -
+        //  0   M3N1K0  19    -        -         -      15      -
+        //  0   M2N0K1  20    -        -         -      16      -
+        //  0   M2N1K1  21    -        -         -       -     a0
+        //  0   M3N0K1  22    -        -         -       -     a1
+        //  0   M3N1K1  23    -        -         -       -     a2
+        //  0   M2N2K0  24    -        -         -       -     a3
+        //  0   M2N3K0  25    -        -         -       -      -
+        //  0   M3N2K0  26    -        -         -       -     a4
+        //  0   M3N3K0  27    -        -         -       -      -
+        //  0   M2N2K1  28    -        -         -       -     a5
+        //  0   M2N3K1  29   89        -         -       -      -
+        //  0   M3N2K1  30    -        -         -       -     a6
+        //  0   M3N3K1  31 1011        -         -       -      -
+        //  0   M4N0K0  32    -        -         -       -     a7
+        //  0   M4N1K0  33    -        -         -       -     b0
+        //  0   M5N0K0  34    -        -         -       -     b1
+        //  0   M5N1K0  35    -        -         -       -     b2
+        //  0   M4N0K1  36    -        -         -       -     b3
+        //  0   M4N1K1  37    -        -         -       -      -
+        //  0   M5N0K1  38    -        -         -       -      -
+        //  0   M5N1K1  39    -        -         -       -      -
+        //  0   M4N2K0  40    -        -         -       -      -
+        //  0   M4N3K0  41    -        -         -       -      -
+        //  0   M5N2K0  42    -        -         -       -      -
+        //  0   M5N3K0  43    -        -         -       -      -
+        //  0   M4N2K1  44    -        -         -       -      -
+        //  0   M4N3K1  45 1213        -         -       -      -
+        //  0   M5N2K1  46    -        -         -       -      -
+        //  0   M5N3K1  47 1415        -         -       -      -
+        //  0   M6N0K0  48    -        -         -       -      -
+        //  0   M6N1K0  49    -        -         -       -      -
+        //  0   M7N0K0  50    -        0         -       -      -
+        //  0   M7N1K0  51    -        1         -       -      -
+        //  0   M6N0K1  52    -        -         -       -      -
+        //  0   M6N1K1  53    -        -         -       -      -
+        //  0   M7N0K1  54    -        2         -       -      -
+        //  0   M7N1K1  55    -        3         -       -      -
+        //  0   M6N2K0  56    -        -         -       -      -
+        //  0   M6N3K0  57    -        -         -       -      -
+        //  0   M7N2K0  58    -        -         -       -      -
+        //  0   M7N3K0  59    -        -         -       -      -
+        //  0   M6N2K1  60    -        -         -       -      -
+        //  0   M6N3K1  61 1617        -         -       -      -
+        //  0   M7N2K1  62    -        -         -       -      -
+        //  0   M7N3K1  63 1819        -         -       -      -
 
-        _Pragma("unroll") for(int kIter = 0; kIter < KIterPerWarp; kIter++)
-        {
-            _Pragma("unroll") for(int mIter = 0; mIter < MIterPerWarp; mIter++)
-            {
-                index_t dsread_perM  = 0;
-                index_t dswrite_perM = 0;
-                index_t load_perM    = 0;
+        constexpr int DSREAD_A = 0, DSREAD_B = 1, LOAD_A = 2, LOAD_B = 3, SCALE_AB = 4;
+        int load_a_cnt     = a_load_num;
+        int load_b_cnt     = b_load_num;
+        int load_scale_cnt = ScaleAload_num + ScaleBload_num;
 
-                // Calculate ds_read number per M
-                dsread_perM = a_dsread_per_wg;
+        constexpr int wg_cnt = KIterPerWarp * MIterPerWarp * NIterPerWarp;
+        index_t queue_start  = 0;
+        index_t queue_end    = 0;
+        int32_t queue[wg_cnt];
+        _Pragma("unroll") for(int i = 0; i < wg_cnt + 16; i++) queue[i] = 0;
 
-                // Calculate ds_write number per M
-                if(mIter == 0)
-                {
-                    dswrite_perM =
-                        (a_dswrite_num_perK - (MIterPerWarp - DsWritePreIssue) * dswrite_rep) > 0
-                            ? a_dswrite_num_perK - (MIterPerWarp - DsWritePreIssue) * dswrite_rep
-                            : 0;
-                }
-                else if(mIter >= MIterPerWarp - DsWritePreIssue + 1)
-                {
-                    dswrite_perM = 0;
-                }
-                else
-                {
-                    dswrite_perM = (a_dswrite_num_perK -
-                                    (MIterPerWarp - DsWritePreIssue - mIter) * dswrite_rep) > 0
-                                       ? dswrite_rep
-                                       : 0;
-                }
-                // Add ds write when ds write data > needed
-                if(a_dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
-                {
-                    if(mIter == MIterPerWarp - 1 - dswrite_mIter)
-                        dswrite_perM = 1;
-                }
+        static_for_product<sequence<0, KPackIterPerWarp, 1>,
+                           sequence<0, MPackIterPerWarp, 1>,
+                           sequence<0, NPackIterPerWarp, 1>,
+                           sequence<0, KXdlPack, 1>,
+                           sequence<0, MXdlPack, 1>,
+                           sequence<0, NXdlPack, 1>>{}(
+            [&](auto ikpack, auto impack, auto inpack, auto ikxdl, auto imxdl, auto inxdl) {
+                static_assert(mfma_per_wg == 1);
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // MFMA
 
-                // Calculate buffer_load number per M
-                if(mIter < HalfMIter)
+                constexpr auto m_iter = impack * MXdlPack + imxdl;
+                constexpr auto n_iter = inpack * NXdlPack + inxdl;
+
+                if constexpr(n_iter == NIterPerWarp - 1 && ikxdl == KXdlPack - 1)
                 {
-                    load_perM =
-                        ((Aload_num_perK - (MIterPerWarp - 1 - mIter) * Aload_rep) > 0 ? Aload_rep
-                                                                                       : 0) +
-                        ((Bload_num_perK - (HalfMIter - 1 - mIter) * Bload_rep) > 0 ? Bload_rep
-                                                                                    : 0);
+                    queue[queue_end++] = DSREAD_A;
                 }
-                else
-                {
-                    load_perM = (Aload_num_perK - (MIterPerWarp - 1 - mIter) * Aload_rep) > 0
-                                    ? Aload_rep
-                                    : 0;
-                }
-                // if((kIter % KPerScaleLoad == 0) && (mIter == 0))
+                // if constexpr(m_iter == MIterPerWarp - 1 && ikxdl == KXdlPack - 1)
                 // {
-                //     load_perM = load_perM + 1;
+                //     queue[queue_end++] = DSREAD_B;
                 // }
-                SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
-            }
-        }
-        // Add Aload when Aload data > needed
-        if(Aload_num_perK == 0)
-            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
-        __builtin_amdgcn_sched_barrier(0);
+
+                if(queue_start == queue_end)
+                {
+                    if(load_a_cnt > 0)
+                    {
+                        queue[queue_end++] = LOAD_A;
+                        load_a_cnt--;
+                    }
+                    else if(load_b_cnt > 0)
+                    {
+                        queue[queue_end++] = LOAD_B;
+                        load_b_cnt--;
+                    }
+                    else if(load_scale_cnt > 0)
+                    {
+                        queue[queue_end++] = SCALE_AB;
+                        load_scale_cnt--;
+                    }
+                }
+
+                // consume queue
+                if(queue_start < queue_end)
+                {
+                    int inst = queue[queue_start++];
+                    if(inst == DSREAD_A || inst == DSREAD_B)
+                    {
+                        __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                        __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // DS read
+                    }
+                    else if(inst == LOAD_A || inst == LOAD_B || inst == SCALE_AB)
+                    {
+                        __builtin_amdgcn_sched_group_barrier(0x020, 1, 0); // VMEM read
+                    }
+                }
+            });
     }
 
+#if 0 
     CK_TILE_HOST_DEVICE static constexpr auto Last2ndHotLoopScheduler()
     {
-        _Pragma("unroll") for(int kIter = 0; kIter < KIterPerWarp; kIter++)
+        _Pragma("unroll") for(int kIter = 0; kIter < KPackIterPerWarp; kIter++)
         {
             _Pragma("unroll") for(int mIter = 0; mIter < MIterPerWarp; mIter++)
             {
-                index_t dsread_perM  = 0;
-                index_t dswrite_perM = 0;
-                index_t load_perM    = 0;
+                index_t dsread_perM = 0;
+                index_t load_perM   = 0;
 
                 // Calculate ds_read number per M
                 dsread_perM = a_dsread_per_wg;
-
-                // Calculate ds_write number per M
-                if(mIter == 0)
-                {
-                    dswrite_perM =
-                        (a_dswrite_num_perK - (MIterPerWarp - DsWritePreIssue) * dswrite_rep) > 0
-                            ? a_dswrite_num_perK - (MIterPerWarp - DsWritePreIssue) * dswrite_rep
-                            : 0;
-                }
-                else if(mIter >= MIterPerWarp - DsWritePreIssue + 1)
-                {
-                    dswrite_perM = 0;
-                }
-                else
-                {
-                    dswrite_perM = (a_dswrite_num_perK -
-                                    (MIterPerWarp - DsWritePreIssue - mIter) * dswrite_rep) > 0
-                                       ? dswrite_rep
-                                       : 0;
-                }
-                // Add ds write when ds write data > needed
-                if(a_dswrite_num_perK == 0 && kIter == (KIterPerWarp - 1 - dswrite_kIter))
-                {
-                    if(mIter == MIterPerWarp - 1 - dswrite_mIter)
-                        dswrite_perM = 1;
-                }
 
                 // Calculate buffer_load number per M
                 if(mIter < HalfMIter)
@@ -443,7 +399,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         ((Bload_num_perK - (HalfMIter - 1 - mIter) * Bload_rep) > 0 ? Bload_rep
                                                                                     : 0);
                 }
-                SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
+                SchedulerPerMPack(dsread_perM, load_perM);
             }
         }
         __builtin_amdgcn_sched_barrier(0);
@@ -455,20 +411,19 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         {
             _Pragma("unroll") for(int mIter = 0; mIter < MIterPerWarp; mIter++)
             {
-                index_t dsread_perM  = 0;
-                index_t dswrite_perM = 0;
-                index_t load_perM    = 0;
+                index_t dsread_perM = 0;
+                index_t load_perM   = 0;
 
                 // Calculate ds_read number per M
                 if((kIter * MIterPerWarp + mIter) < (KIterPerWarp * MIterPerWarp - m_preload))
                     dsread_perM = a_dsread_per_wg;
 
-                SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
+                SchedulerPerMPack(dsread_perM, load_perM);
             }
         }
         // __builtin_amdgcn_sched_barrier(0);
     }
-
+#endif
     CK_TILE_HOST_DEVICE static constexpr auto GetADramTileDistribution()
     {
         return PipelinePolicy::template MakeADramTileDistribution<Problem>();
@@ -695,8 +650,8 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             });
         if constexpr(HasSndLoop)
         {
-            async_load_tile_(b_store_lds_window_pong, b_flat_dram_window);
-            move_tile_window(b_flat_dram_window, {0, KIterPerWarp * KFlatBytesPerBlockPerIter});
+            // async_load_tile_(b_store_lds_window_pong, b_flat_dram_window);
+            // move_tile_window(b_flat_dram_window, {0, KIterPerWarp * KFlatBytesPerBlockPerIter});
         }
         // initialize C
         statically_indexed_array<statically_indexed_array<CWarpTensor, NIterPerWarp>, MIterPerWarp>
@@ -721,38 +676,26 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                 a_warp_window_ping, tuple<number<mIter * WG::kM>, number<kIter * WG::kK>>{});
         });
 
-        static_for_product<sequence<0, KPackIterPerWarp, 1>,
-                           sequence<0, NPackIterPerWarp, 1>,
-                           sequence<0, KXdlPack, 1>,
-                           sequence<0, NXdlPack, 1>>{}(
-            [&](auto ikpack, auto inpack, auto ikxdl, auto inxdl) {
-                constexpr auto nIter     = inpack * NXdlPack + inxdl;
-                constexpr auto kIter     = ikpack * KXdlPack + ikxdl;
-                constexpr auto BwarpIter = kIter * NIterPerWarp + nIter;
-                constexpr auto nOffset   = inpack * NXdlPack * NWarp + inxdl;
+        // static_for_product<sequence<0, KPackIterPerWarp, 1>,
+        //                    sequence<0, NPackIterPerWarp, 1>,
+        //                    sequence<0, KXdlPack, 1>,
+        //                    sequence<0, NXdlPack, 1>>{}(
+        //     [&](auto ikpack, auto inpack, auto ikxdl, auto inxdl) {
+        //         constexpr auto nIter     = inpack * NXdlPack + inxdl;
+        //         constexpr auto kIter     = ikpack * KXdlPack + ikxdl;
+        //         constexpr auto BwarpIter = kIter * NIterPerWarp + nIter;
+        //         constexpr auto nOffset   = inpack * NXdlPack * NWarp + inxdl;
 
-                b_warp_tensor(number<BwarpIter>{}) = load_tile_with_offset(
-                    b_warp_window_ping,
-                    tuple<number<nOffset>, number<kIter * WG::kN * WG::kK / BPackedSize>>{});
-            });
+        //         b_warp_tensor(number<BwarpIter>{}) = load_tile_with_offset(
+        //             b_warp_window_ping,
+        //             tuple<number<nOffset>, number<kIter * WG::kN * WG::kK / BPackedSize>>{});
+        //     });
 
         __builtin_amdgcn_sched_barrier(0);
 
         // MAIN LOOP
         auto main_body_implx2 = [&]() mutable {
-            static_for<0, a_xdl_packs, 1>{}( // async load A(2i+1) next part & A(2i+2) first part
-                [&](auto i_a_pack) {
-                    constexpr auto i_pack_with_offset = i_a_pack + a_preload_packs;
-                    constexpr auto next_i_pack_load   = i_pack_with_offset % a_xdl_packs;
-                    if(next_i_pack_load == 0)
-                        move_tile_window(a_dram_window, {0, kKPerBlock});
-                    constexpr auto next_impack = next_i_pack_load / KPackIterPerWarp;
-                    constexpr auto next_ikpack = next_i_pack_load % KPackIterPerWarp;
-                    constexpr auto offset = make_tuple(number<next_impack * MXdlPack * WG::kM>{},
-                                                       number<next_ikpack * KXdlPack * WG::kK>{});
-                    async_load_tile_with_offset(a_store_lds_window_ping, a_dram_window, offset);
-                });
-
+            __builtin_amdgcn_sched_barrier(0);
             // prefetch Scale A and Scale B (2i+1)
             static_for<0, KPackIterPerWarp, 1>{}([&](auto ikpack) {
                 static_for<0, MPackIterPerWarp, 1>{}([&](auto impack) {
@@ -761,7 +704,6 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         impack * scale_a_dram_step_m + ikpack * scale_a_dram_step_k);
                 });
             });
-
             static_for<0, KPackIterPerWarp, 1>{}([&](auto ikpack) {
                 static_for<0, NPackIterPerWarp, 1>{}([&](auto inpack) {
                     scale_b_tile_tensor_pong(inpack)(ikpack) = load_tile_with_offset(
@@ -769,6 +711,40 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         inpack * scale_b_dram_step_n + ikpack * scale_b_dram_step_k);
                 });
             });
+
+            // Prefetch B(2i+1)
+            async_load_tile_(b_store_lds_window_pong, b_flat_dram_window);
+            move_tile_window(b_flat_dram_window, {0, KIterPerWarp * KFlatBytesPerBlockPerIter});
+
+            // async load A(2i+1) next part & A(2i+2) first part
+            static_for<0, a_xdl_packs, 1>{}([&](auto i_a_pack) {
+                constexpr auto i_pack_with_offset = i_a_pack + a_preload_packs;
+                constexpr auto next_i_pack_load   = i_pack_with_offset % a_xdl_packs;
+                if(next_i_pack_load == 0)
+                    move_tile_window(a_dram_window, {0, kKPerBlock});
+                constexpr auto next_impack = next_i_pack_load / KPackIterPerWarp;
+                constexpr auto next_ikpack = next_i_pack_load % KPackIterPerWarp;
+                constexpr auto offset      = make_tuple(number<next_impack * MXdlPack * WG::kM>{},
+                                                   number<next_ikpack * KXdlPack * WG::kK>{});
+                async_load_tile_with_offset(a_store_lds_window_ping, a_dram_window, offset);
+            });
+
+            __builtin_amdgcn_sched_barrier(0);
+            // preload B(2i) from lds
+            static_for_product<sequence<0, KPackIterPerWarp, 1>,
+                               sequence<0, NPackIterPerWarp, 1>,
+                               sequence<0, KXdlPack, 1>,
+                               sequence<0, NXdlPack, 1>>{}(
+                [&](auto ikpack, auto inpack, auto ikxdl, auto inxdl) {
+                    constexpr auto nIter     = inpack * NXdlPack + inxdl;
+                    constexpr auto kIter     = ikpack * KXdlPack + ikxdl;
+                    constexpr auto BwarpIter = kIter * NIterPerWarp + nIter;
+                    constexpr auto nOffset   = inpack * NXdlPack * NWarp + inxdl;
+
+                    b_warp_tensor(number<BwarpIter>{}) = load_tile_with_offset(
+                        b_warp_window_ping,
+                        tuple<number<nOffset>, number<kIter * WG::kN * WG::kK / BPackedSize>>{});
+                });
 
             // GEMM 2i
             static_for_product<sequence<0, KPackIterPerWarp, 1>,
@@ -806,17 +782,20 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         }
                     }
                 });
+            // move ab scale window to next K
+            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
             // barrier as ds_load A(2i) and buffer_load_lds A(2i + 1) finished
             s_waitcnt</*vmcnt*/ ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
+            HotLoopScheduler();
+            __builtin_amdgcn_sched_barrier(0);
+
+            ////////////////////////////// Next K //////////////////////////////
 
             // Prefetch B(2i+2)
             async_load_tile_(b_store_lds_window_ping, b_flat_dram_window);
             move_tile_window(b_flat_dram_window, {0, KIterPerWarp * KFlatBytesPerBlockPerIter});
-
-            // move B window to next flat K
-            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
-            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
 
             // preload B(2i+1) from lds
             static_for_product<sequence<0, KPackIterPerWarp, 1>,
@@ -833,10 +812,6 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         b_warp_window_pong,
                         tuple<number<nOffset>, number<kIter * WG::kN * WG::kK / BPackedSize>>{});
                 });
-
-            HotLoopScheduler();
-
-            ////////////////////////////// Next K //////////////////////////////
             static_for<0, a_xdl_packs, 1>{}( // async load A(2i+2) next part & A(2i+3) first part
                 [&](auto i_a_pack) {
                     constexpr auto i_pack_with_offset = i_a_pack + a_preload_packs;
@@ -903,33 +878,14 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         }
                     }
                 });
+            // move ab scale window to next K
+            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
+            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
             // barrier as ds_load A(2i + 1) and buffer_load_lds A(2i + 2) finished
             s_waitcnt</*vmcnt*/ ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
-
-            // Prefetch B(2i+3)
-            async_load_tile_(b_store_lds_window_pong, b_flat_dram_window);
-            move_tile_window(b_flat_dram_window, {0, KIterPerWarp * KFlatBytesPerBlockPerIter});
-            // move B window to next flat K
-            move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
-            move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
-
-            // preload B(2i+2) from lds
-            static_for_product<sequence<0, KPackIterPerWarp, 1>,
-                               sequence<0, NPackIterPerWarp, 1>,
-                               sequence<0, KXdlPack, 1>,
-                               sequence<0, NXdlPack, 1>>{}(
-                [&](auto ikpack, auto inpack, auto ikxdl, auto inxdl) {
-                    constexpr auto nIter     = inpack * NXdlPack + inxdl;
-                    constexpr auto kIter     = ikpack * KXdlPack + ikxdl;
-                    constexpr auto BwarpIter = kIter * NIterPerWarp + nIter;
-                    constexpr auto nOffset   = inpack * NXdlPack * NWarp + inxdl;
-
-                    b_warp_tensor(number<BwarpIter>{}) = load_tile_with_offset(
-                        b_warp_window_ping,
-                        tuple<number<nOffset>, number<kIter * WG::kN * WG::kK / BPackedSize>>{});
-                });
             HotLoopScheduler();
+            __builtin_amdgcn_sched_barrier(0);
         };
 
         if constexpr(HasHotLoop)
@@ -945,6 +901,25 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         // TAIL
         if constexpr(TailNum == TailNumber::Even)
         {
+            // Prefetch B(2i+1)
+            async_load_tile_(b_store_lds_window_pong, b_flat_dram_window);
+            move_tile_window(b_flat_dram_window, {0, KIterPerWarp * KFlatBytesPerBlockPerIter});
+            // preload B(2i) from lds
+            static_for_product<sequence<0, KPackIterPerWarp, 1>,
+                               sequence<0, NPackIterPerWarp, 1>,
+                               sequence<0, KXdlPack, 1>,
+                               sequence<0, NXdlPack, 1>>{}(
+                [&](auto ikpack, auto inpack, auto ikxdl, auto inxdl) {
+                    constexpr auto nIter     = inpack * NXdlPack + inxdl;
+                    constexpr auto kIter     = ikpack * KXdlPack + ikxdl;
+                    constexpr auto BwarpIter = kIter * NIterPerWarp + nIter;
+                    constexpr auto nOffset   = inpack * NXdlPack * NWarp + inxdl;
+
+                    b_warp_tensor(number<BwarpIter>{}) = load_tile_with_offset(
+                        b_warp_window_ping,
+                        tuple<number<nOffset>, number<kIter * WG::kN * WG::kK / BPackedSize>>{});
+                });
+
             static_for<0, a_xdl_packs, 1>{}( // async load A(2i+1) next part & A(2i+2) first part
                 [&](auto i_a_pack) {         // TODO(Yi): remove unused load
                     constexpr auto i_pack_with_offset = i_a_pack + a_preload_packs;
@@ -1013,6 +988,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             // barrier as ds_load A(2i) and buffer_load_lds A(2i + 1) finished
             s_waitcnt</*vmcnt*/ ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
+            // Last2ndHotLoopScheduler();
 
             // preload A(2i+1) and B(2i+1) from lds
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
@@ -1021,6 +997,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                 a_warp_tensor(loadIter) = load_tile_with_offset(
                     a_warp_window_pong, tuple<number<mIter * WG::kM>, number<kIter * WG::kK>>{});
             });
+            // preload B(2i+1) from lds
             static_for_product<sequence<0, KPackIterPerWarp, 1>,
                                sequence<0, NPackIterPerWarp, 1>,
                                sequence<0, KXdlPack, 1>,
@@ -1035,8 +1012,6 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         b_warp_window_pong,
                         tuple<number<nOffset>, number<kIter * WG::kN * WG::kK / BPackedSize>>{});
                 });
-
-            Last2ndHotLoopScheduler();
 
             // GEMM loopK
             static_for_product<sequence<0, KPackIterPerWarp, 1>,
@@ -1074,13 +1049,28 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         }
                     }
                 });
-            LastHotLoopScheduler();
+            // LastHotLoopScheduler();
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
             // if(get_thread_id() < 64)
             //     printf("Odd Tail\n");
             // GEMM loopK
+            // preload B(2i) from lds
+            static_for_product<sequence<0, KPackIterPerWarp, 1>,
+                               sequence<0, NPackIterPerWarp, 1>,
+                               sequence<0, KXdlPack, 1>,
+                               sequence<0, NXdlPack, 1>>{}(
+                [&](auto ikpack, auto inpack, auto ikxdl, auto inxdl) {
+                    constexpr auto nIter     = inpack * NXdlPack + inxdl;
+                    constexpr auto kIter     = ikpack * KXdlPack + ikxdl;
+                    constexpr auto BwarpIter = kIter * NIterPerWarp + nIter;
+                    constexpr auto nOffset   = inpack * NXdlPack * NWarp + inxdl;
+
+                    b_warp_tensor(number<BwarpIter>{}) = load_tile_with_offset(
+                        b_warp_window_ping,
+                        tuple<number<nOffset>, number<kIter * WG::kN * WG::kK / BPackedSize>>{});
+                });
             static_for_product<sequence<0, KPackIterPerWarp, 1>,
                                sequence<0, MPackIterPerWarp, 1>,
                                sequence<0, NPackIterPerWarp, 1>,
@@ -1118,7 +1108,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         }
                     }
                 });
-            LastHotLoopScheduler();
+            // LastHotLoopScheduler();
         }
         else
         {
