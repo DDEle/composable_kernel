@@ -73,7 +73,6 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
     using WG = remove_cvref_t<decltype(config.template at<0>())>;
 
     static constexpr index_t DsWritePreIssue = 3; // default 2, ds write at MIter - 2
-    static constexpr index_t DsReadPreload   = 4; // default 4 for MXFP4 (MXdlPack * KXdlPack)
 
     static constexpr index_t BlockSize = Problem::kBlockSize;
     static constexpr index_t WaveSize  = get_warp_size();
@@ -131,9 +130,8 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
     static constexpr index_t AK1 = Problem::VectorLoadSize / sizeof(ADataType);
     static constexpr index_t BK1 = Problem::VectorLoadSize / sizeof(BDataType);
 
-    static constexpr index_t m_preload = (MIterPerWarp * KIterPerWarp >= DsReadPreload)
-                                             ? DsReadPreload
-                                             : MIterPerWarp * KIterPerWarp;
+    static constexpr index_t a_preload_packs = 1;
+    static constexpr index_t m_preload       = a_preload_packs * MXdlPack * KXdlPack;
 
     static constexpr bool HasHotLoop = Problem::HasHotLoop;
     static constexpr auto TailNum    = Problem::TailNum;
@@ -624,7 +622,13 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
         // HEAD
         // Prefetch A0
-        async_load_tile_(a_store_lds_window_ping, a_dram_window);
+        static_for_product<number<KPackIterPerWarp>, number<MPackIterPerWarp>>{}( //
+            [&](auto ikpack, auto impack) {
+                async_load_tile_with_offset(a_store_lds_window_ping,
+                                            a_dram_window,
+                                            make_tuple(number<impack * MXdlPack * WG::kM>{},
+                                                       number<ikpack * KXdlPack * WG::kK>{}));
+            });
         move_tile_window(a_dram_window, {0, kKPerBlock});
 
         // prefetch B
@@ -666,7 +670,13 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         // Prefetch A1
         if constexpr(HasHotLoop || TailNum == TailNumber::Even)
         {
-            async_load_tile_(a_store_lds_window_pong, a_dram_window);
+            static_for_product<number<KPackIterPerWarp>, number<MPackIterPerWarp>>{}(
+                [&](auto ikpack, auto impack) {
+                    async_load_tile_with_offset(a_store_lds_window_pong,
+                                                a_dram_window,
+                                                make_tuple(number<impack * MXdlPack * WG::kM>{},
+                                                           number<ikpack * KXdlPack * WG::kK>{}));
+                });
             move_tile_window(a_dram_window, {0, kKPerBlock});
         }
         // initialize C
@@ -770,7 +780,13 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             block_sync_lds();
 
             // Prefetch A(2i+2)
-            async_load_tile_(a_store_lds_window_ping, a_dram_window);
+            static_for_product<number<KPackIterPerWarp>, number<MPackIterPerWarp>>{}(
+                [&](auto ikpack, auto impack) {
+                    async_load_tile_with_offset(a_store_lds_window_ping,
+                                                a_dram_window,
+                                                make_tuple(number<impack * MXdlPack * WG::kM>{},
+                                                           number<ikpack * KXdlPack * WG::kK>{}));
+                });
             move_tile_window(a_dram_window, {0, kKPerBlock});
 
             // move B window to next flat K
@@ -866,7 +882,13 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             block_sync_lds();
 
             // Prefetch A(2i+3)
-            async_load_tile_(a_store_lds_window_pong, a_dram_window);
+            static_for_product<number<KPackIterPerWarp>, number<MPackIterPerWarp>>{}(
+                [&](auto ikpack, auto impack) {
+                    async_load_tile_with_offset(a_store_lds_window_pong,
+                                                a_dram_window,
+                                                make_tuple(number<impack * MXdlPack * WG::kM>{},
+                                                           number<ikpack * KXdlPack * WG::kK>{}));
+                });
             move_tile_window(a_dram_window, {0, kKPerBlock});
             // move B window to next flat K
             move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
