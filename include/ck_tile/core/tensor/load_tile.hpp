@@ -150,11 +150,12 @@ template <typename LdsTileWindow_,
           index_t i_access           = -1,
           bool oob_conditional_check = true,
           bool static_move_ys        = false,
+          typename offset_t,
           typename = std::enable_if_t<std::is_class_v<remove_cvref_t<LdsTileWindow_>> &&
                                       std::is_class_v<TileWindow_>>>
 CK_TILE_DEVICE void async_load_tile_with_offset(LdsTileWindow_&& lds_tile,
                                                 const TileWindow_& tile_window,
-                                                index_t offset,
+                                                offset_t offset,
                                                 number<i_access>                         = {},
                                                 bool_constant<oob_conditional_check> occ = {},
                                                 bool_constant<static_move_ys> smy        = {})

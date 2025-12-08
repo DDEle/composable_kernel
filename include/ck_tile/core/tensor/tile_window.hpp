@@ -538,8 +538,9 @@ struct tile_window_with_static_distribution
               index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true,
               bool static_move_ys         = false,
+              typename offset_t,
               typename = std::enable_if_t<std::is_class_v<remove_cvref_t<LdsTileWindow_>>>>
-    CK_TILE_DEVICE void async_load_with_offset(index_t offset,
+    CK_TILE_DEVICE void async_load_with_offset(offset_t offset,
                                                LdsTileWindow_&& lds_tile,
                                                number<i_access_unsupport_>          = {},
                                                bool_constant<oob_conditional_check> = {},
@@ -551,6 +552,17 @@ struct tile_window_with_static_distribution
 
         using vector_t = typename Traits::vector_t;
         using SFC_Ys   = typename Traits::SFC_Ys;
+
+        const auto dram_off = [&]() {
+            if constexpr(std::is_integral_v<offset_t>)
+                return offset;
+            else if constexpr(is_constant_v<offset_t>)
+                return offset_t::value;
+            else
+            {
+                return 0;
+            }
+        }();
 
         // Precompute invariant values outside loops
         const auto window_origin       = lds_tile.get_window_origin();
@@ -585,6 +597,15 @@ struct tile_window_with_static_distribution
                     }
                     else
                         return 0;
+                }() + [&]() {
+                    if constexpr(is_tuple_v<offset_t>)
+                    {
+                        const auto coord_offset =
+                            make_tensor_coordinate(tensor_descriptor, to_multi_index(offset_t{}));
+                        return coord_offset.get_offset();
+                    }
+                    else
+                        return 0;
                 }();
 
                 // Use precomputed window origin & tensor descriptor
@@ -607,12 +628,22 @@ struct tile_window_with_static_distribution
                     }
                     else
                         return 0;
+                }() + [&]() {
+                    if constexpr(is_tuple_v<offset_t>)
+                    {
+                        const auto coord_offset = make_tensor_coordinate(
+                            this->get_bottom_tensor_view().get_tensor_descriptor(),
+                            to_multi_index(offset_t{}));
+                        return coord_offset.get_offset();
+                    }
+                    else
+                        return 0;
                 }();
 
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                     smem,
                     bottom_tensor_thread_coord,
-                    offset + dram_ys_offset,
+                    dram_off + dram_ys_offset,
                     bool_constant<oob_conditional_check>{});
 
                 // Move thread coordinate if not last access

@@ -608,6 +608,9 @@ CK_TILE_HOST_DEVICE constexpr auto tuple_reduce(F&& f, const tuple<Ts...>& t)
 template <typename T>
 using is_tuple = decltype(std::declval<T&>().IsTuple());
 
+template <typename T>
+inline constexpr auto is_tuple_v = is_detected<is_tuple, T>::value;
+
 template <typename... Ts>
 CK_TILE_HOST_DEVICE constexpr auto is_nested_tuple(const tuple<Ts...>&)
 {

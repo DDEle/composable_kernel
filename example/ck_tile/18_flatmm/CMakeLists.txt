@@ -14,7 +14,7 @@ endforeach()
 if(has_supported_gpu)
     # NOTE: we turn off undefined-func-template to let source compile without explicit declare function specializations
     #       ... because they are auto-generated
-    set(EXAMPLE_FLATMM_COMPILE_OPTIONS -Wno-undefined-func-template)
+    set(EXAMPLE_FLATMM_COMPILE_OPTIONS -Wno-undefined-func-template --save-temps -Wno-gnu-line-marker)
     set(EXAMPLE_MOE_FLATMM_COMPILE_OPTIONS)
 
     if(CK_USE_OCP_FP8)
