@@ -69,19 +69,20 @@ int run_mx_flatmm_with_layouts(int argc,
     ck_tile::HostTensor<ScaleType> scale_b(ck_tile::host_tensor_descriptor(
         K / ScaleGranularityK, N / ScaleGranularityN, scale_stride_B, is_row_major(b_layout)));
 
+    std::srand(42);
     if(init_method == 0)
     {
-        ck_tile::FillUniformDistribution<>{0.0f, 1.0f}(a_host);
-        ck_tile::FillUniformDistribution<>{-.5f, .5f}(b_origin_host);
-        ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_a);
-        ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_b);
+        ck_tile::FillUniformDistribution<>{0.0f, 1.0f, std::rand()}(a_host);
+        ck_tile::FillUniformDistribution<>{-.5f, .5f, std::rand()}(b_origin_host);
+        ck_tile::FillUniformDistribution<>{-2.f, 2.f, std::rand()}(scale_a);
+        ck_tile::FillUniformDistribution<>{-2.f, 2.f, std::rand()}(scale_b);
     }
     else if(init_method == 1)
     {
-        ck_tile::FillUniformDistribution<>{1.f, 1.f}(a_host);
-        ck_tile::FillUniformDistribution<>{1.f, 1.f}(b_origin_host);
-        ck_tile::FillUniformDistribution<>{1.f, 1.f}(scale_a);
-        ck_tile::FillUniformDistribution<>{1.f, 1.f}(scale_b);
+        ck_tile::FillUniformDistribution<>{1.f, 1.f, std::rand()}(a_host);
+        ck_tile::FillUniformDistribution<>{1.f, 1.f, std::rand()}(b_origin_host);
+        ck_tile::FillUniformDistribution<>{1.f, 1.f, std::rand()}(scale_a);
+        ck_tile::FillUniformDistribution<>{1.f, 1.f, std::rand()}(scale_b);
     }
     else
     {
@@ -154,6 +155,10 @@ int run_mx_flatmm_with_layouts(int argc,
 
         pass = ck_tile::check_err(
             c_rslt_host, c_m_n_host_ref, "Error: Incorrect results!", rtol, atol);
+        // if(pass)
+        // {
+        //     c_rslt_host.print_first_n(std::cout, 32);
+        // }
 
         std::cout << "Relative error threshold: " << rtol << " Absolute error threshold: " << atol
                   << std::endl;

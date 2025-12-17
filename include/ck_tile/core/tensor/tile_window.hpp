@@ -538,8 +538,9 @@ struct tile_window_with_static_distribution
               index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true,
               bool static_move_ys         = false,
+              typename offset_t,
               typename = std::enable_if_t<std::is_class_v<remove_cvref_t<LdsTileWindow_>>>>
-    CK_TILE_DEVICE void async_load_with_offset(index_t offset,
+    CK_TILE_DEVICE void async_load_with_offset(offset_t offset,
                                                LdsTileWindow_&& lds_tile,
                                                number<i_access_unsupport_>          = {},
                                                bool_constant<oob_conditional_check> = {},
@@ -557,6 +558,21 @@ struct tile_window_with_static_distribution
         const auto& bottom_tensor_view = lds_tile.get_bottom_tensor_view();
         const auto& tensor_descriptor  = bottom_tensor_view.get_tensor_descriptor();
         auto lds_base_ptr              = bottom_tensor_view.get_buffer_view().p_data_;
+
+        const auto linear_off2 = [&]() {
+            if constexpr(std::is_integral_v<offset_t>)
+                return make_tuple(offset, 0);
+            else if constexpr(is_constant_v<offset_t>)
+                return make_tuple(offset_t::value, 0);
+            else
+                return make_tuple(
+                    get_load_offset(offset_t{}),
+                    amd_wave_read_first_lane(
+                        make_tensor_coordinate(tensor_descriptor, to_multi_index(offset_t{}))
+                            .get_offset()));
+        }();
+        const index_t dram_off = linear_off2[number<0>{}];
+        const index_t lds_off  = linear_off2[number<1>{}];
 
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
@@ -594,7 +610,7 @@ struct tile_window_with_static_distribution
                     make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
                 // Calculate SMEM address using base pointer
-                CK_TILE_LDS_ADDR LdsDataType* smem = lds_base_ptr +
+                CK_TILE_LDS_ADDR LdsDataType* smem = lds_base_ptr + lds_off / Traits::PackedSize +
                                                      lds_coord.get_offset() / Traits::PackedSize +
                                                      lds_ys_offset / Traits::PackedSize;
 
@@ -612,7 +628,7 @@ struct tile_window_with_static_distribution
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                     smem,
                     bottom_tensor_thread_coord,
-                    offset + dram_ys_offset,
+                    dram_off + dram_ys_offset,
                     bool_constant<oob_conditional_check>{});
 
                 // Move thread coordinate if not last access
