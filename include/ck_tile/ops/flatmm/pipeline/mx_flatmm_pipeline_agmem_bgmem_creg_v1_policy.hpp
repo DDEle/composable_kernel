@@ -77,16 +77,20 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 
     CK_TILE_DEVICE static constexpr auto MakeMX_ABytesDramTileDistribution()
     {
-        constexpr index_t K2 = DWORDx4;                             // 16 bytes
-        constexpr index_t K1 = kDramLoadPackBytes / K2;             // 8
-        constexpr index_t K0 = KPerBlock / (K1 * K2 * APackedSize); // KPerBlock/256/packsize
+        constexpr index_t MPerBlockPack = MXdlPack * MPerXdl * MWarps;
+        constexpr index_t KPerBlockPack = KXdlPack * KPerXdl;
+
+        constexpr index_t K2 = DWORDx4;                 // 16 bytes
+        constexpr index_t K1 = kDramLoadPackBytes / K2; // 8
+        constexpr index_t K0 =
+            KPerBlockPack / (K1 * K2 * APackedSize); // KPerBlockPack/256/packsize
 
         constexpr index_t M2 = WaveSize / K1;        // 8
         constexpr index_t M1 = BlockSize / WaveSize; // 4
-        constexpr index_t M0 = MPerBlock / (M2 * M1);
-        static_assert(M0 * M1 * M2 == MPerBlock, "M0, M1, M2 must cover whole MPerBlock!");
-        static_assert(K0 * K1 * K2 * APackedSize == KPerBlock,
-                      "K0, K1, K2 must cover whole KPerBlock!");
+        constexpr index_t M0 = MPerBlockPack / (M2 * M1);
+        static_assert(M0 * M1 * M2 == MPerBlockPack, "M0, M1, M2 must cover whole MPerBlockPack!");
+        static_assert(K0 * K1 * K2 * APackedSize == KPerBlockPack,
+                      "K0, K1, K2 must cover whole KPerBlockPack!");
 
         return make_static_tile_distribution(
             tile_distribution_encoding< //
