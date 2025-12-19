@@ -539,8 +539,11 @@ struct tile_window_with_static_distribution
               bool oob_conditional_check  = true,
               bool static_move_ys         = false,
               typename offset_t,
-              typename = std::enable_if_t<std::is_class_v<remove_cvref_t<LdsTileWindow_>>>>
+              typename lds_offset_t,
+              typename = std::enable_if_t<
+                  std::is_class_v<typename remove_cvref_t<LdsTileWindow_>::WindowLengths>>>
     CK_TILE_DEVICE void async_load_with_offset(offset_t offset,
+                                               lds_offset_t lds_offset,
                                                LdsTileWindow_&& lds_tile,
                                                number<i_access_unsupport_>          = {},
                                                bool_constant<oob_conditional_check> = {},
@@ -559,20 +562,32 @@ struct tile_window_with_static_distribution
         const auto& tensor_descriptor  = bottom_tensor_view.get_tensor_descriptor();
         auto lds_base_ptr              = bottom_tensor_view.get_buffer_view().p_data_;
 
-        const auto linear_off2 = [&]() {
+        const index_t dram_off = [&]() {
             if constexpr(std::is_integral_v<offset_t>)
-                return make_tuple(offset, 0);
+                return offset;
             else if constexpr(is_constant_v<offset_t>)
-                return make_tuple(offset_t::value, 0);
+                return offset_t::value;
             else
-                return make_tuple(
-                    get_load_offset(offset_t{}),
-                    amd_wave_read_first_lane(
-                        make_tensor_coordinate(tensor_descriptor, to_multi_index(offset_t{}))
-                            .get_offset()));
+                return get_load_offset(offset_t{});
         }();
-        const index_t dram_off = linear_off2[number<0>{}];
-        const index_t lds_off  = linear_off2[number<1>{}];
+        const index_t lds_off = [&]() {
+            if constexpr(std::is_integral_v<lds_offset_t>)
+                return lds_offset;
+            else if constexpr(is_constant_v<lds_offset_t>)
+                return 0;
+            else
+                return amd_wave_read_first_lane(
+                    make_tensor_coordinate(tensor_descriptor, to_multi_index(lds_offset_t{}))
+                        .get_offset());
+        }();
+        constexpr auto lds_imm = []() {
+            if constexpr(is_constant_v<lds_offset_t>)
+                return lds_offset_t{};
+            else
+                return I0;
+        }();
+        // if(get_thread_id() < 64)
+        //     printf("async_load_with_offset: dram_off=%d, lds_off=%d\n", dram_off, lds_off);
 
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             auto window_adaptor_thread_coord = pre_computed_coords_[iCoord][I0];
@@ -627,8 +642,8 @@ struct tile_window_with_static_distribution
 
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                     smem,
-                    bottom_tensor_thread_coord,
-                    dram_off + dram_ys_offset,
+                    bottom_tensor_thread_coord.get_offset() + dram_off + dram_ys_offset - lds_imm(),
+                    lds_imm,
                     bool_constant<oob_conditional_check>{});
 
                 // Move thread coordinate if not last access
@@ -651,6 +666,18 @@ struct tile_window_with_static_distribution
                 }
             });
         });
+    }
+
+    template <typename LdsTileWindow_,
+              typename offset_t,
+              typename = std::enable_if_t<
+                  std::is_class_v<typename remove_cvref_t<LdsTileWindow_>::WindowLengths>>,
+              typename... Ts>
+    CK_TILE_DEVICE void
+    async_load_with_offset(offset_t offset, LdsTileWindow_&& lds_tile, Ts&&... ts) const
+    {
+        async_load_with_offset(
+            offset, 0, std::forward<LdsTileWindow_>(lds_tile), std::forward<Ts>(ts)...);
     }
 
     template <typename Policy, index_t i_access_unsupport_ = -1, bool oob_conditional_check = true>

@@ -157,25 +157,29 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         static_assert(K0 * K1 * K2 * APackedSize == KPerBlock,
                       "K0, K1, K2 must cover whole KPerBlock!");
 
-        constexpr index_t M3 = 4;                   // so that we can use imm offset to load lds
-        constexpr index_t M2 = WaveSize / K1 / M3;  // 2
-        constexpr index_t M1 = MPerXdl / (M2 * M3); // 2
-        constexpr index_t M0 = MPerBlock / (M1 * M2 * M3); // MPerBlock/16
-        static_assert(M0 * M1 * M2 * M3 == MPerBlock, "M0, M1, M2, M3 must cover whole MPerBlock!");
+        constexpr index_t M3     = 4;                   // so that we can use imm offset to load lds
+        constexpr index_t M2     = WaveSize / K1 / M3;  // 2
+        constexpr index_t M1     = MPerXdl / (M2 * M3); // 2
+        constexpr index_t M0     = MXdlPack;
+        constexpr index_t MPacks = MPerBlock / (M0 * M1 * M2 * M3); // MPerBlock/16
+        static_assert(MPacks * M0 * M1 * M2 * M3 == MPerBlock,
+                      "MPacks, M0, M1, M2, M3 must cover whole MPerBlock!");
 
         constexpr index_t Pad = 4 * K2; // 4 dwords
 
         constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor( //
             make_tuple(number<M0>{},
-                       number<K0>{},
                        number<M1>{},
+                       number<MPacks>{},
+                       number<K0>{},
                        number<M2>{},
                        number<M3>{},
                        number<K1>{},
                        number<K2>{}),
-            make_tuple(number<K0*(M1 * (M2 * M3 * K1 * K2) + (M1 - 1) * Pad)>{},
-                       number<M1*(M2 * M3 * K1 * K2) + (M1 - 1) * Pad>{},
-                       number<M2 * M3 * K1 * K2 + Pad>{},
+            make_tuple(number<M1 * MPacks * K0 * M2 * M3 * K1 * K2 + (M1 - 1) * Pad>{},
+                       number<MPacks * K0 * M2 * M3 * K1 * K2 + Pad>{},
+                       number<K0 * M2 * M3 * K1 * K2>{},
+                       number<M2 * M3 * K1 * K2>{},
                        number<M3 * K1 * K2>{},
                        number<K1 * K2>{},
                        number<K2>{},
@@ -186,8 +190,9 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr auto a_lds_block_desc_1 = transform_tensor_descriptor(
             a_lds_block_desc_0,
             make_tuple(make_pass_through_transform(M0),
-                       make_pass_through_transform(K0),
                        make_pass_through_transform(M1),
+                       make_pass_through_transform(MPacks),
+                       make_pass_through_transform(K0),
                        make_pass_through_transform(M2),
                        make_xor_transform(make_tuple(number<M3>{}, number<K1>{})),
                        make_pass_through_transform(number<K2>{})),
@@ -195,21 +200,24 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                        sequence<1>{},
                        sequence<2>{},
                        sequence<3>{},
-                       sequence<4, 5>{},
-                       sequence<6>{}),
+                       sequence<4>{},
+                       sequence<5, 6>{},
+                       sequence<7>{}),
             make_tuple(sequence<0>{},
                        sequence<1>{},
                        sequence<2>{},
                        sequence<3>{},
-                       sequence<4, 5>{},
-                       sequence<6>{}));
+                       sequence<4>{},
+                       sequence<5, 6>{},
+                       sequence<7>{}));
         constexpr auto a_lds_block_desc = transform_tensor_descriptor(
             a_lds_block_desc_1,
-            make_tuple(make_merge_transform_v3_division_mod(
-                           make_tuple(number<M0>{}, number<M1>{}, number<M2>{}, number<M3>{})),
-                       make_merge_transform_v3_division_mod(
-                           make_tuple(number<K0>{}, number<K1>{}, number<K2>{}))),
-            make_tuple(sequence<0, 2, 3, 4>{}, sequence<1, 5, 6>{}),
+            make_tuple(
+                make_merge_transform_v3_division_mod(make_tuple(
+                    number<MPacks>{}, number<M0>{}, number<M1>{}, number<M2>{}, number<M3>{})),
+                make_merge_transform_v3_division_mod(
+                    make_tuple(number<K0>{}, number<K1>{}, number<K2>{}))),
+            make_tuple(sequence<2, 0, 1, 4, 5>{}, sequence<3, 6, 7>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
 
         // return a_lds_block_desc_permuted;

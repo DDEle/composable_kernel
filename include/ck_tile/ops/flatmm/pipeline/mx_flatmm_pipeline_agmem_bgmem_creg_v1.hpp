@@ -543,6 +543,9 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         auto a_lds_block_pong = make_tensor_view<address_space_enum::lds>(
             static_cast<uint8_t*>(p_smem_pong), a_lds_block_desc);
 
+        constexpr index_t a_lds_pack_offset =
+            make_tensor_coordinate(a_lds_block_desc, make_array(MXdlPack * WG::kM, 0)).get_offset();
+
         auto a_store_lds_window_ping = make_tile_window( //
             a_lds_block_ping,
             make_tuple(number<kMPerBlock>{}, number<kKPerBlock / APackedSize>{}),
@@ -620,18 +623,20 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             NPackIterPerWarp>
             scale_b_tile_tensor_ping, scale_b_tile_tensor_pong;
 
-        auto async_load_tile_with_offset_ = [](auto lds, auto dram, auto off) {
-            async_load_tile_with_offset(lds, dram, off, number<-1>{}, true_type{}, true_type{});
+        auto async_load_tile_with_offset_ = [](auto lds, auto dram, auto lds_off, auto dram_off) {
+            dram.async_load_with_offset(
+                dram_off, lds_off, lds, number<-1>{}, true_type{}, true_type{});
         };
         // HEAD
         // Prefetch A0
         static_for_product<number<KPackIterPerWarp>, number<MPackIterPerWarp>>{}( //
             [&](auto ikpack, auto impack) {
+                static_assert(ikpack() == 0, "ikpack must be 0");
                 async_load_tile_with_offset_(
                     a_store_lds_window_ping,
                     a_dram_window,
-                    make_tuple(number<impack * MXdlPack * WG::kM>{},
-                               number<ikpack * KXdlPack * WG::kK / APackedSize>{}));
+                    number<impack * a_lds_pack_offset>{},
+                    make_tuple(number<impack * MXdlPack * WG::kM>{}, number<0>{}));
             });
         move_tile_window(a_dram_window, {0, kKPerBlock / APackedSize});
 
@@ -676,11 +681,12 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         {
             static_for_product<number<KPackIterPerWarp>, number<MPackIterPerWarp>>{}(
                 [&](auto ikpack, auto impack) {
+                    static_assert(ikpack() == 0, "ikpack must be 0");
                     async_load_tile_with_offset_(
                         a_store_lds_window_pong,
                         a_dram_window,
-                        make_tuple(number<impack * MXdlPack * WG::kM>{},
-                                   number<ikpack * KXdlPack * WG::kK / APackedSize>{}));
+                        number<impack * a_lds_pack_offset>{},
+                        make_tuple(number<impack * MXdlPack * WG::kM>{}, number<0>{}));
                 });
             move_tile_window(a_dram_window, {0, kKPerBlock / APackedSize});
         }
@@ -780,11 +786,12 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             // Prefetch A(2i+2)
             static_for_product<number<KPackIterPerWarp>, number<MPackIterPerWarp>>{}(
                 [&](auto ikpack, auto impack) {
+                    static_assert(ikpack() == 0, "ikpack must be 0");
                     async_load_tile_with_offset_(
                         a_store_lds_window_ping,
                         a_dram_window,
-                        make_tuple(number<impack * MXdlPack * WG::kM>{},
-                                   number<ikpack * KXdlPack * WG::kK / APackedSize>{}));
+                        number<impack * a_lds_pack_offset>{},
+                        make_tuple(number<impack * MXdlPack * WG::kM>{}, number<0>{}));
                 });
             move_tile_window(a_dram_window, {0, kKPerBlock / APackedSize});
 
@@ -876,11 +883,12 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
             // Prefetch A(2i+3)
             static_for_product<number<KPackIterPerWarp>, number<MPackIterPerWarp>>{}(
                 [&](auto ikpack, auto impack) {
+                    static_assert(ikpack() == 0, "ikpack must be 0");
                     async_load_tile_with_offset_(
                         a_store_lds_window_pong,
                         a_dram_window,
-                        make_tuple(number<impack * MXdlPack * WG::kM>{},
-                                   number<ikpack * KXdlPack * WG::kK / APackedSize>{}));
+                        number<impack * a_lds_pack_offset>{},
+                        make_tuple(number<impack * MXdlPack * WG::kM>{}, number<0>{}));
                 });
             move_tile_window(a_dram_window, {0, kKPerBlock / APackedSize});
             // move B window to next flat K
