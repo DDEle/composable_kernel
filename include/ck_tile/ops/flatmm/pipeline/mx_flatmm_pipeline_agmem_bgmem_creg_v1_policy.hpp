@@ -85,8 +85,8 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t K0 =
             KPerBlockPack / (K1 * K2 * APackedSize); // KPerBlockPack/256/packsize
 
-        constexpr index_t M2 = WaveSize / K1;        // 8
-        constexpr index_t M1 = BlockSize / WaveSize; // 4
+        constexpr index_t M2 = WaveSize / K1; // 8
+        constexpr index_t M1 = WaveNum / K0;  // f4:4; f8:2
         constexpr index_t M0 = MPerBlockPack / (M2 * M1);
         static_assert(M0 * M1 * M2 == MPerBlockPack, "M0, M1, M2 must cover whole MPerBlockPack!");
         static_assert(K0 * K1 * K2 * APackedSize == KPerBlockPack,
@@ -96,10 +96,10 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
             tile_distribution_encoding< //
                 sequence<1>,
                 tuple<sequence<M0, M1, M2>, sequence<K0, K1, K2>>, // ?,4,8 1,8,32 or 2,8,16
-                tuple<sequence<1>, sequence<1, 2>>,                // M1 M2,K1
-                tuple<sequence<1>, sequence<2, 1>>,
-                sequence<1, 2, 2>, // M0,K0,K2
-                sequence<0, 0, 2>>{});
+                tuple<sequence<1, 2>, sequence<1, 2>>,             // M1,K0 M2,K1
+                tuple<sequence<1, 0>, sequence<2, 1>>,
+                sequence<1, 2>, // M0,K2
+                sequence<0, 2>>{});
     }
 
     template <typename WindowTmp>
@@ -160,7 +160,7 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t M3     = 4;                   // so that we can use imm offset to load lds
         constexpr index_t M2     = WaveSize / K1 / M3;  // 2
         constexpr index_t M1     = MPerXdl / (M2 * M3); // 2
-        constexpr index_t M0     = MXdlPack;
+        constexpr index_t M0     = WaveNum / K0 / M1;   // f4: 2; f8:1
         constexpr index_t MPacks = MPerBlock / (M0 * M1 * M2 * M3); // MPerBlock/16
         static_assert(MPacks * M0 * M1 * M2 * M3 == MPerBlock,
                       "MPacks, M0, M1, M2, M3 must cover whole MPerBlock!");
@@ -168,17 +168,17 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t Pad = 4 * K2; // 4 dwords
 
         constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor( //
-            make_tuple(number<M0>{},
+            make_tuple(number<K0>{},
+                       number<M0>{},
                        number<M1>{},
                        number<MPacks>{},
-                       number<K0>{},
                        number<M2>{},
                        number<M3>{},
                        number<K1>{},
                        number<K2>{}),
-            make_tuple(number<M1 * MPacks * K0 * M2 * M3 * K1 * K2 + (M1 - 1) * Pad>{},
-                       number<MPacks * K0 * M2 * M3 * K1 * K2 + Pad>{},
-                       number<K0 * M2 * M3 * K1 * K2>{},
+            make_tuple(number<M0*(M1 * MPacks * M2 * M3 * K1 * K2 + (M1 - 1) * Pad)>{},
+                       number<M1 * MPacks * M2 * M3 * K1 * K2 + (M1 - 1) * Pad>{},
+                       number<MPacks * M2 * M3 * K1 * K2 + Pad>{},
                        number<M2 * M3 * K1 * K2>{},
                        number<M3 * K1 * K2>{},
                        number<K1 * K2>{},
@@ -189,11 +189,11 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
 
         constexpr auto a_lds_block_desc_1 = transform_tensor_descriptor(
             a_lds_block_desc_0,
-            make_tuple(make_pass_through_transform(M0),
-                       make_pass_through_transform(M1),
-                       make_pass_through_transform(MPacks),
-                       make_pass_through_transform(K0),
-                       make_pass_through_transform(M2),
+            make_tuple(make_pass_through_transform(number<K0>{}),
+                       make_pass_through_transform(number<M0>{}),
+                       make_pass_through_transform(number<M1>{}),
+                       make_pass_through_transform(number<MPacks>{}),
+                       make_pass_through_transform(number<M2>{}),
                        make_xor_transform(make_tuple(number<M3>{}, number<K1>{})),
                        make_pass_through_transform(number<K2>{})),
             make_tuple(sequence<0>{},
@@ -217,7 +217,7 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                     number<MPacks>{}, number<M0>{}, number<M1>{}, number<M2>{}, number<M3>{})),
                 make_merge_transform_v3_division_mod(
                     make_tuple(number<K0>{}, number<K1>{}, number<K2>{}))),
-            make_tuple(sequence<2, 0, 1, 4, 5>{}, sequence<3, 6, 7>{}),
+            make_tuple(sequence<3, 1, 2, 4, 5>{}, sequence<0, 6, 7>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
 
         // return a_lds_block_desc_permuted;

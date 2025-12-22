@@ -557,10 +557,10 @@ struct tile_window_with_static_distribution
         using SFC_Ys   = typename Traits::SFC_Ys;
 
         // Precompute invariant values outside loops
-        const auto window_origin       = lds_tile.get_window_origin();
-        const auto& bottom_tensor_view = lds_tile.get_bottom_tensor_view();
-        const auto& tensor_descriptor  = bottom_tensor_view.get_tensor_descriptor();
-        auto lds_base_ptr              = bottom_tensor_view.get_buffer_view().p_data_;
+        const auto lds_origin       = lds_tile.get_window_origin();
+        const auto& lds_tensor_view = lds_tile.get_bottom_tensor_view();
+        const auto& lds_tensor_desc = lds_tensor_view.get_tensor_descriptor();
+        auto lds_base_ptr           = lds_tensor_view.get_buffer_view().p_data_;
 
         const index_t dram_off = [&]() {
             if constexpr(std::is_integral_v<offset_t>)
@@ -577,12 +577,12 @@ struct tile_window_with_static_distribution
                 return 0;
             else
                 return amd_wave_read_first_lane(
-                    make_tensor_coordinate(tensor_descriptor, to_multi_index(lds_offset_t{}))
+                    make_tensor_coordinate(lds_tensor_desc, to_multi_index(lds_offset_t{}))
                         .get_offset());
         }();
         constexpr auto lds_imm = []() {
             if constexpr(is_constant_v<lds_offset_t>)
-                return lds_offset_t{};
+                return lds_offset_t::value;
             else
                 return I0;
         }();
@@ -607,11 +607,11 @@ struct tile_window_with_static_distribution
                                          to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
                     return adapter_ys_offset.get_bottom_index();
                 }();
-                const auto lds_ys_offset = [&]() {
+                constexpr auto lds_ys_offset = [&]() {
                     if constexpr(static_move_ys)
                     {
                         const auto coord_ys_offset =
-                            make_tensor_coordinate(tensor_descriptor, idx_ys_offset);
+                            make_tensor_coordinate(decltype(lds_tensor_desc){}, idx_ys_offset);
                         return coord_ys_offset.get_offset();
                     }
                     else
@@ -620,14 +620,18 @@ struct tile_window_with_static_distribution
 
                 // Use precomputed window origin & tensor descriptor
                 auto lds_bottom_tensor_thread_idx =
-                    window_origin + window_adaptor_warp_coord.get_bottom_index();
+                    lds_origin + window_adaptor_warp_coord.get_bottom_index();
                 const auto lds_coord =
-                    make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
+                    make_tensor_coordinate(lds_tensor_desc, lds_bottom_tensor_thread_idx);
 
                 // Calculate SMEM address using base pointer
+                constexpr auto imm_total    = lds_imm + lds_ys_offset;
+                constexpr auto imm_valid    = imm_total % (Traits::PackedSize * 1 << 12);
+                constexpr auto imm_overflow = imm_total - imm_valid;
+
                 CK_TILE_LDS_ADDR LdsDataType* smem = lds_base_ptr + lds_off / Traits::PackedSize +
                                                      lds_coord.get_offset() / Traits::PackedSize +
-                                                     lds_ys_offset / Traits::PackedSize;
+                                                     imm_overflow / Traits::PackedSize;
 
                 const auto dram_ys_offset = [&]() {
                     if constexpr(static_move_ys)
@@ -642,8 +646,8 @@ struct tile_window_with_static_distribution
 
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                     smem,
-                    bottom_tensor_thread_coord.get_offset() + dram_off + dram_ys_offset - lds_imm(),
-                    lds_imm,
+                    bottom_tensor_thread_coord.get_offset() + dram_off + dram_ys_offset - imm_valid,
+                    number<imm_valid>{},
                     bool_constant<oob_conditional_check>{});
 
                 // Move thread coordinate if not last access

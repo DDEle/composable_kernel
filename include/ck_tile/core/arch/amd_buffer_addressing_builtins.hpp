@@ -1712,6 +1712,7 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
                                           bool_constant<oob_conditional_check>      = {})
 {
     constexpr index_t bytes = sizeof(T) * N;
+    static_assert(IMM < (1 << 12), "wrong! immediate offset too large");
 
 #if defined(__gfx950__)
     static_assert(bytes == 4 || bytes == 12 || bytes == 16,

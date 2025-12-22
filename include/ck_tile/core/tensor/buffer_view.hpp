@@ -430,8 +430,8 @@ struct buffer_view<address_space_enum::global,
         constexpr index_t t_per_x = scalar_per_x_vector / scalar_per_t_vector;
         const auto rsrc = make_builtin_buffer_resource(p_data_, buffer_size_ * sizeof(type));
         // if(get_thread_id() < 64)
-        //     printf("async_get: smem=%p, p_data_=%p, size=%d i=%d, linear_offset=%d,
-        //     is_valid_element=%d\n",
+        //     printf("async_get: smem=%p, p_data_=%p, size=%d i=%d, linear_offset=%d, "
+        //            "is_valid_element=%d\n",
         //            smem,
         //            p_data_,
         //            static_cast<int>(buffer_size_ * sizeof(type)),
