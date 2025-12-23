@@ -20,6 +20,11 @@ if(has_supported_gpu)
     if(CK_USE_OCP_FP8)
         list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
     endif()
+    # list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS "SHELL: -mllvm --debug-pass=Structure")
+    # list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS "SHELL: -mllvm -print-before=si-insert-waitcnts")
+    # list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS "SHELL: -mllvm -print-after=si-insert-waitcnts")
+    # list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS "SHELL: -mllvm -print-after-all")
+    
     list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS "SHELL: -mllvm -greedy-reverse-local-assignment=1")
     list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS --save-temps -Wno-gnu-line-marker)
 
