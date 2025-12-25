@@ -428,12 +428,12 @@ class KernelComponentFactoryGfx9(KernelComponentFactoryBase):
             ]  # fmt: skip
         if dtype in ["fp16", "bf16"]:
             return [
-                FmhaBwdDQDKDVTileSize( 32, 128,  32,  32,  32,  32,  64,  32,  32, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1),
-                FmhaBwdDQDKDVTileSize( 32, 128,  64,  32,  64,  32,  32,  64,  64, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
-                FmhaBwdDQDKDVTileSize( 32, 128,  96,  32,  96,  32,  32,  96,  96, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1),
-                FmhaBwdDQDKDVTileSize( 16, 128, 128,  16, 128,  16,  32, 128, 128, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
+                # FmhaBwdDQDKDVTileSize( 32, 128,  32,  32,  32,  32,  64,  32,  32, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1),
+                # FmhaBwdDQDKDVTileSize( 32, 128,  64,  32,  64,  32,  32,  64,  64, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
+                # FmhaBwdDQDKDVTileSize( 32, 128,  96,  32,  96,  32,  32,  96,  96, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1),
+                FmhaBwdDQDKDVTileSize( 16, 64, 128,  16, 128,  16,  32, 128, 128, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
                 # FmhaBwdDQDKDVTileSize( 32, 64, 160, 32, 160, 32, 32, 160, 160, 1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1),
-                FmhaBwdDQDKDVTileSize( 16,  64, 256,  16, 256,  16,  32, 256, 256, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
+                # FmhaBwdDQDKDVTileSize( 16,  64, 256,  16, 256,  16,  32, 256, 256, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1),
             ]  # fmt: skip
         return []
 
@@ -1064,14 +1064,14 @@ def get_bwd_blobs(
             # Flash attention integration
             if receipt == 2:
                 cond = dtype in ["fp16", "bf16"]
-                cond &= bias in ["no", "alibi"]
+                # cond &= bias in ["no", "alibi"]
                 cond &= dropout in ["no", "dropout_wg32", "dropout_wg16"]
                 cond &= dpad == dvpad
                 if not cond:
                     continue
             elif receipt == 3:
                 cond = dtype in ["fp16", "bf16"]
-                cond &= bias in ["no", "alibi"]
+                # cond &= bias in ["no", "alibi"]
                 cond &= dpad == dvpad
                 cond &= deterministic == "f"
                 if not cond:
