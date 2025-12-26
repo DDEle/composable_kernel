@@ -338,6 +338,8 @@ struct tile_window_with_static_distribution
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+                // if(get_thread_id() < 64)
+                // print(bottom_tensor_thread_coord);
 
                 // read from bottom tensor
                 const vector_t vec_value =
@@ -726,11 +728,14 @@ struct tile_window_with_static_distribution
         });
     }
 
-    template <index_t i_access_unsupport_ = -1, bool oob_conditional_check = true>
+    template <index_t i_access_unsupport_ = -1,
+              bool oob_conditional_check  = true,
+              bool static_move_ys         = false>
     CK_TILE_DEVICE void store(const static_distributed_tensor<typename Base::DataType,
                                                               typename Base::TileDstr>& dstr_tensor,
                               number<i_access_unsupport_>          = {},
-                              bool_constant<oob_conditional_check> = {}) const
+                              bool_constant<oob_conditional_check> = {},
+                              bool_constant<static_move_ys>        = {}) const
     {
         using Traits = typename Base::Traits;
 
@@ -746,6 +751,27 @@ struct tile_window_with_static_distribution
 
             static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                 constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
+
+                constexpr auto idx_ys_offset = [&]() {
+                    constexpr auto idx_off_ys = SFC_Ys::get_step_between(number<0>{}, iAccess);
+                    constexpr auto adapter_ys_offset = make_tensor_adaptor_coordinate(
+                        StaticTileDistribution_{}.get_ps_ys_to_xs_adaptor(),
+                        container_concat(array<index_t, Base::NDimP>{0},
+                                         to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
+                    return adapter_ys_offset.get_bottom_index();
+                }();
+                const auto ys_offset = [&]() {
+                    if constexpr(static_move_ys)
+                    {
+                        const auto coord_ys_offset = make_tensor_coordinate(
+                            this->get_bottom_tensor_view().get_tensor_descriptor(), idx_ys_offset);
+                        // if(get_thread_id() == 0)
+                        //     print(coord_ys_offset);
+                        return coord_ys_offset.get_offset();
+                    }
+                    else
+                        return 0;
+                }();
 
                 // data index [y0, y1, ...]
                 constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
@@ -773,14 +799,17 @@ struct tile_window_with_static_distribution
                 // const vector_t vec_value = vec.template get_as<vector_t>().template at<0>();
 
                 // write into bottom tensor
+                // print(bottom_tensor_thread_coord);
+                // printf("tid: %03d ys_offset: %ld\n", get_thread_id(), ys_offset);
+
                 this->get_bottom_tensor_view().template set_vectorized_elements<vector_t>(
                     bottom_tensor_thread_coord,
-                    0,
+                    ys_offset,
                     vec_value,
                     bool_constant<oob_conditional_check>{});
 
                 // move thread coordinate
-                if constexpr(iCoordAccess != (NumAccessPerCoord - 1))
+                if constexpr(!static_move_ys && iCoordAccess != (NumAccessPerCoord - 1))
                 {
                     constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
 

@@ -680,9 +680,19 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
         else if constexpr(QuantMode == ck_tile::QuantType::ABQuantGrouped)
         {
             ck_tile::FillConstant<ADataType>{static_cast<ADataType>(0x38)}(a_m_k);
-            ck_tile::FillConstant<BDataType>{static_cast<BDataType>(0x22)}(b_k_n);
-            ck_tile::FillConstant<AQDataType>{static_cast<AQDataType>(0.5f)}(*aq_tensor_ptr);
-            ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(0.5f)}(*bq_tensor_ptr);
+            ck_tile::FillConstant<BDataType>{static_cast<BDataType>(0x38)}(b_k_n);
+            ck_tile::FillConstant<AQDataType>{static_cast<AQDataType>(1.f)}(*aq_tensor_ptr);
+            ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(1.f)}(*bq_tensor_ptr);
+            ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
+                *aq_tensor_ptr);
+            ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
+                *bq_tensor_ptr);
+            // a_m_k.ForEach([&](auto& self, auto i) {
+            //     self(i) = ck_tile::type_convert<ADataType>(i[0] % 3 * 1.f);
+            // });
+            // b_k_n.ForEach([&](auto& self, auto i) {
+            //     self(i) = ck_tile::type_convert<BDataType>(i[0] % 3 * 1.f);
+            // });
         }
         else
         {

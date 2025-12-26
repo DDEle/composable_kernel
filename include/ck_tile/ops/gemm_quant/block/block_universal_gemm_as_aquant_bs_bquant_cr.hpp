@@ -266,6 +266,8 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
             // If B datatype were pkint4 it would be converted prior to storing in LDS
             load_int4_tile<OverrideBDataType, ComputeDataType, UnaryOpSize_, BLoadTranspose>(
                 b_warp_tile_, b_block_window);
+            // CK_PRINTF<>{}(b_warp_tile_);
+            // CK_PRINT<decltype(b_warp_tile_), decltype(b_block_window)>();
         }
 
         // C += A * B
