@@ -4,7 +4,11 @@
 #include "run_gemm_quant_example.inc"
 
 template <typename T>
-using GemmConfig = GemmConfigQuantPrefill<T>;
+struct GemmConfig : public GemmConfigQuantPrefill<T>
+{
+    static constexpr bool kPadK      = false;
+    static constexpr bool TransposeC = true;
+};
 
 static auto _ = ([]() {
     auto& lut                               = get_kernel_lut();

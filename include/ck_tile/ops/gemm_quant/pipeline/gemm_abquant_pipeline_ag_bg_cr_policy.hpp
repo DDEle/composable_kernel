@@ -46,6 +46,7 @@ struct GemmABQuantPipelineAgBgCrDefaultPolicy : public UniversalGemmPipelineAgBg
 
         static_assert(Problem::BQuantGroupSize::kK % WarpTile::at(I2) == 0,
                       "KPerWarpGemm must be a multiple of QuantGroupSize::kK!");
+        static_assert(Problem::TransposeC, "Wrong!");
 
         using WarpGemm = WarpGemmDispatcher<typename Problem::ComputeDataType,
                                             typename Problem::ComputeDataType,
@@ -70,7 +71,7 @@ struct GemmABQuantPipelineAgBgCrDefaultPolicy : public UniversalGemmPipelineAgBg
     }
 
     template <typename Problem>
-    CK_TILE_DEVICE static constexpr auto MakeACopyDistributionEncode()
+    CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
     {
         constexpr index_t kBlockSize = Problem::kBlockSize;
         constexpr index_t MPerBlock  = Problem::BlockGemmShape::kM;
@@ -86,16 +87,17 @@ struct GemmABQuantPipelineAgBgCrDefaultPolicy : public UniversalGemmPipelineAgBg
         static_assert(K0 * K1 == KPerBlock, "wrong!");
         static_assert(M0 * M1 * M2 == MPerBlock, "wrong!");
 
-        return ck_tile::tile_distribution_encoding<
-            ck_tile::sequence<>,
-            ck_tile::tuple<ck_tile::sequence<M0, M1, M2>, ck_tile::sequence<K0, K1>>,
-            ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>, // M1 M2,K0
-            ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 0>>,
-            ck_tile::sequence<1, 2>, // M0,K1
-            ck_tile::sequence<0, 1>>{};
+        return make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<M0, M1, M2>, ck_tile::sequence<K0, K1>>,
+                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>, // M1 M2,K0
+                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 0>>,
+                ck_tile::sequence<1, 2>, // M0,K1
+                ck_tile::sequence<0, 1>>{});
     }
     template <typename Problem>
-    CK_TILE_DEVICE static constexpr auto MakeBCopyDistributionEncode()
+    CK_TILE_DEVICE static constexpr auto MakeBDramTileDistribution()
     {
         constexpr index_t kBlockSize = Problem::kBlockSize;
         constexpr index_t NPerBlock  = Problem::BlockGemmShape::kN;
@@ -111,13 +113,14 @@ struct GemmABQuantPipelineAgBgCrDefaultPolicy : public UniversalGemmPipelineAgBg
         static_assert(K0 * K1 == KPerBlock, "wrong!");
         static_assert(N0 * N1 * N2 == NPerBlock, "wrong!");
 
-        return ck_tile::tile_distribution_encoding<
-            ck_tile::sequence<>,
-            ck_tile::tuple<ck_tile::sequence<N0, N1, N2>, ck_tile::sequence<K0, K1>>,
-            ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>, // N1 N2,K0
-            ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 0>>,
-            ck_tile::sequence<1, 2>, // N0,K1
-            ck_tile::sequence<0, 1>>{};
+        return make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<N0, N1, N2>, ck_tile::sequence<K0, K1>>,
+                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>, // N1 N2,K0
+                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 0>>,
+                ck_tile::sequence<1, 2>, // N0,K1
+                ck_tile::sequence<0, 1>>{});
     }
 
     template <index_t MPerBlock, index_t KPerBlock, index_t KPack>
@@ -125,9 +128,10 @@ struct GemmABQuantPipelineAgBgCrDefaultPolicy : public UniversalGemmPipelineAgBg
     {
         constexpr index_t K1 = KPack;
         constexpr index_t K0 = KPerBlock / K1;
-        constexpr index_t M3 = 4;
+        constexpr index_t M3 =
+            get_warp_size() / static_cast<index_t>(WGAttrNumAccessEnum::Double) / K0;
         constexpr index_t M2 = (get_warp_size() / K0) / M3;
-        constexpr index_t M1 = 2;
+        constexpr index_t M1 = static_cast<index_t>(WGAttrNumAccessEnum::Double);
         constexpr index_t M0 = MPerBlock / M1 / M2 / M3;
 
         static_assert(K0 * K1 == KPerBlock, "wrong!");

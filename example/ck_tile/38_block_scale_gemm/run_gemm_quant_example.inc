@@ -33,6 +33,8 @@ template <typename GemmConfig,
 float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::stream_config& s)
 {
     static_assert(std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>);
+    constexpr bool transpose_c = QuantMode == ck_tile::QuantType::ABQuantGrouped;
+
     using ComputeDataType = std::conditional_t<QuantMode == ck_tile::QuantType::AQuantGrouped ||
                                                    QuantMode == ck_tile::QuantType::RowColQuant,
                                                typename TypeConfig::BDataType,
@@ -57,7 +59,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                                     QuantMode,
                                                     AQLayout, // for AQLayout
                                                     BQLayout, // for BQLayout
-                                                    false,
+                                                    transpose_c,
                                                     GemmConfig::DoubleSmemBuffer>;
 
     using GemmPipelineProblem = ck_tile::GemmPipelineProblemBase<typename TypeConfig::ADataType,
@@ -86,7 +88,6 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
     const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
         constexpr bool has_hot_loop_v = has_hot_loop_.value;
         constexpr auto tail_number_v  = tail_number_.value;
-        constexpr bool transpose_c    = false;
 
         // row-col and tensor quants use the regular pipeline, A/B/AB quants use their own
         using PipelineProblem = std::conditional_t<
@@ -683,13 +684,13 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
             ck_tile::FillConstant<BDataType>{static_cast<BDataType>(0x38)}(b_k_n);
             ck_tile::FillConstant<AQDataType>{static_cast<AQDataType>(1.f)}(*aq_tensor_ptr);
             ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(1.f)}(*bq_tensor_ptr);
-            ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *aq_tensor_ptr);
-            ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
-                *bq_tensor_ptr);
-            // a_m_k.ForEach([&](auto& self, auto i) {
-            //     self(i) = ck_tile::type_convert<ADataType>(i[0] % 3 * 1.f);
-            // });
+            // ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
+            //     *aq_tensor_ptr);
+            // ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
+            //     *bq_tensor_ptr);
+            a_m_k.ForEach([&](auto& self, auto i) {
+                self(i) = ck_tile::type_convert<ADataType>(i[0] % 3 * 1.f);
+            });
             // b_k_n.ForEach([&](auto& self, auto i) {
             //     self(i) = ck_tile::type_convert<BDataType>(i[0] % 3 * 1.f);
             // });

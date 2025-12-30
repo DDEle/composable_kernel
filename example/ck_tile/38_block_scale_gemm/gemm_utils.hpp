@@ -203,8 +203,6 @@ struct GemmConfigPreshuffleB_PreshuffleBQuant_Prefill
 template <typename PrecType>
 struct GemmConfigQuantPrefill : public GemmConfigBase
 {
-    static constexpr bool kPadK = false;
-
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
     static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
