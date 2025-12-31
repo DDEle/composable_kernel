@@ -78,7 +78,6 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
     static constexpr index_t GetVectorSizeA() { return Policy::template GetVectorSizeA<Problem>(); }
     static constexpr index_t GetVectorSizeB() { return Policy::template GetVectorSizeB<Problem>(); }
-    static constexpr index_t GetVectorSizeC() { return Policy::template GetVectorSizeC<Problem>(); }
     static constexpr index_t GetVectorSizeAQ()
     {
         return Policy::template GetVectorSizeAQ<Problem>();
@@ -88,9 +87,6 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         return Policy::template GetVectorSizeBQ<Problem>();
     }
 
-    static constexpr index_t GetSmemPackA() { return Policy::template GetSmemPackA<Problem>(); }
-    static constexpr index_t GetSmemPackB() { return Policy::template GetSmemPackB<Problem>(); }
-
     static constexpr bool kPadM = Problem::kPadM;
     static constexpr bool kPadN = Problem::kPadN;
     static constexpr bool kPadK = Problem::kPadK;
@@ -98,9 +94,8 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
     static constexpr bool DoubleSmemBuffer = Problem::DoubleSmemBuffer;
     static constexpr bool PreshuffleQuant  = Problem::Traits::PreshuffleQuant;
 
-    static constexpr bool HasHotLoop = Problem::HasHotLoop;
-    static constexpr auto TailNum    = Problem::TailNum;
-    static constexpr auto Scheduler  = Problem::Scheduler;
+    static constexpr auto Scheduler = Problem::Scheduler;
+    static_assert(Scheduler == GemmPipelineScheduler::Intrawave, "Only Intrawave supported!");
 
     static constexpr auto is_a_load_tr_v = bool_constant<PipelineImplBase::is_a_load_tr>{};
     static constexpr auto is_b_load_tr_v = bool_constant<PipelineImplBase::is_b_load_tr>{};
@@ -126,477 +121,220 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         return Policy::template GetSmemSize<Problem>();
     }
 
-    CK_TILE_HOST static std::string Print()
+    CK_TILE_HOST static std::string Print() { return "ABQuantGemmPipelineAgBgCrAsync\n"; }
+
+    template <bool HasHotLoop, TailNumber TailNum, typename... Args>
+    CK_TILE_DEVICE auto Run_(void* p_smem, Args&&... args) const
     {
-        constexpr index_t MPerXDL = BlockGemm::WarpGemm::kM;
-        constexpr index_t NPerXDL = BlockGemm::WarpGemm::kN;
-        constexpr index_t KPerXDL = BlockGemm::WarpGemm::WarpGemmAttribute::Impl::kK;
-
-        constexpr index_t WaveSize = 64;
-        constexpr index_t WaveNumM = BlockGemmShape::BlockWarps::at(I0);
-        constexpr index_t WaveNumN = BlockGemmShape::BlockWarps::at(I1);
-
-        constexpr index_t A_LDS_Read_Width = GetSmemPackA();
-        constexpr index_t B_LDS_Read_Width = GetSmemPackB();
-
-        constexpr index_t A_LDS_Write_Width = GetSmemPackA();
-        constexpr index_t B_LDS_Write_Width = GetSmemPackB();
-
-        constexpr index_t A_Buffer_Load_Inst_Num =
-            MPerBlock * KPerBlock / (BlockSize * GetVectorSizeA());
-        constexpr index_t B_Buffer_Load_Inst_Num =
-            NPerBlock * KPerBlock / (BlockSize * GetVectorSizeB());
-        constexpr index_t AQ_Buffer_Load_Inst_Num =
-            MPerBlock * KPerBlockAQ / (BlockSize * GetVectorSizeAQ());
-        constexpr index_t BQ_Buffer_Load_Inst_Num =
-            NPerBlockBQ * KPerBlockBQ / (BlockSize * GetVectorSizeBQ());
-
-        constexpr index_t A_LDS_Write_Inst_Num =
-            MPerBlock * KPerBlock / (BlockSize * A_LDS_Write_Width);
-        constexpr index_t B_LDS_Write_Inst_Num =
-            NPerBlock * KPerBlock / (BlockSize * B_LDS_Write_Width);
-
-        constexpr index_t A_LDS_Read_Inst_Num =
-            WaveNumN * MPerBlock * KPerBlock / (BlockSize * A_LDS_Read_Width);
-        constexpr index_t B_LDS_Read_Inst_Num =
-            WaveNumM * NPerBlock * KPerBlock / (BlockSize * B_LDS_Read_Width);
-
-        constexpr index_t C_MFMA_Inst_Num = MPerBlock * NPerBlock * KPerBlock /
-                                            (BlockSize / WaveSize) / (MPerXDL * NPerXDL * KPerXDL);
-
-        auto str = std::stringstream{};
-
-        str << "A/B vector size: " << GetVectorSizeA() << ", " << GetVectorSizeB() << ", "
-            << "AQ vector size: " << GetVectorSizeAQ() << "\n"
-            << "BQ vector size: " << GetVectorSizeBQ() << "\n"
-            << "A/B LDS read/write width: " << A_LDS_Read_Width << ", " << B_LDS_Read_Width << "\n"
-            << "A/B buffer load inst: " << A_Buffer_Load_Inst_Num << ", " << B_Buffer_Load_Inst_Num
-            << ", " << "AQ buffer load inst: " << AQ_Buffer_Load_Inst_Num << "\n"
-            << ", " << "BQ buffer load inst: " << BQ_Buffer_Load_Inst_Num << "\n"
-            << "A/B LDS write inst: " << A_LDS_Write_Inst_Num << ", " << B_LDS_Write_Inst_Num
-            << "\n"
-            << "A/B LDS read inst: " << A_LDS_Read_Inst_Num << ", " << B_LDS_Read_Inst_Num << "\n"
-            << "C MFMA inst: " << C_MFMA_Inst_Num << "\n"
-            << "AQuantGroupSize: " << AQuantGroupSize::GetName() << "\n"
-            << "BQuantGroupSize: " << BQuantGroupSize::GetName() << "\n"
-            << "KPack: " << BlockGemm::Traits::KPack << "\n"
-            << "PrefetchStages: " << PrefetchStages << "\n";
-        return str.str();
+        auto smem      = reinterpret_cast<uint8_t*>(p_smem);
+        auto alloc_lds = [&smem](index_t size) {
+            auto ptr = smem;
+            smem += size;
+            return ptr;
+        };
+        auto smem_a = alloc_lds(Policy::template GetSmemSizeA<Problem>());
+        auto smem_b = alloc_lds(Policy::template GetSmemSizeB<Problem>());
+        return Run__<HasHotLoop, TailNum>(smem_a, smem_b, std::forward<Args>(args)...);
     }
 
-    template <GemmPipelineScheduler Scheduler>
-    struct PipelineImpl : public PipelineImplBase
+    template <bool HasHotLoop,
+              TailNumber TailNum,
+              typename ADramBlockWindowTmp,
+              typename BDramBlockWindowTmp,
+              typename AQDramBlockWindowTmp,
+              typename BQDramBlockWindowTmp>
+    CK_TILE_DEVICE auto Run__(void* __restrict__ smem_a,
+                              void* __restrict__ smem_b,
+                              const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                              const BDramBlockWindowTmp& b_dram_block_window_tmp,
+                              const AQDramBlockWindowTmp& aq_dram_block_window_tmp,
+                              const BQDramBlockWindowTmp& bq_dram_block_window_tmp,
+                              index_t num_loop) const
     {
-    };
+        static_assert(
+            std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>> &&
+                std::is_same_v<BDataType, remove_cvref_t<typename BDramBlockWindowTmp::DataType>> &&
+                std::is_same_v<AQDataType,
+                               remove_cvref_t<typename AQDramBlockWindowTmp::DataType>> &&
+                std::is_same_v<BQDataType, remove_cvref_t<typename BQDramBlockWindowTmp::DataType>>,
+            "A/B/AQ/BQ Dram block window should have the same data type as appropriate "
+            "([A|B|AQ|BQ]DataType) defined in Problem definition!");
 
-    template <>
-    struct PipelineImpl<GemmPipelineScheduler::Intrawave> : public PipelineImplBase
-    {
-        using Base = PipelineImplBase;
+        static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>, "Wrong!");
+        static_assert(std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>, "Wrong!");
+        static_assert(std::is_same_v<AQLayout, tensor_layout::gemm::RowMajor>, "Wrong!");
+        static_assert(std::is_same_v<BQLayout, tensor_layout::gemm::ColumnMajor>, "Wrong!");
 
-        template <typename ADramWindow, typename ABlockTile_>
-        CK_TILE_DEVICE static void LoadAndConvertATile(ABlockTile_& a_block_tile,
-                                                       const ADramWindow& a_dram_window)
-        {
-            using DestDataType            = typename ABlockTile_::DataType;
-            using SrcDataType             = typename ADramWindow::Base::TileWindowBase::DataType;
-            constexpr index_t UnaryOpSize = 8;
-            load_int4_tile<SrcDataType, DestDataType, UnaryOpSize>(a_block_tile, a_dram_window);
-        }
+        static_assert((MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                       KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1]),
+                      "A block window has incorrect lengths for defined ALayout!");
+        static_assert((NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                       KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1]),
+                      "B block window has incorrect lengths for defined BLayout!");
+        static_assert((NPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I0] &&
+                       KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1]),
+                      "Bq block window has incorrect lengths for defined BqLayout!");
 
-        template <typename BDramWindow, typename BBlockTile_>
-        CK_TILE_DEVICE static void LoadAndConvertBTile(BBlockTile_& b_block_tile,
-                                                       const BDramWindow& b_dram_window)
-        {
-            using DestDataType            = typename BBlockTile_::DataType;
-            using SrcDataType             = typename BDramWindow::Base::TileWindowBase::DataType;
-            constexpr index_t UnaryOpSize = 8;
-            load_int4_tile<SrcDataType, DestDataType, UnaryOpSize>(b_block_tile, b_dram_window);
-        }
+        auto lds_a = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<ADataType*>(smem_a),
+            Policy::template MakeALdsBlockDescriptor<Problem>());
+        auto lds_b = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<BDataType*>(smem_b),
+            Policy::template MakeBLdsBlockDescriptor<Problem>());
 
-        template <bool HasHotLoop,
-                  TailNumber TailNum,
-                  typename ADramBlockWindowTmp,
-                  typename BDramBlockWindowTmp,
-                  typename AQDramBlockWindowTmp,
-                  typename BQDramBlockWindowTmp,
-                  typename AElementFunction,
-                  typename BElementFunction>
-        CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
-                                       const AElementFunction& a_element_func,
-                                       const BDramBlockWindowTmp& b_dram_block_window_tmp,
-                                       const BElementFunction& b_element_func,
-                                       const AQDramBlockWindowTmp& aq_dram_block_window_tmp,
-                                       const BQDramBlockWindowTmp& bq_dram_block_window_tmp,
-                                       index_t m,
-                                       index_t n,
-                                       index_t num_loop,
-                                       void* p_smem) const
-        {
-            static_assert(
-                std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>> &&
-                    std::is_same_v<BDataType,
-                                   remove_cvref_t<typename BDramBlockWindowTmp::DataType>> &&
-                    std::is_same_v<AQDataType,
-                                   remove_cvref_t<typename AQDramBlockWindowTmp::DataType>> &&
-                    std::is_same_v<BQDataType,
-                                   remove_cvref_t<typename BQDramBlockWindowTmp::DataType>>,
-                "A/B/AQ/BQ Dram block window should have the same data type as appropriate "
-                "([A|B|AQ|BQ]DataType) defined in Problem definition!");
+        constexpr auto a_load_distr =
+            make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());
+        constexpr auto b_load_distr =
+            make_static_tile_distribution(BlockGemm::MakeBBlockDistributionEncode());
+        constexpr auto a_copy_distr  = Policy::template MakeADramTileDistribution<Problem>();
+        constexpr auto b_copy_distr  = Policy::template MakeBDramTileDistribution<Problem>();
+        constexpr auto aq_copy_distr = Policy::template MakeAQDramTileDistribution<Problem>();
+        constexpr auto bq_copy_distr = Policy::template MakeBQDramTileDistribution<Problem>();
+        constexpr auto a_lds_size    = number_tuple<MPerBlock, KPerBlock>{};
+        constexpr auto b_lds_size    = number_tuple<NPerBlock, KPerBlock>{};
 
-            constexpr bool is_a_col_major =
-                std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
-            constexpr bool is_aq_col_major =
-                std::is_same_v<AQLayout, tensor_layout::gemm::ColumnMajor>;
-            constexpr bool is_b_row_major = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
-            constexpr bool is_bq_row_major =
-                std::is_same_v<BQLayout, tensor_layout::gemm::RowMajor>;
+        auto&& a_copy_dram_window  = make_tile_window(a_dram_block_window_tmp, a_copy_distr);
+        auto&& b_copy_dram_window  = make_tile_window(b_dram_block_window_tmp, b_copy_distr);
+        auto&& a_copy_lds_window   = make_tile_window(lds_a, a_lds_size, {0, 0}, a_copy_distr);
+        auto&& b_copy_lds_window   = make_tile_window(lds_b, b_lds_size, {0, 0}, b_copy_distr);
+        auto&& a_lds_gemm_window   = make_tile_window(lds_a, a_lds_size, {0, 0}, a_load_distr);
+        auto&& b_lds_gemm_window   = make_tile_window(lds_b, b_lds_size, {0, 0}, b_load_distr);
+        auto&& aq_copy_dram_window = make_tile_window(aq_dram_block_window_tmp, aq_copy_distr);
+        auto&& bq_copy_dram_window = make_tile_window(bq_dram_block_window_tmp, bq_copy_distr);
 
-            static_assert(is_a_col_major
-                              ? (KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                                 MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1])
-                              : (MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                                 KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1]),
-                          "A block window has incorrect lengths for defined ALayout!");
-            static_assert(is_b_row_major
-                              ? (KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                                 NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1])
-                              : (NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                                 KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1]),
-                          "B block window has incorrect lengths for defined BLayout!");
-            static_assert(
-                PreshuffleQuant ||
-                    (is_bq_row_major
-                         ? (KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                            NPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1])
-                         : (NPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I0] &&
-                            KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1])),
-                "Bq block window has incorrect lengths for defined BqLayout!");
+        decltype(load_tile(a_copy_dram_window)) a_block_tile;
+        decltype(load_tile(b_copy_dram_window)) b_block_tile;
+        decltype(load_tile(aq_copy_dram_window)) aq_block_tile[2];
+        decltype(load_tile(bq_copy_dram_window)) bq_block_tile[2];
 
-            using ADramTileWindowStep  = typename ADramBlockWindowTmp::BottomTensorIndex;
-            using BDramTileWindowStep  = typename BDramBlockWindowTmp::BottomTensorIndex;
-            using AQDramTileWindowStep = typename AQDramBlockWindowTmp::BottomTensorIndex;
-            using BQDramTileWindowStep = typename BQDramBlockWindowTmp::BottomTensorIndex;
+        auto block_gemm   = BlockGemm();
+        auto c_block_tile = block_gemm.MakeCBlockTile();
 
-            // Note: BDataType PkInt4 gets converted during loading, before going to LDS
-            auto&& lds_blocks =
-                Base::template GetABLdsTensorViews<ADataType, OverrideBDataType>(p_smem);
+        constexpr auto a_step  = make_array(0, KPerBlock);
+        constexpr auto b_step  = make_array(0, KPerBlock);
+        constexpr auto aq_step = make_array(0, KPerBlockAQ);
+        constexpr auto bq_step = make_array(0, KPerBlockBQ);
 
-            constexpr auto a_lds_load_tile_distr =
-                make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());
-            constexpr auto b_lds_load_tile_distr =
-                make_static_tile_distribution(BlockGemm::MakeBBlockDistributionEncode());
-            constexpr auto a_copy_distr = Policy::template MakeADramTileDistribution<Problem>();
-            constexpr auto b_copy_distr = Policy::template MakeBDramTileDistribution<Problem>();
+        load_tile(a_block_tile, a_copy_dram_window);
+        move_tile_window(a_copy_dram_window, a_step);
+        load_tile(b_block_tile, b_copy_dram_window);
+        move_tile_window(b_copy_dram_window, b_step);
 
-            auto&& a_windows =
-                Base::GetAWindows(a_dram_block_window_tmp, lds_blocks[I0], a_lds_load_tile_distr);
-            auto&& a_copy_dram_window = a_windows[I0];
-            auto&& a_copy_lds_window  = make_tile_window(a_windows[I1], a_copy_distr);
-            auto&& a_lds_gemm_window  = a_windows[I2];
-            auto&& b_windows =
-                Base::GetBWindows(b_dram_block_window_tmp, lds_blocks[I1], b_lds_load_tile_distr);
-            auto&& b_copy_dram_window = b_windows[I0];
-            auto&& b_copy_lds_window  = make_tile_window(b_windows[I1], b_copy_distr);
-            auto&& b_lds_gemm_window  = b_windows[I2];
-            auto aq_copy_dram_window  = Base::GetAQDramLoadWindow(aq_dram_block_window_tmp);
-            auto bq_copy_dram_window  = Base::GetBQDramLoadWindow(bq_dram_block_window_tmp);
+        load_tile(aq_block_tile[I0], aq_copy_dram_window);
+        move_tile_window(aq_copy_dram_window, aq_step);
+        load_tile(bq_block_tile[I0], bq_copy_dram_window);
+        move_tile_window(bq_copy_dram_window, bq_step);
 
-            using AQBlockTileDistr = decltype(aq_copy_dram_window.get_tile_distribution());
-            using BQBlockTileDistr = decltype(bq_copy_dram_window.get_tile_distribution());
+        clear_tile(c_block_tile);
 
-            using ABlockTile = decltype(make_static_distributed_tensor<ADataType>(a_copy_distr));
-            using BBlockTile = decltype(make_static_distributed_tensor<BDataType>(b_copy_distr));
-            using AQBlockTile =
-                decltype(make_static_distributed_tensor<AQDataType>(AQBlockTileDistr{}));
-            using BQBlockTile =
-                decltype(make_static_distributed_tensor<BQDataType>(BQBlockTileDistr{}));
+        a_copy_lds_window.store(a_block_tile, number<-1>{}, true_type{}, true_type{});
+        b_copy_lds_window.store(b_block_tile, number<-1>{}, true_type{}, true_type{});
 
-            auto block_gemm = BlockGemm();
+        load_tile(a_block_tile, a_copy_dram_window);
+        move_tile_window(a_copy_dram_window, a_step);
 
-            ABlockTile a_block_tile;
-            BBlockTile b_block_tile;
-            AQBlockTile aq_block_tile[2];
-            BQBlockTile bq_block_tile[2];
+        load_tile(b_block_tile, b_copy_dram_window);
+        move_tile_window(b_copy_dram_window, b_step);
+        block_sync_lds();
 
-            auto c_block_tile = block_gemm.MakeCBlockTile();
+        block_gemm.LocalPrefetch(
+            a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
 
-            constexpr ADramTileWindowStep a_dram_tile_window_step =
-                is_a_col_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
-            constexpr BDramTileWindowStep b_dram_tile_window_step =
-                is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
-            // only row_major for AQ
-            const AQDramTileWindowStep aq_dram_tile_window_step =
-                PreshuffleQuant
-                    ? make_array(ck_tile::integer_least_multiple(m, MPerBlock) /
-                                     BlockGemm::WarpGemm::kM,
-                                 0)
-                    : (is_aq_col_major ? make_array(KPerBlockAQ, 0) : make_array(0, KPerBlockAQ));
-            const BQDramTileWindowStep bq_dram_tile_window_step =
-                (PreshuffleQuant) ? make_array(ck_tile::integer_least_multiple(n, NPerBlock) /
-                                                   BlockGemmShape::WarpTile::at(number<1>{}),
-                                               0)
-                : is_bq_row_major ? make_array(KPerBlockBQ, 0)
-                                  : make_array(0, KPerBlockBQ);
+        __builtin_amdgcn_sched_barrier(0);
 
-            // DRAM prefetch (global read 0)
-            // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
-            // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
+        auto main_body = [&](auto curr_i) {
+            auto next_i = number<(curr_i.value + 1) % 2>{};
 
-            LoadAndConvertATile(a_block_tile, a_copy_dram_window);
-            move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
-            // B tile gets converted to A datatype during loading
-            LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
-            move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
-
-            Base::GlobalPrefetch(aq_block_tile[I0], aq_copy_dram_window, aq_dram_tile_window_step);
-            Base::GlobalPrefetch(bq_block_tile[I0], bq_copy_dram_window, bq_dram_tile_window_step);
-
-            clear_tile(c_block_tile);
-
-            if constexpr(is_a_col_major && !is_a_load_tr_v())
-            {
-                auto a_shuffle_tmp = make_static_distributed_tensor<ADataType>(
-                    Policy::template MakeShuffledARegTileDistribution<Problem>());
-                transpose_tile2d(a_shuffle_tmp, a_block_tile);
-                Base::LocalPrefill(a_copy_lds_window, a_shuffle_tmp, a_element_func);
-            }
-            else
-            {
-                // CK_PRINTF<>{}(tile_elementwise_in(a_element_func, a_block_tile));
-                a_copy_lds_window.store(tile_elementwise_in(a_element_func, a_block_tile),
-                                        number<-1>{},
-                                        true_type{},
-                                        true_type{});
-            }
-
-            if constexpr(is_b_row_major && !is_b_load_tr_v())
-            {
-                auto b_shuffle_tmp = make_static_distributed_tensor<BDataType>(
-                    Policy::template MakeShuffledBRegTileDistribution<Problem>());
-                transpose_tile2d(b_shuffle_tmp, b_block_tile);
-                Base::LocalPrefill(b_copy_lds_window, b_shuffle_tmp, b_element_func);
-            }
-            else
-            {
-                // CK_PRINTF<>{}(tile_elementwise_in(b_element_func, b_block_tile));
-                b_copy_lds_window.store(tile_elementwise_in(b_element_func, b_block_tile),
-                                        number<-1>{},
-                                        true_type{},
-                                        true_type{});
-            }
-#if 0
-            block_sync_lds();
-            auto ptr = reinterpret_cast<uint8_t*>(lds_blocks[I0].get_buffer_view().p_data_);
-            printf("tid %03d b_lds[%04d-%04d]: "
-                   "%02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx "
-                   "%02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx "
-                   "%02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx "
-                   "%02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx "
-                   "\n",
-                   get_thread_id(),
-                   get_thread_id() * 32,
-                   get_thread_id() * 32 + 31,
-                   ptr[get_thread_id() * 32 + 0 + 0],
-                   ptr[get_thread_id() * 32 + 0 + 1],
-                   ptr[get_thread_id() * 32 + 0 + 2],
-                   ptr[get_thread_id() * 32 + 0 + 3],
-                   ptr[get_thread_id() * 32 + 0 + 4],
-                   ptr[get_thread_id() * 32 + 0 + 5],
-                   ptr[get_thread_id() * 32 + 0 + 6],
-                   ptr[get_thread_id() * 32 + 0 + 7],
-
-                   ptr[get_thread_id() * 32 + 8 + 0],
-                   ptr[get_thread_id() * 32 + 8 + 1],
-                   ptr[get_thread_id() * 32 + 8 + 2],
-                   ptr[get_thread_id() * 32 + 8 + 3],
-                   ptr[get_thread_id() * 32 + 8 + 4],
-                   ptr[get_thread_id() * 32 + 8 + 5],
-                   ptr[get_thread_id() * 32 + 8 + 6],
-                   ptr[get_thread_id() * 32 + 8 + 7],
-
-                   ptr[get_thread_id() * 32 + 16 + 0],
-                   ptr[get_thread_id() * 32 + 16 + 1],
-                   ptr[get_thread_id() * 32 + 16 + 2],
-                   ptr[get_thread_id() * 32 + 16 + 3],
-                   ptr[get_thread_id() * 32 + 16 + 4],
-                   ptr[get_thread_id() * 32 + 16 + 5],
-                   ptr[get_thread_id() * 32 + 16 + 6],
-                   ptr[get_thread_id() * 32 + 16 + 7],
-
-                   ptr[get_thread_id() * 32 + 24 + 0],
-                   ptr[get_thread_id() * 32 + 24 + 1],
-                   ptr[get_thread_id() * 32 + 24 + 2],
-                   ptr[get_thread_id() * 32 + 24 + 3],
-                   ptr[get_thread_id() * 32 + 24 + 4],
-                   ptr[get_thread_id() * 32 + 24 + 5],
-                   ptr[get_thread_id() * 32 + 24 + 6],
-                   ptr[get_thread_id() * 32 + 24 + 7]);
-#endif
-
-            // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window, a_dram_tile_window_step);
-            // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window, b_dram_tile_window_step);
-
-            LoadAndConvertATile(a_block_tile, a_copy_dram_window);
-            move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
-
-            LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
-            move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
             block_sync_lds();
 
+            a_copy_lds_window.store(a_block_tile, number<-1>{}, true_type{}, true_type{});
+            b_copy_lds_window.store(b_block_tile, number<-1>{}, true_type{}, true_type{});
+            load_tile(a_block_tile, a_copy_dram_window);
+            move_tile_window(a_copy_dram_window, a_step);
+
+            load_tile(b_block_tile, b_copy_dram_window);
+            move_tile_window(b_copy_dram_window, b_step);
+
+            load_tile(aq_block_tile[next_i], aq_copy_dram_window);
+            move_tile_window(aq_copy_dram_window, aq_step);
+            load_tile(bq_block_tile[next_i], bq_copy_dram_window);
+            move_tile_window(bq_copy_dram_window, bq_step);
+
+            block_gemm(c_block_tile,
+                       aq_block_tile[curr_i],
+                       bq_block_tile[curr_i],
+                       a_lds_gemm_window,
+                       b_lds_gemm_window);
+            block_sync_lds();
             block_gemm.LocalPrefetch(
                 a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
-
             __builtin_amdgcn_sched_barrier(0);
+        };
 
-            auto main_body = [&](auto curr_i) {
-                auto next_i = number<(curr_i.value + 1) % 2>{};
+        constexpr index_t tail_count =
+            ((TailNum == TailNumber::Full) || (TailNum == TailNumber::Odd)) ? 1 : 2;
 
-                block_sync_lds();
-
-                if constexpr(is_a_col_major && !is_a_load_tr_v())
-                {
-                    auto a_shuffle_tmp = make_static_distributed_tensor<ADataType>(
-                        Policy::template MakeShuffledARegTileDistribution<Problem>());
-                    transpose_tile2d(a_shuffle_tmp, a_block_tile);
-                    Base::LocalPrefill(a_copy_lds_window, a_shuffle_tmp, a_element_func);
-                }
-                else
-                {
-                    a_copy_lds_window.store(tile_elementwise_in(a_element_func, a_block_tile),
-                                            number<-1>{},
-                                            true_type{},
-                                            true_type{});
-                }
-                if constexpr(is_b_row_major && !is_b_load_tr_v())
-                {
-                    // Note: BDataType PkInt4 gets converted during loading earlier
-                    auto b_shuffle_tmp = make_static_distributed_tensor<OverrideBDataType>(
-                        Policy::template MakeShuffledBRegTileDistribution<Problem>());
-                    transpose_tile2d(b_shuffle_tmp, b_block_tile);
-                    Base::LocalPrefill(b_copy_lds_window, b_shuffle_tmp, b_element_func);
-                }
-                else
-                {
-                    b_copy_lds_window.store(tile_elementwise_in(b_element_func, b_block_tile),
-                                            number<-1>{},
-                                            true_type{},
-                                            true_type{});
-                }
-                LoadAndConvertATile(a_block_tile, a_copy_dram_window);
-                move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
-
-                LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
-                move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
-
-                Base::GlobalPrefetch(
-                    aq_block_tile[next_i], aq_copy_dram_window, aq_dram_tile_window_step);
-                Base::GlobalPrefetch(
-                    bq_block_tile[next_i], bq_copy_dram_window, bq_dram_tile_window_step);
-
-                block_gemm(c_block_tile,
-                           aq_block_tile[curr_i],
-                           bq_block_tile[curr_i],
-                           a_lds_gemm_window,
-                           b_lds_gemm_window);
-                block_sync_lds();
-                block_gemm.LocalPrefetch(
-                    a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
-                __builtin_amdgcn_sched_barrier(0);
-            };
-
-            constexpr index_t tail_count =
-                ((TailNum == TailNumber::Full) || (TailNum == TailNumber::Odd)) ? 1 : 2;
-
-            if constexpr(HasHotLoop)
+        if constexpr(HasHotLoop)
+        {
+            const index_t num_loopx2 = (num_loop - tail_count) / 2;
+            index_t i                = 0;
+            do
             {
-                const index_t num_loopx2 = (num_loop - tail_count) / 2;
-                index_t i                = 0;
-                do
-                {
-                    main_body(number<0>{});
-                    main_body(number<1>{});
-                } while(++i < num_loopx2);
-                if(num_loopx2 * 2 < (num_loop - tail_count))
-                {
-                    main_body(number<0>{});
-                }
+                main_body(number<0>{});
+                main_body(number<1>{});
+            } while(++i < num_loopx2);
+            if(num_loopx2 * 2 < (num_loop - tail_count))
+            {
+                main_body(number<0>{});
             }
-            // tail
+        }
+        // tail
 #if 1
-            if constexpr((TailNum == TailNumber::Full) || (TailNum == TailNumber::Odd))
-            {
-                if(num_loop % 2 == 1)
-                    block_gemm(c_block_tile,
-                               aq_block_tile[I0],
-                               bq_block_tile[I0],
-                               a_lds_gemm_window,
-                               b_lds_gemm_window);
-                if(num_loop % 2 == 0)
-                    block_gemm(c_block_tile,
-                               aq_block_tile[I1],
-                               bq_block_tile[I1],
-                               a_lds_gemm_window,
-                               b_lds_gemm_window);
-                // CK_PRINTF<>{}(c_block_tile);
-            }
-            else
-            {
-                static_assert(!HasHotLoop, "Kernel with even tail must not have hot loop");
-                Base::GlobalPrefetch(
-                    aq_block_tile[I1], aq_copy_dram_window, aq_dram_tile_window_step);
-                Base::GlobalPrefetch(
-                    bq_block_tile[I1], bq_copy_dram_window, bq_dram_tile_window_step);
+        if constexpr((TailNum == TailNumber::Full) || (TailNum == TailNumber::Odd))
+        {
+            if(num_loop % 2 == 1)
                 block_gemm(c_block_tile,
                            aq_block_tile[I0],
                            bq_block_tile[I0],
                            a_lds_gemm_window,
                            b_lds_gemm_window);
-                block_sync_lds();
-
-                if constexpr(is_a_col_major)
-                {
-                    auto a_shuffle_tmp = make_static_distributed_tensor<ADataType>(
-                        Policy::template MakeShuffledARegTileDistribution<Problem>());
-                    transpose_tile2d(a_shuffle_tmp, a_block_tile);
-                    Base::LocalPrefill(a_copy_lds_window, a_shuffle_tmp, a_element_func);
-                }
-                else
-                {
-                    a_copy_lds_window.store(tile_elementwise_in(a_element_func, a_block_tile),
-                                            number<-1>{},
-                                            true_type{},
-                                            true_type{});
-                }
-                if constexpr(is_b_row_major)
-                {
-                    // Note: BDataType gets converted during loading from PkInt4
-                    auto b_shuffle_tmp = make_static_distributed_tensor<OverrideBDataType>(
-                        Policy::template MakeShuffledBRegTileDistribution<Problem>());
-                    transpose_tile2d(b_shuffle_tmp, b_block_tile);
-                    Base::LocalPrefill(b_copy_lds_window, b_shuffle_tmp, b_element_func);
-                }
-                else
-                {
-                    b_copy_lds_window.store(tile_elementwise_in(b_element_func, b_block_tile),
-                                            number<-1>{},
-                                            true_type{},
-                                            true_type{});
-                }
-                block_sync_lds();
-                block_gemm.LocalPrefetch(
-                    a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
+            if(num_loop % 2 == 0)
                 block_gemm(c_block_tile,
                            aq_block_tile[I1],
                            bq_block_tile[I1],
                            a_lds_gemm_window,
                            b_lds_gemm_window);
-            }
-#endif
-            return c_block_tile;
         }
-    };
-    // Overload for PreshuffleQuant = true
+        else
+        {
+            static_assert(!HasHotLoop, "Kernel with even tail must not have hot loop");
+
+            load_tile(aq_block_tile[I1], aq_copy_dram_window);
+            move_tile_window(aq_copy_dram_window, aq_step);
+            load_tile(bq_block_tile[I1], bq_copy_dram_window);
+            move_tile_window(bq_copy_dram_window, bq_step);
+            block_gemm(c_block_tile,
+                       aq_block_tile[I0],
+                       bq_block_tile[I0],
+                       a_lds_gemm_window,
+                       b_lds_gemm_window);
+            block_sync_lds();
+
+            a_copy_lds_window.store(a_block_tile, number<-1>{}, true_type{}, true_type{});
+            b_copy_lds_window.store(b_block_tile, number<-1>{}, true_type{}, true_type{});
+            block_sync_lds();
+            block_gemm.LocalPrefetch(
+                a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
+            block_gemm(c_block_tile,
+                       aq_block_tile[I1],
+                       bq_block_tile[I1],
+                       a_lds_gemm_window,
+                       b_lds_gemm_window);
+        }
+#endif
+        return c_block_tile;
+    }
+
     template <typename ADramBlockWindowTmp,
               typename BDramBlockWindowTmp,
               typename AQDramBlockWindowTmp,
@@ -607,21 +345,16 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                                    const BQDramBlockWindowTmp& bq_dram_block_window_tmp,
                                    index_t num_loop,
                                    void* p_smem,
-                                   index_t m = 0,
-                                   index_t n = 0) const
+                                   index_t /*m*/ = 0,
+                                   index_t /*n*/ = 0) const
     {
 
-        return PipelineImpl<Scheduler>{}.template operator()<HasHotLoop, TailNum>(
-            a_dram_block_window_tmp,
-            [](const ADataType& a) { return a; },
-            b_dram_block_window_tmp,
-            [](const BDataType& b) { return b; },
-            aq_dram_block_window_tmp,
-            bq_dram_block_window_tmp,
-            m,
-            n,
-            num_loop,
-            p_smem);
+        return Run_<Problem::HasHotLoop, Problem::TailNum>(p_smem,
+                                                           a_dram_block_window_tmp,
+                                                           b_dram_block_window_tmp,
+                                                           aq_dram_block_window_tmp,
+                                                           bq_dram_block_window_tmp,
+                                                           num_loop);
     }
 
     /// @brief Runtime pipeline dispatch operator for grouped GEMM kernels.
@@ -654,25 +387,19 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                                    bool has_hot_loop,
                                    TailNumber tail_number,
                                    void* p_smem,
-                                   index_t m = 0,
-                                   index_t n = 0) const
+                                   index_t /*m*/ = 0,
+                                   index_t /*n*/ = 0) const
     {
         const auto RunPipeline = [&](auto has_hot_loop_, auto tail_number_) {
             constexpr bool hot_loop = has_hot_loop_.value;
             constexpr auto tail_num = tail_number_.value;
 
-            return PipelineImpl<Scheduler>{}.template operator()<hot_loop, tail_num>(
-                a_dram_block_window_tmp,
-                [](const ADataType& a) { return a; },
-                b_dram_block_window_tmp,
-                // Note: BDataType PkInt4 gets converted during loading
-                [](const OverrideBDataType& b) { return b; },
-                aq_dram_block_window_tmp,
-                bq_dram_block_window_tmp,
-                m,
-                n, // dummy value, won't be used
-                num_loop,
-                p_smem);
+            return Run_<hot_loop, tail_num>(p_smem,
+                                            a_dram_block_window_tmp,
+                                            b_dram_block_window_tmp,
+                                            aq_dram_block_window_tmp,
+                                            bq_dram_block_window_tmp,
+                                            num_loop);
         };
         return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
     }
