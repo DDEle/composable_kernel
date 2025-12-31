@@ -28,9 +28,6 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static_assert(std::is_same_v<ComputeDataType, fp8_t> || std::is_same_v<ComputeDataType, bf8_t>);
     static_assert(std::is_same_v<CDataType, float>);
 
-    static constexpr index_t warp_size = get_warp_size();
-    static_assert(warp_size == 64, "Wrong!");
-
     using BlockGemmShape = typename Problem::BlockGemmShape;
     using BlockWarps     = typename BlockGemmShape::BlockWarps;
     using WarpTile       = typename BlockGemmShape::WarpTile;
@@ -39,6 +36,19 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static constexpr index_t MPerBlock  = BlockGemmShape::kM;
     static constexpr index_t NPerBlock  = BlockGemmShape::kN;
     static constexpr index_t KPerBlock  = BlockGemmShape::kK;
+    static constexpr index_t WarpTileM  = WarpTile::at(I0);
+    static constexpr index_t WarpTileN  = WarpTile::at(I1);
+    static constexpr index_t WarpTileK  = WarpTile::at(I2);
+    static constexpr index_t MWarpTiles = MPerBlock / WarpTileM;
+    static constexpr index_t NWarpTiles = NPerBlock / WarpTileN;
+    static constexpr index_t KWarpTiles = KPerBlock / WarpTileK;
+
+    static constexpr index_t NPerBlockBQ = KPerBlock / Problem::BQuantGroupSize::kN;
+    static_assert(Problem::AQuantGroupSize::kM == 1 && Problem::AQuantGroupSize::kK == WarpTileK);
+
+    static constexpr index_t warp_size = get_warp_size();
+    static constexpr index_t warp_num  = kBlockSize / warp_size;
+    static_assert(warp_size == 64, "Wrong!");
 
     static_assert(sizeof(ADataType) == sizeof(BDataType), "Wrong!");
     static constexpr index_t ElementSize = sizeof(ADataType);
@@ -47,19 +57,69 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static constexpr index_t K0          = KPerBlock / (K1 * K2);
     static_assert(K0 * K1 * K2 == KPerBlock, "Wrong!");
 
-    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeAQ()
-    {
-        return GemmAQuantPipelineAgBgCrDefaultPolicy::GetVectorSizeAQ<Problem>();
-    }
+    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeAQ() { return 1; }
     CK_TILE_HOST_DEVICE static constexpr auto MakeAQDramTileDistribution()
+    {
+        constexpr index_t M3 = 4;
+        constexpr index_t M0 = MWarpTiles;
+        constexpr index_t M2 = warp_size / M3 / M0;
+        constexpr index_t M1 = MPerBlock / M0 / M3 / M2;
+
+        static_assert(M0 * M1 * M2 * M3 == MPerBlock, "wrong!");
+
+        constexpr index_t R = kBlockSize / warp_size / M1;
+        static_assert(kBlockSize == warp_size * M1 * R, "wrong!");
+
+        return make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<R>,
+                ck_tile::tuple<ck_tile::sequence<M0, M1, M2, M3>, ck_tile::sequence<KWarpTiles, 1>>,
+                ck_tile::tuple<ck_tile::sequence<0, 2, 1>, ck_tile::sequence<1, 1, 1>>,
+                ck_tile::tuple<ck_tile::sequence<0, 0, 1>, ck_tile::sequence<2, 0, 3>>,
+                ck_tile::sequence<2>,
+                ck_tile::sequence<1>>{});
+    }
+    CK_TILE_HOST_DEVICE static constexpr auto MakeAQLdsBlockDescriptor()
+    {
+        constexpr index_t M2 = 4;
+        constexpr index_t M1 = WarpTileM / M2;
+        constexpr index_t M0 = MWarpTiles;
+        static_assert(M0 * M1 * M2 == MPerBlock, "wrong!");
+
+        constexpr auto desc_0 =
+            make_naive_tensor_descriptor_packed(number_tuple<KWarpTiles, M1, M0, M2>{});
+
+        constexpr auto desc_1 = transform_tensor_descriptor( //
+            desc_0,
+            make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2>{}),
+                       make_merge_transform_v3_division_mod(number_tuple<KWarpTiles>{})),
+            make_tuple(sequence<2, 1, 3>{}, sequence<0>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        return desc_1;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeBQ() { return 1; }
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBQDramTileDistribution()
+    {
+        return make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<warp_num, warp_size / NPerBlockBQ>,
+                ck_tile::tuple<ck_tile::sequence<NPerBlockBQ>, ck_tile::sequence<KWarpTiles>>,
+                ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
+                ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<0, 1>>,
+                ck_tile::sequence<2>,
+                ck_tile::sequence<0>>{});
+    }
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBQLdsBlockDescriptor()
+    {
+        return make_naive_tensor_descriptor_packed(number_tuple<NPerBlockBQ, KWarpTiles>{});
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto MakeAQBlockDistribution()
     {
         return GemmAQuantPipelineAgBgCrDefaultPolicy::MakeAQDramTileDistribution<Problem>();
     }
-    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeBQ()
-    {
-        return GemmBQuantPipelineAgBgCrDefaultPolicy::GetVectorSizeBQ<Problem>();
-    }
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBQDramTileDistribution()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBQBlockDistribution()
     {
         return GemmBQuantPipelineAgBgCrDefaultPolicy::MakeBQDramTileDistribution<Problem>();
     }
@@ -73,9 +133,9 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         using WarpGemm = WarpGemmDispatcher<ComputeDataType,
                                             ComputeDataType,
                                             CDataType,
-                                            WarpTile::at(I0),
-                                            WarpTile::at(I1),
-                                            WarpTile::at(I2),
+                                            WarpTileM,
+                                            WarpTileN,
+                                            WarpTileK,
                                             Problem::TransposeC,
                                             false,
                                             false,
@@ -221,16 +281,25 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         constexpr index_t desc_size = MakeALdsBlockDescriptor().get_element_space_size();
         return integer_least_multiple(sizeof(typename Problem::ADataType) * desc_size, 16);
     }
-
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
         constexpr index_t desc_size = MakeBLdsBlockDescriptor().get_element_space_size();
         return integer_least_multiple(sizeof(typename Problem::BDataType) * desc_size, 16);
     }
+    CK_TILE_DEVICE static constexpr index_t GetSmemSizeAQ()
+    {
+        constexpr index_t desc_size = MakeAQLdsBlockDescriptor().get_element_space_size();
+        return sizeof(float) * integer_least_multiple(desc_size, warp_size);
+    }
+    CK_TILE_DEVICE static constexpr index_t GetSmemSizeBQ()
+    {
+        constexpr index_t desc_size = MakeBQLdsBlockDescriptor().get_element_space_size();
+        return sizeof(float) * integer_least_multiple(desc_size, warp_size);
+    }
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
-        return GetSmemSizeA() + GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeB();
+        return 2 * (GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ());
     }
 
     CK_TILE_DEVICE static constexpr auto GetVectorSizeA() { return K2; }
@@ -253,8 +322,12 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
     FORWARD_METHOD_(GetVectorSizeAQ);
     FORWARD_METHOD_(MakeAQDramTileDistribution);
+    FORWARD_METHOD_(MakeAQLdsBlockDescriptor);
     FORWARD_METHOD_(GetVectorSizeBQ);
     FORWARD_METHOD_(MakeBQDramTileDistribution);
+    FORWARD_METHOD_(MakeBQLdsBlockDescriptor);
+    FORWARD_METHOD_(MakeAQBlockDistribution);
+    FORWARD_METHOD_(MakeBQBlockDistribution);
     FORWARD_METHOD_(GetBlockGemm);
     FORWARD_METHOD_(MakeADramTileDistribution);
     FORWARD_METHOD_(MakeBDramTileDistribution);
@@ -263,6 +336,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     FORWARD_METHOD_(MakeBLdsBlockDescriptor);
     FORWARD_METHOD_(GetSmemSizeA);
     FORWARD_METHOD_(GetSmemSizeB);
+    FORWARD_METHOD_(GetSmemSizeAQ);
+    FORWARD_METHOD_(GetSmemSizeBQ);
     FORWARD_METHOD_(GetSmemSize);
     FORWARD_METHOD_(GetVectorSizeA);
     FORWARD_METHOD_(GetVectorSizeB);

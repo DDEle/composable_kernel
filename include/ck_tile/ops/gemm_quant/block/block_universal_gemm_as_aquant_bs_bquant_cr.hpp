@@ -232,6 +232,26 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         return b_block_dstr_encode;
     }
 
+    CK_TILE_DEVICE static constexpr auto MakeCBlockDistributionEncode()
+    {
+        constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
+            sequence<>,
+            tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
+            tuple<sequence<1, 2>>,
+            tuple<sequence<1, 1>>,
+            sequence<1, 2>,
+            sequence<0, 0>>{};
+        constexpr auto c_block_dstr_encoding = detail::make_embed_tile_distribution_encoding(
+            c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
+        return c_block_dstr_encoding;
+    }
+
+    CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
+    {
+        return make_static_distributed_tensor<CDataType>(
+            make_static_tile_distribution(MakeCBlockDistributionEncode()));
+    }
+
     private:
     template <GemmPipelineScheduler Scheduler, typename GemmTraits>
     struct BlockGemmImpl
@@ -285,7 +305,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                           "C block tensor data type!");
             constexpr auto warp_size = get_warp_size();
 
-            auto q_block_tensor = std::move(aq_block_tensor);
+            auto q_block_tensor = aq_block_tensor;
             if constexpr(Traits::NQPerBlock == 1)
             {
                 constexpr auto aq_spans = AQBlockTensor::get_distributed_spans();
@@ -422,12 +442,6 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     };
 
     public:
-    CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
-    {
-        return BlockGemmQuantCommon<CDataType, WarpGemm, MIterPerWarp, MWarp, NIterPerWarp, NWarp>::
-            MakeCBlockTile();
-    }
-
     template <typename ASmemBlockWindow,
               typename BSmemBlockWindow,
               bool ALoadTranspose = false,
