@@ -453,9 +453,6 @@ struct ABQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Pro
 
                 block_sync_lds();
 
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";;# a_copy_lds_window");
-                __builtin_amdgcn_sched_barrier(0);
                 if constexpr(is_a_col_major && !is_a_load_tr_v())
                 {
                     auto a_shuffle_tmp = make_static_distributed_tensor<ADataType>(
@@ -470,9 +467,6 @@ struct ABQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Pro
                                             true_type{},
                                             true_type{});
                 }
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";;# b_copy_lds_window");
-                __builtin_amdgcn_sched_barrier(0);
                 if constexpr(is_b_row_major && !is_b_load_tr_v())
                 {
                     // Note: BDataType PkInt4 gets converted during loading earlier
@@ -488,38 +482,23 @@ struct ABQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Pro
                                             true_type{},
                                             true_type{});
                 }
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";;# LoadAndConvertATile");
-                __builtin_amdgcn_sched_barrier(0);
                 LoadAndConvertATile(a_block_tile, a_copy_dram_window);
                 move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";;# LoadAndConvertBTile");
-                __builtin_amdgcn_sched_barrier(0);
                 LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
                 move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
 
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";;# GlobalPrefetch");
-                __builtin_amdgcn_sched_barrier(0);
                 Base::GlobalPrefetch(
                     aq_block_tile[next_i], aq_copy_dram_window, aq_dram_tile_window_step);
                 Base::GlobalPrefetch(
                     bq_block_tile[next_i], bq_copy_dram_window, bq_dram_tile_window_step);
 
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";;# block_gemm");
-                __builtin_amdgcn_sched_barrier(0);
                 block_gemm(c_block_tile,
                            aq_block_tile[curr_i],
                            bq_block_tile[curr_i],
                            a_lds_gemm_window,
                            b_lds_gemm_window);
-                __builtin_amdgcn_sched_barrier(0);
                 block_sync_lds();
-                __builtin_amdgcn_sched_barrier(0);
-                asm volatile(";;# LocalPrefetch");
                 block_gemm.LocalPrefetch(
                     a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
                 __builtin_amdgcn_sched_barrier(0);

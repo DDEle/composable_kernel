@@ -6,8 +6,12 @@
 template <typename T>
 struct GemmConfig : public GemmConfigQuantPrefill<T>
 {
+    static constexpr ck_tile::index_t M_Warp = 4;
+    static constexpr ck_tile::index_t N_Warp = 1;
+
     static constexpr bool kPadK      = false;
     static constexpr bool TransposeC = true;
+    static constexpr int kBlockPerCu = 1;
 };
 
 static auto _ = ([]() {
