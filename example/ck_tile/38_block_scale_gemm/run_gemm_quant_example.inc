@@ -157,7 +157,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                    ck_tile::AQuantGemmPipelineAgBgCrMem<PipelineProblem>>,
                 std::conditional_t<
                     QuantMode == ck_tile::QuantType::ABQuantGrouped,
-                    ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>,
+                    ck_tile::ABQuantGemmPipelineAgBgCrAsync<PipelineProblem>,
                     std::conditional_t<
                         GemmConfig::PreshuffleB == true,
                         ck_tile::WPQuantBPipelineAgBgCrV2<PipelineProblem>,
