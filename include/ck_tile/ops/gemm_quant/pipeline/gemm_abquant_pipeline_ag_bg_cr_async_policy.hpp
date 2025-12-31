@@ -115,6 +115,46 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         return MakeABDramTileDistribution_<NPerBlock>();
     }
 
+    template <typename WindowTmp>
+    CK_TILE_DEVICE static constexpr auto MakeAsyncLoadDramWindow(const WindowTmp& window_tmp)
+    {
+        constexpr auto ndims = std::decay_t<decltype(window_tmp)>::get_num_of_dimension();
+        static_assert(ndims == 2, "only support 2D tensor");
+        auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
+        const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
+
+        const index_t k_tiles = cols / (K1 * K2);
+        const auto col_lens   = make_tuple(k_tiles, number<K1>{}, number<K2>{});
+
+        constexpr index_t M1 = warp_size / static_cast<index_t>(WGAccessDouble) / K1;
+        const index_t M0     = integer_divide_ceil(rows, M1);
+        const auto row_lens  = make_tuple(M0, number<M1>{});
+
+        const auto d0 = make_naive_tensor_descriptor_packed(container_concat(row_lens, col_lens));
+        const auto desc_0 = decltype(d0)( // set correct size (without padding)
+            d0.get_transforms(),
+            tensor_view_tmp.get_tensor_descriptor().get_element_space_size());
+        const auto desc_1 = transform_tensor_descriptor(
+            desc_0,
+            make_tuple(make_pass_through_transform(M0),
+                       make_xor_transform(make_tuple(number<M1>{}, number<K1>{})),
+                       make_pass_through_transform(k_tiles),
+                       make_pass_through_transform(number<K2>{})),
+            make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}, sequence<4>{}),
+            make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}, sequence<4>{}));
+        const auto desc = transform_tensor_descriptor( //
+            desc_1,
+            make_tuple(make_merge_transform_v3_division_mod(row_lens),
+                       make_merge_transform_v3_division_mod(col_lens)),
+            make_tuple(sequence<0, 1>{}, sequence<2, 3, 4>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+
+        return make_tile_window(make_tensor_view<address_space_enum::global>(
+                                    &tensor_view_tmp.get_buffer_view()(0), desc),
+                                window_tmp.get_window_lengths(),
+                                window_tmp.get_window_origin());
+    }
+
     template <index_t MNPerBlock>
     CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_()
     {
@@ -167,7 +207,6 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             make_tuple(sequence<0>{}, sequence<1>{}));
         return desc_2;
     }
-
     CK_TILE_DEVICE static constexpr auto MakeALdsBlockDescriptor()
     {
         return MakeABLdsBlockDescriptor_<MPerBlock>();
@@ -191,7 +230,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
-        return GetSmemSizeA() + GetSmemSizeB();
+        return GetSmemSizeA() + GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeB();
     }
 
     CK_TILE_DEVICE static constexpr auto GetVectorSizeA() { return K2; }
@@ -219,6 +258,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     FORWARD_METHOD_(GetBlockGemm);
     FORWARD_METHOD_(MakeADramTileDistribution);
     FORWARD_METHOD_(MakeBDramTileDistribution);
+    FORWARD_METHOD_(MakeAsyncLoadDramWindow);
     FORWARD_METHOD_(MakeALdsBlockDescriptor);
     FORWARD_METHOD_(MakeBLdsBlockDescriptor);
     FORWARD_METHOD_(GetSmemSizeA);
