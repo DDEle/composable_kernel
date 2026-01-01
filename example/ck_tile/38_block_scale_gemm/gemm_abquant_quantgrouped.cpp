@@ -8,6 +8,9 @@ struct GemmConfig : public GemmConfigQuantPrefill<T>
 {
     static constexpr ck_tile::index_t M_Warp = 4;
     static constexpr ck_tile::index_t N_Warp = 1;
+    static constexpr ck_tile::index_t K_Warp = 2;
+
+    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(T) * K_Warp;
 
     static constexpr bool kPadK      = false;
     static constexpr bool TransposeC = true;

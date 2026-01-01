@@ -32,7 +32,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     using BlockWarps     = typename BlockGemmShape::BlockWarps;
     using WarpTile       = typename BlockGemmShape::WarpTile;
 
-    static constexpr index_t kBlockSize = Problem::kBlockSize;
+    static constexpr index_t BlockSize  = Problem::kBlockSize;
     static constexpr index_t MPerBlock  = BlockGemmShape::kM;
     static constexpr index_t NPerBlock  = BlockGemmShape::kN;
     static constexpr index_t KPerBlock  = BlockGemmShape::kK;
@@ -43,19 +43,48 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static constexpr index_t NWarpTiles = NPerBlock / WarpTileN;
     static constexpr index_t KWarpTiles = KPerBlock / WarpTileK;
 
-    static constexpr index_t NPerBlockBQ = KPerBlock / Problem::BQuantGroupSize::kN;
+    static constexpr index_t MWarps       = BlockWarps::at(I0);
+    static constexpr index_t NWarps       = BlockWarps::at(I1);
+    static constexpr index_t KWarps       = BlockWarps::at(I2);
+    static constexpr index_t MIterPerWarp = MWarpTiles / MWarps;
+    static constexpr index_t KPerWarp     = KPerBlock / KWarps;
+    static_assert(KWarps == 2, "KWarps == 2 for ping-pong!");
+    static_assert(KWarpTiles == KWarps, "Wrong!");
+
+    static constexpr index_t KPerWarpAQ  = KPerWarp / Problem::AQuantGroupSize::kK;
+    static constexpr index_t NPerBlockBQ = NPerBlock / Problem::BQuantGroupSize::kN;
+    static constexpr index_t KPerWarpkBQ = KPerWarp / Problem::BQuantGroupSize::kK;
     static_assert(Problem::AQuantGroupSize::kM == 1 && Problem::AQuantGroupSize::kK == WarpTileK);
 
     static constexpr index_t warp_size = get_warp_size();
-    static constexpr index_t warp_num  = kBlockSize / warp_size;
+    static constexpr index_t warp_num  = BlockSize / warp_size;
     static_assert(warp_size == 64, "Wrong!");
+    static_assert(warp_num * warp_size == BlockSize, "Wrong!");
 
     static_assert(sizeof(ADataType) == sizeof(BDataType), "Wrong!");
     static constexpr index_t ElementSize = sizeof(ADataType);
     static constexpr index_t K2          = Problem::VectorLoadSize / ElementSize; // 16
     static constexpr index_t K1          = WarpTile::at(I2) / K2;                 // 8
-    static constexpr index_t K0          = KPerBlock / (K1 * K2);
-    static_assert(K0 * K1 * K2 == KPerBlock, "Wrong!");
+    static constexpr index_t K0          = KPerWarp / (K1 * K2);
+    static_assert(K0 * K1 * K2 == KPerWarp, "Wrong!");
+    static_assert(K0 == 1, "Wrong!");
+
+    struct swap_warp_t
+    {
+        template <typename T>
+        CK_TILE_HOST_DEVICE constexpr auto operator()(T&& v) const
+        {
+            return v ^ 1;
+        }
+    };
+
+    template <bool swap_warp_group>
+    static constexpr inline auto warp_groups_transform = []() {
+        if constexpr(swap_warp_group)
+            return make_functor_transform(swap_warp_t{}, number<KWarps>{});
+        else
+            return make_pass_through_transform(number<KWarps>{});
+    }();
 
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeAQ() { return 1; }
     CK_TILE_HOST_DEVICE static constexpr auto MakeAQDramTileDistribution()
@@ -67,19 +96,54 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
         static_assert(M0 * M1 * M2 * M3 == MPerBlock, "wrong!");
 
-        constexpr index_t R = kBlockSize / warp_size / M1;
-        static_assert(kBlockSize == warp_size * M1 * R, "wrong!");
+        constexpr index_t R = BlockSize / KWarps / warp_size / M1;
+        static_assert(BlockSize == KWarps * warp_size * M1 * R, "wrong!");
 
         return make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<R>,
-                ck_tile::tuple<ck_tile::sequence<M0, M1, M2, M3>, ck_tile::sequence<KWarpTiles, 1>>,
-                ck_tile::tuple<ck_tile::sequence<0, 2, 1>, ck_tile::sequence<1, 1, 1>>,
+                ck_tile::tuple<ck_tile::sequence<M0, M1, M2, M3>,
+                               ck_tile::sequence<KWarps, KWarpTiles>>,
+                ck_tile::tuple<ck_tile::sequence<2, 0, 1>, ck_tile::sequence<1, 1, 1>>,
                 ck_tile::tuple<ck_tile::sequence<0, 0, 1>, ck_tile::sequence<2, 0, 3>>,
                 ck_tile::sequence<2>,
                 ck_tile::sequence<1>>{});
     }
-    CK_TILE_HOST_DEVICE static constexpr auto MakeAQLdsBlockDescriptor()
+    template <typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeAQAsyncLoadDramWindow(const WindowTmp& window_tmp)
+    {
+        constexpr auto ndims = std::decay_t<decltype(window_tmp)>::get_num_of_dimension();
+        static_assert(ndims == 2, "only support 2D tensor");
+        auto&& tensor_view_tmp = window_tmp.get_bottom_tensor_view();
+        const auto [mn, qk]    = tensor_view_tmp.get_tensor_descriptor().get_lengths();
+        const auto [stride_mn, stride_qk] =
+            tensor_view_tmp.get_tensor_descriptor().get_transforms()[I0].coefficients_;
+        const auto desc_0 = make_naive_tensor_descriptor( //
+            make_tuple(mn, qk / KWarps, number<KWarps>{}),
+            make_tuple(stride_mn, KWarps * stride_qk, stride_qk),
+            number<KWarps>{},
+            number<1>{});
+        const auto desc_1 = transform_tensor_descriptor( //
+            desc_0,
+            make_tuple(make_pass_through_transform(mn),
+                       make_pass_through_transform(qk / KWarps),
+                       warp_groups_transform<true>),
+            make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
+        const auto desc   = transform_tensor_descriptor( //
+            desc_1,
+            make_tuple(
+                make_pass_through_transform(mn),
+                make_maerge_transform_v3_division_mod(make_tuple(qk / KWarps, number<KWarps>{}))),
+            make_tuple(sequence<0>{}, sequence<1, 2>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        return make_tile_window(make_tensor_view<address_space_enum::global>(
+                                    &tensor_view_tmp.get_buffer_view()(0), desc),
+                                window_tmp.get_window_lengths(),
+                                window_tmp.get_window_origin());
+    }
+    template <typename SwapWarpGroup>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeAQLdsBlockDescriptor(SwapWarpGroup)
     {
         constexpr index_t M2 = 4;
         constexpr index_t M1 = WarpTileM / M2;
@@ -87,12 +151,12 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         static_assert(M0 * M1 * M2 == MPerBlock, "wrong!");
 
         constexpr auto desc_0 =
-            make_naive_tensor_descriptor_packed(number_tuple<KWarpTiles, M1, M0, M2>{});
+            make_naive_tensor_descriptor_packed(number_tuple<KWarps, M1, M0, M2>{});
 
         constexpr auto desc_1 = transform_tensor_descriptor( //
             desc_0,
             make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2>{}),
-                       make_merge_transform_v3_division_mod(number_tuple<KWarpTiles>{})),
+                       warp_groups_transform<SwapWarpGroup::value>),
             make_tuple(sequence<2, 1, 3>{}, sequence<0>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
         return desc_1;
@@ -103,25 +167,54 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     {
         return make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
-                ck_tile::sequence<warp_num, warp_size / NPerBlockBQ>,
-                ck_tile::tuple<ck_tile::sequence<NPerBlockBQ>, ck_tile::sequence<KWarpTiles>>,
-                ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
-                ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<0, 1>>,
+                ck_tile::sequence<warp_num / KWarps, warp_size / NPerBlockBQ>,
+                ck_tile::tuple<ck_tile::sequence<NPerBlockBQ>,
+                               ck_tile::sequence<KWarps, KWarpTiles>>,
+                ck_tile::tuple<ck_tile::sequence<2, 0>, ck_tile::sequence<1, 0>>,
+                ck_tile::tuple<ck_tile::sequence<1, 0>, ck_tile::sequence<0, 1>>,
                 ck_tile::sequence<2>,
                 ck_tile::sequence<0>>{});
     }
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBQLdsBlockDescriptor()
+
+    template <typename SwapWarpGroup>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBQLdsBlockDescriptor(SwapWarpGroup)
     {
-        return make_naive_tensor_descriptor_packed(number_tuple<NPerBlockBQ, KWarpTiles>{});
+        constexpr auto desc_0 = make_naive_tensor_descriptor( //
+            number_tuple<KWarps, NPerBlockBQ>{},
+            number_tuple<max(warp_size, NPerBlockBQ), 1>{},
+            number<NPerBlockBQ>{},
+            number<1>{});
+        constexpr auto desc_1 = transform_tensor_descriptor(
+            desc_0,
+            make_tuple(make_pass_through_transform(number<NPerBlockBQ>{}),
+                       warp_groups_transform<SwapWarpGroup::value>),
+            make_tuple(sequence<1>{}, sequence<0>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        return desc_1;
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeAQBlockDistribution()
     {
-        return GemmAQuantPipelineAgBgCrDefaultPolicy::MakeAQDramTileDistribution<Problem>();
+        return make_static_tile_distribution(
+            tile_distribution_encoding<                          //
+                sequence<NWarps, warp_size / WarpTileM>,         // ?, 4
+                tuple<sequence<MIterPerWarp, MWarps, WarpTileM>, // ?,?,16
+                      sequence<KWarps, KPerWarpAQ>>,             // 2, 1
+                tuple<sequence<2, 1, 0>, sequence<0, 1>>,
+                tuple<sequence<0, 1, 0>, sequence<1, 2>>,
+                sequence<1, 2>,
+                sequence<0, 1>>{});
     }
     CK_TILE_HOST_DEVICE static constexpr auto MakeBQBlockDistribution()
     {
-        return GemmBQuantPipelineAgBgCrDefaultPolicy::MakeBQDramTileDistribution<Problem>();
+        return make_static_tile_distribution(
+            tile_distribution_encoding<                                      //
+                sequence<MWarps, NWarps, warp_size>,                         // ?,?,64
+                tuple<sequence<NPerBlockBQ>, sequence<KWarps, KPerWarpkBQ>>, // 1 2,1
+                tuple<sequence<2, 0, 0>, sequence<0>>,
+                tuple<sequence<0, 0, 1>, sequence<2>>,
+                sequence<1, 2>,
+                sequence<0, 1>>{});
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
@@ -153,18 +246,19 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     CK_TILE_DEVICE static constexpr auto MakeABDramTileDistribution_()
     {
         constexpr index_t M2 = warp_size / K1;
-        constexpr index_t M1 = kBlockSize / warp_size;
+        constexpr index_t M1 = BlockSize / warp_size / KWarps;
         constexpr index_t M0 = MNPerBlock / M1 / M2;
         static_assert(M0 * M1 * M2 == MNPerBlock, "wrong!");
 
         return make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<>,
-                ck_tile::tuple<ck_tile::sequence<M0, M1, M2>, ck_tile::sequence<K0, K1, K2>>,
-                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>, // M1 M2,K1
-                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 1>>,
+                ck_tile::tuple<ck_tile::sequence<M0, M1, M2>,
+                               ck_tile::sequence<KWarps, K0, K1, K2>>,
+                ck_tile::tuple<ck_tile::sequence<2, 1>, ck_tile::sequence<1, 2>>, // KWarps,M1 M2,K1
+                ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 2>>,
                 ck_tile::sequence<1, 2, 2>, // M0,K0,K2
-                ck_tile::sequence<0, 0, 2>>{});
+                ck_tile::sequence<0, 1, 3>>{});
     }
     CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
     {
@@ -183,8 +277,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
         const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
 
-        const index_t k_tiles = cols / (K1 * K2);
-        const auto col_lens   = make_tuple(k_tiles, number<K1>{}, number<K2>{});
+        const index_t k_tiles = cols / (KWarps * K1 * K2);
+        const auto col_lens   = make_tuple(k_tiles, number<KWarps>{}, number<K1>{}, number<K2>{});
 
         constexpr index_t M1 = warp_size / static_cast<index_t>(WGAccessDouble) / K1;
         const index_t M0     = integer_divide_ceil(rows, M1);
@@ -199,14 +293,17 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             make_tuple(make_pass_through_transform(M0),
                        make_xor_transform(make_tuple(number<M1>{}, number<K1>{})),
                        make_pass_through_transform(k_tiles),
+                       warp_groups_transform<true>,
                        make_pass_through_transform(number<K2>{})),
-            make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}, sequence<4>{}),
-            make_tuple(sequence<0>{}, sequence<1, 3>{}, sequence<2>{}, sequence<4>{}));
+            make_tuple(
+                sequence<0>{}, sequence<1, 4>{}, sequence<2>{}, sequence<3>{}, sequence<5>{}),
+            make_tuple(
+                sequence<0>{}, sequence<1, 4>{}, sequence<2>{}, sequence<3>{}, sequence<5>{}));
         const auto desc = transform_tensor_descriptor( //
             desc_1,
             make_tuple(make_merge_transform_v3_division_mod(row_lens),
                        make_merge_transform_v3_division_mod(col_lens)),
-            make_tuple(sequence<0, 1>{}, sequence<2, 3, 4>{}),
+            make_tuple(sequence<0, 1>{}, sequence<2, 3, 4, 5>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
 
         return make_tile_window(make_tensor_view<address_space_enum::global>(
@@ -215,8 +312,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                                 window_tmp.get_window_origin());
     }
 
-    template <index_t MNPerBlock>
-    CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_()
+    template <index_t MNPerBlock, typename SwapWarpGroup>
+    CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_(SwapWarpGroup)
     {
         constexpr index_t M3 = warp_size / static_cast<index_t>(WGAccessDouble) / K1;
         constexpr index_t M2 = (warp_size / K1) / M3;
@@ -228,8 +325,9 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         constexpr index_t PadSize = 16;
 
         constexpr auto desc_0 = make_naive_tensor_descriptor( //
-            number_tuple<M1, K0, M0, M2, M3, K1, K2>{},
-            number_tuple<K0 * M0 * M2 * M3 * K1 * K2 + PadSize,
+            number_tuple<M1, KWarps, K0, M0, M2, M3, K1, K2>{},
+            number_tuple<KWarps * K0 * M0 * M2 * M3 * K1 * K2 + PadSize,
+                         K0 * M0 * M2 * M3 * K1 * K2,
                          M0 * M2 * M3 * K1 * K2,
                          M2 * M3 * K1 * K2,
                          M3 * K1 * K2,
@@ -242,6 +340,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         constexpr auto desc_1 = transform_tensor_descriptor(
             desc_0,
             make_tuple(make_pass_through_transform(number<M1>{}),
+                       warp_groups_transform<SwapWarpGroup::value>,
                        make_pass_through_transform(number<K0>{}),
                        make_pass_through_transform(number<M0>{}),
                        make_pass_through_transform(number<M2>{}),
@@ -251,55 +350,63 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                        sequence<1>{},
                        sequence<2>{},
                        sequence<3>{},
-                       sequence<4, 5>{},
-                       sequence<6>{}),
+                       sequence<4>{},
+                       sequence<5, 6>{},
+                       sequence<7>{}),
             make_tuple(sequence<0>{},
                        sequence<1>{},
                        sequence<2>{},
                        sequence<3>{},
-                       sequence<4, 5>{},
-                       sequence<6>{}));
+                       sequence<4>{},
+                       sequence<5, 6>{},
+                       sequence<7>{}));
         constexpr auto desc_2 = transform_tensor_descriptor( //
             desc_1,
             make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2, M3>{}),
-                       make_merge_transform_v3_division_mod(number_tuple<K0, K1, K2>{})),
-            make_tuple(sequence<2, 0, 3, 4>{}, sequence<1, 5, 6>{}),
+                       make_merge_transform_v3_division_mod(number_tuple<KWarps, K0, K1, K2>{})),
+            make_tuple(sequence<3, 0, 4, 5>{}, sequence<1, 2, 6, 7>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
         return desc_2;
     }
-    CK_TILE_DEVICE static constexpr auto MakeALdsBlockDescriptor()
+    template <typename SwapWarpGroup>
+    CK_TILE_DEVICE static constexpr auto MakeALdsBlockDescriptor(SwapWarpGroup)
     {
-        return MakeABLdsBlockDescriptor_<MPerBlock>();
+        return MakeABLdsBlockDescriptor_<MPerBlock>(SwapWarpGroup{});
     }
-    CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
+    template <typename SwapWarpGroup>
+    CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor(SwapWarpGroup)
     {
-        return MakeABLdsBlockDescriptor_<NPerBlock>();
+        return MakeABLdsBlockDescriptor_<NPerBlock>(SwapWarpGroup{});
     }
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
-        constexpr index_t desc_size = MakeALdsBlockDescriptor().get_element_space_size();
+        constexpr index_t desc_size =
+            MakeALdsBlockDescriptor(false_type{}).get_element_space_size();
         return integer_least_multiple(sizeof(typename Problem::ADataType) * desc_size, 16);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
-        constexpr index_t desc_size = MakeBLdsBlockDescriptor().get_element_space_size();
+        constexpr index_t desc_size =
+            MakeBLdsBlockDescriptor(false_type{}).get_element_space_size();
         return integer_least_multiple(sizeof(typename Problem::BDataType) * desc_size, 16);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeAQ()
     {
-        constexpr index_t desc_size = MakeAQLdsBlockDescriptor().get_element_space_size();
+        constexpr index_t desc_size =
+            MakeAQLdsBlockDescriptor(false_type{}).get_element_space_size();
         return sizeof(float) * integer_least_multiple(desc_size, warp_size);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeBQ()
     {
-        constexpr index_t desc_size = MakeBQLdsBlockDescriptor().get_element_space_size();
+        constexpr index_t desc_size =
+            MakeBQLdsBlockDescriptor(false_type{}).get_element_space_size();
         return sizeof(float) * integer_least_multiple(desc_size, warp_size);
     }
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
-        return 2 * (GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ());
+        return GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ();
     }
 
     CK_TILE_DEVICE static constexpr auto GetVectorSizeA() { return K2; }

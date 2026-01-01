@@ -16,7 +16,8 @@ namespace ck_tile {
 template <typename Problem>
 struct BaseGemmPipelineAgBgCrCompV3
 {
-    static constexpr index_t PrefetchStages   = 2;
+    static constexpr index_t PrefetchStages =
+        Problem::BlockGemmShape::BlockWarps::at(number<2>{}) == 2 ? 1 : 2;
     static constexpr index_t PrefillStages    = 1;
     static constexpr index_t GlobalBufferNum  = 1;
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
@@ -28,7 +29,11 @@ struct BaseGemmPipelineAgBgCrCompV3
 
     CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
     {
-        if(BlockHasHotloop(num_loop))
+        if constexpr(PrefetchStages == 1)
+        {
+            return TailNumber::One;
+        }
+        else if(BlockHasHotloop(num_loop))
         {
             return TailNumber::Odd;
         }
@@ -49,34 +54,29 @@ struct BaseGemmPipelineAgBgCrCompV3
     CK_TILE_HOST_DEVICE static auto
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
-        // Handle all the valid cases.
-        if(has_hot_loop)
-        {
-            if(tail_number == ck_tile::TailNumber::Odd)
-            {
-                return run_func(
-                    ck_tile::bool_constant<true>{},
-                    ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Odd>{});
-            }
-        }
-#if 1
-        else
-        {
+        constexpr auto scenarios = []() {
+            if constexpr(PrefetchStages == 1)
+                return std::array{
+                    std::make_pair(true, TailNumber::One),
+                    std::make_pair(false, TailNumber::One),
+                };
+            else
+                return std::array{
+                    std::make_pair(true, TailNumber::Odd),
+                    std::make_pair(false, TailNumber::Odd),
+                    std::make_pair(false, TailNumber::Even),
+                };
+        }();
 
-            if(tail_number == ck_tile::TailNumber::Odd)
-            {
-                return run_func(
-                    ck_tile::bool_constant<false>{},
-                    ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Odd>{});
-            }
-            else if(tail_number == ck_tile::TailNumber::Even)
-            {
-                return run_func(
-                    ck_tile::bool_constant<false>{},
-                    ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Even>{});
-            }
-        }
-#endif
+#define DISPATCH_(i)                                                                 \
+    if constexpr(i < scenarios.size())                                               \
+        if(has_hot_loop == scenarios[i].first && tail_number == scenarios[i].second) \
+            return run_func(bool_constant<scenarios[i].first>{}, constant<scenarios[i].second>{});
+        DISPATCH_(0)
+        DISPATCH_(1)
+        DISPATCH_(2)
+#undef DISPATCH_
+
 #if defined(__HIP_DEVICE_COMPILE__)
         // This path should be unreachable in device code if tail_number is valid.
         __builtin_unreachable();
