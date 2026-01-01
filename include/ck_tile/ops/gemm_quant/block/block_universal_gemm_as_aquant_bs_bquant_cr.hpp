@@ -58,6 +58,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         // number of warps along M and N for threadblock's GEMM problem size
         static constexpr index_t MWarp = config.template at<1>();
         static constexpr index_t NWarp = config.template at<2>();
+        static constexpr index_t KWarp = Problem::BlockGemmShape::BlockWarps::at(number<2>{});
 
         using I0 = number<0>;
         using I1 = number<1>;
@@ -73,12 +74,12 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
 
         static constexpr index_t MIterPerWarp = MPerBlock / (MWarp * WarpGemm::kM);
         static constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WarpGemm::kN);
-        static constexpr index_t KIterPerWarp = KPerBlock / WarpGemm::kK;
+        static constexpr index_t KIterPerWarp = KPerBlock / (KWarp * WarpGemm::kK);
 
         static constexpr bool PreshuffleQuant = Problem::Traits::PreshuffleQuant;
 
         static constexpr index_t QScalesPerBlockRow =
-            integer_divide_ceil(KPerBlock, BQuantGroupSize::kK);
+            integer_divide_ceil(KPerBlock / KWarp, BQuantGroupSize::kK);
         static constexpr index_t QScalesPerWarpGemmRow =
             integer_divide_ceil(WarpGemm::kK, BQuantGroupSize::kK);
 
@@ -91,7 +92,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         static_assert(KIterPerWarp % QScalesPerBlockRow == 0,
                       "Error! KItersPerWarp should be a multiple of QscalesPerBlockRow");
 
-        static_assert(KPerBlock / BQuantGroupSize::kK > 0,
+        static_assert(KPerBlock / KWarp / BQuantGroupSize::kK > 0,
                       "Error! Each row of blockgemm should have a separate scale");
 
         static_assert(MIterPerWarp * MWarp * WarpGemm::kM == MPerBlock,
@@ -145,6 +146,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
 
     static constexpr index_t MWarp = Traits::MWarp;
     static constexpr index_t NWarp = Traits::NWarp;
+    static constexpr index_t KWarp = Traits::KWarp;
 
     static constexpr auto Scheduler = Traits::Scheduler;
 
@@ -190,16 +192,16 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         constexpr index_t KIterInterwave = KPerInnerLoop / WarpGemm::kKPerThread;
 
         using KIterSeq = std::conditional_t<Scheduler == GemmPipelineScheduler::Interwave,
-                                            sequence<KIterInterwave>,
-                                            sequence<KIterPerWarp>>;
+                                            sequence<KWarp, KIterInterwave>,
+                                            sequence<KWarp, KIterPerWarp>>;
 
         constexpr auto a_block_outer_dstr_encoding =
             tile_distribution_encoding<sequence<NWarp>,
                                        tuple<sequence<MIterPerWarp, MWarp>, KIterSeq>,
-                                       tuple<sequence<1, 0>>,
-                                       tuple<sequence<1, 0>>,
+                                       tuple<sequence<2, 1, 0>>,
+                                       tuple<sequence<0, 1, 0>>,
                                        sequence<1, 2>,
-                                       sequence<0, 0>>{};
+                                       sequence<0, 1>>{};
         constexpr auto a_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             a_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
 
@@ -215,16 +217,16 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         constexpr index_t KIterInterwave = KPerInnerLoop / WarpGemm::kKPerThread;
 
         using KIterSeq = std::conditional_t<Scheduler == GemmPipelineScheduler::Interwave,
-                                            sequence<KIterInterwave>,
-                                            sequence<KIterPerWarp>>;
+                                            sequence<KWarp, KIterInterwave>,
+                                            sequence<KWarp, KIterPerWarp>>;
 
         constexpr auto b_block_outer_dstr_encoding =
             tile_distribution_encoding<sequence<MWarp>,
                                        tuple<sequence<NIterPerWarp, NWarp>, KIterSeq>,
-                                       tuple<sequence<0, 1>>,
-                                       tuple<sequence<0, 1>>,
+                                       tuple<sequence<2, 0, 1>>,
+                                       tuple<sequence<0, 0, 1>>,
                                        sequence<1, 2>,
-                                       sequence<0, 0>>{};
+                                       sequence<0, 1>>{};
 
         constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             b_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
@@ -235,7 +237,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     CK_TILE_DEVICE static constexpr auto MakeCBlockDistributionEncode()
     {
         constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
-            sequence<>,
+            sequence<KWarp>,
             tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
             tuple<sequence<1, 2>>,
             tuple<sequence<1, 1>>,
@@ -283,9 +285,11 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         {
             load_int4_tile<ADataType, ComputeDataType, UnaryOpSize_, ALoadTranspose>(
                 a_warp_tile_, a_block_window);
+            // CK_PRINTF<>{}(a_warp_tile_);
             // If B datatype were pkint4 it would be converted prior to storing in LDS
             load_int4_tile<OverrideBDataType, ComputeDataType, UnaryOpSize_, BLoadTranspose>(
                 b_warp_tile_, b_block_window);
+            // CK_PRINTF<>{}(b_warp_tile_);
         }
 
         // C += A * B
@@ -324,6 +328,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                                                                                      auto nIter) {
                     CWarpTensor c_warp_tensor;
                     static_for<0, Traits::KIterPerQScale, 1>{}([&](auto kIterInQScale) {
+                        static_assert(Traits::KIterPerQScale == 1);
                         constexpr auto kIter = kQScale * Traits::KIterPerQScale + kIterInQScale;
 
                         AWarpTensor a_warp_tensor;

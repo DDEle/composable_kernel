@@ -599,6 +599,9 @@ struct tile_window_with_static_distribution
                 CK_TILE_LDS_ADDR LdsDataType* smem = lds_base_ptr +
                                                      lds_coord.get_offset() / Traits::PackedSize +
                                                      lds_ys_offset / Traits::PackedSize;
+                // print(lds_coord);
+                // printf("tid %03d: smem off %d \n", get_thread_id(), lds_coord.get_offset() +
+                // lds_ys_offset);
 
                 const auto dram_ys_offset = [&]() {
                     if constexpr(static_move_ys)
@@ -611,6 +614,7 @@ struct tile_window_with_static_distribution
                         return 0;
                 }();
 
+                // print(bottom_tensor_thread_coord);
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                     smem,
                     bottom_tensor_thread_coord,

@@ -336,6 +336,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                          1>{},
             number<K2>{},
             number<1>{});
+        // CK_PRINT<decltype(desc_0)>();
 
         constexpr auto desc_1 = transform_tensor_descriptor(
             desc_0,
@@ -406,6 +407,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
+        // CK_PRINT<GetSmemSizeA(), GetSmemSizeB(), GetSmemSizeAQ(), GetSmemSizeBQ()>();
         return GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ();
     }
 

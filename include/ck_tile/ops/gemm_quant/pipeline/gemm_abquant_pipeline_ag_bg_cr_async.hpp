@@ -264,8 +264,12 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             move_tile_window(bq_copy_dram_window, bq_step);
         };
         auto load_local = [&]() {
+            // printf("tid %03d sptr_aq: %f\n", get_thread_id(), float(sptr_aq[get_thread_id() %
+            // 256]));
             load_tile(aq_block_tile, aq_lds_gemm_window);
+            // CK_PRINTF<>{}(aq_block_tile);
             load_tile(bq_block_tile, bq_lds_gemm_window);
+            // CK_PRINTF<>{}(bq_block_tile);
             block_gemm.LocalPrefetch(a_lds_gemm_window, b_lds_gemm_window);
         };
         auto calc_gemm = [&]() {
@@ -311,7 +315,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
         };
-        if constexpr(HasHotLoop)
+        if constexpr(HasHotLoop && 0)
         {
             do
             {
@@ -326,6 +330,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             calc_gemm();
             __builtin_amdgcn_s_barrier();
         }
+        // CK_PRINTF<>{}(c_block_tile);
 
         return c_block_tile;
     }

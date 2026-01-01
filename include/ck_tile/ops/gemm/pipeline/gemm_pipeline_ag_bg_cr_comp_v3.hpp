@@ -50,7 +50,7 @@ struct BaseGemmPipelineAgBgCrCompV3
         }
     }
 
-    template <typename RunFunction>
+    template <size_t I = 0, typename RunFunction>
     CK_TILE_HOST_DEVICE static auto
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
@@ -67,15 +67,10 @@ struct BaseGemmPipelineAgBgCrCompV3
                     std::make_pair(false, TailNumber::Even),
                 };
         }();
-
-#define DISPATCH_(i)                                                                 \
-    if constexpr(i < scenarios.size())                                               \
-        if(has_hot_loop == scenarios[i].first && tail_number == scenarios[i].second) \
-            return run_func(bool_constant<scenarios[i].first>{}, constant<scenarios[i].second>{});
-        DISPATCH_(0)
-        DISPATCH_(1)
-        DISPATCH_(2)
-#undef DISPATCH_
+        if(has_hot_loop == scenarios[I].first && tail_number == scenarios[I].second)
+            return run_func(bool_constant<scenarios[I].first>{}, constant<scenarios[I].second>{});
+        else if constexpr(I + 1 < scenarios.size())
+            return TailHandler<I + 1>(run_func, has_hot_loop, tail_number);
 
 #if defined(__HIP_DEVICE_COMPILE__)
         // This path should be unreachable in device code if tail_number is valid.

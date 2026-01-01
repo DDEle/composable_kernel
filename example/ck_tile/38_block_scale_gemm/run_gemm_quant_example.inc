@@ -688,9 +688,9 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
             //     *aq_tensor_ptr);
             // ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
             //     *bq_tensor_ptr);
-            a_m_k.ForEach([&](auto& self, auto i) {
-                self(i) = ck_tile::type_convert<ADataType>(i[0] % 3 * 1.f);
-            });
+            // a_m_k.ForEach([&](auto& self, auto i) {
+            //     self(i) = ck_tile::type_convert<ADataType>(i[0] % 3 * 1.f);
+            // });
             // b_k_n.ForEach([&](auto& self, auto i) {
             //     self(i) = ck_tile::type_convert<BDataType>(i[0] % 3 * 1.f);
             // });

@@ -1221,7 +1221,7 @@ struct QuantGemmKernel
                     a_block_window, b_block_window, num_loop, smem_ptr_0);
             }
         }();
-
+#if 1
         // Run Epilogue Pipeline
         auto& c_block_window = gemm_tile_windows.at(I4);
 
@@ -1254,6 +1254,7 @@ struct QuantGemmKernel
             EpiloguePipeline{}(
                 c_block_window, c_block_tile, c_block_window, smem_ptr_0, aq_scale, bq_scale);
         }
+#endif
     }
     /**
      * @brief Runs single GEMM problem cooperatively by whole workgroup.
