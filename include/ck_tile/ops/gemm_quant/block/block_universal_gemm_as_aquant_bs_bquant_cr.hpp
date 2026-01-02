@@ -239,8 +239,8 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
             sequence<KWarp>,
             tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
-            tuple<sequence<1, 2>>,
-            tuple<sequence<1, 1>>,
+            tuple<sequence<0, 1, 2>>,
+            tuple<sequence<0, 1, 1>>,
             sequence<1, 2>,
             sequence<0, 0>>{};
         constexpr auto c_block_dstr_encoding = detail::make_embed_tile_distribution_encoding(
@@ -321,6 +321,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                     });
                 });
             }
+            // CK_PRINTF<>{}(q_block_tensor);
 
             // hot loop:
             static_for<0, Traits::QScalesPerBlockRow, 1>{}([&](auto kQScale) {

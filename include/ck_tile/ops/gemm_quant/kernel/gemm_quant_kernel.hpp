@@ -1351,6 +1351,9 @@ struct QuantGemmKernel
         const BQDataType* bq_ptr = static_cast<const BQDataType*>(kargs.bq_ptr);
         CDataType* c_ptr         = static_cast<CDataType*>(kargs.c_ptr);
 
+        // if(get_block_id() != 0)
+        //     return ;
+
         // allocate LDS
         __shared__ char smem_ptr_0[GetSmemSize()];
         assert(kargs.k_batch == 1);

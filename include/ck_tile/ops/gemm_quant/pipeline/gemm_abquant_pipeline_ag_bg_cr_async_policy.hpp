@@ -47,6 +47,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static constexpr index_t NWarps       = BlockWarps::at(I1);
     static constexpr index_t KWarps       = BlockWarps::at(I2);
     static constexpr index_t MIterPerWarp = MWarpTiles / MWarps;
+    static constexpr index_t NIterPerWarp = NWarpTiles / NWarps;
     static constexpr index_t KPerWarp     = KPerBlock / KWarps;
     static_assert(KWarps == 2, "KWarps == 2 for ping-pong!");
     static_assert(KWarpTiles == KWarps, "Wrong!");
@@ -103,14 +104,14 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<R>,
                 ck_tile::tuple<ck_tile::sequence<M0, M1, M2, M3>,
-                               ck_tile::sequence<KWarps, KWarpTiles>>,
+                               ck_tile::sequence<KWarps, KWarpTiles / KWarps>>,
                 ck_tile::tuple<ck_tile::sequence<2, 0, 1>, ck_tile::sequence<1, 1, 1>>,
                 ck_tile::tuple<ck_tile::sequence<0, 0, 1>, ck_tile::sequence<2, 0, 3>>,
                 ck_tile::sequence<2>,
                 ck_tile::sequence<1>>{});
     }
     template <typename WindowTmp>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeAQAsyncLoadDramWindow(const WindowTmp& window_tmp)
+    CK_TILE_HOST_DEVICE static constexpr auto MakeQAsyncLoadDramWindow(const WindowTmp& window_tmp)
     {
         constexpr auto ndims = std::decay_t<decltype(window_tmp)>::get_num_of_dimension();
         static_assert(ndims == 2, "only support 2D tensor");
@@ -134,7 +135,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             desc_1,
             make_tuple(
                 make_pass_through_transform(mn),
-                make_maerge_transform_v3_division_mod(make_tuple(qk / KWarps, number<KWarps>{}))),
+                make_merge_transform_v3_division_mod(make_tuple(qk / KWarps, number<KWarps>{}))),
             make_tuple(sequence<0>{}, sequence<1, 2>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
         return make_tile_window(make_tensor_view<address_space_enum::global>(
@@ -380,6 +381,52 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         return MakeABLdsBlockDescriptor_<NPerBlock>(SwapWarpGroup{});
     }
 
+    CK_TILE_DEVICE static constexpr auto MakeCHalfBlockDistribution()
+    {
+        constexpr auto outer_encoding = tile_distribution_encoding<
+            sequence<>,
+            tuple<sequence<MIterPerWarp / KWarps, KWarps, MWarps>, sequence<NIterPerWarp, NWarps>>,
+            tuple<sequence<1, 1, 2>>,
+            tuple<sequence<1, 2, 1>>,
+            sequence<1, 2>,
+            sequence<0, 0>>{};
+        return make_static_tile_distribution(detail::make_embed_tile_distribution_encoding(
+            outer_encoding, typename decltype(GetBlockGemm())::WarpGemm::CWarpDstrEncoding{}));
+    }
+    template <typename SwapWarpGroup>
+    CK_TILE_DEVICE static constexpr auto MakeCLdsBlockDescriptor(SwapWarpGroup)
+    {
+        constexpr index_t M3 = WarpTileM;                   // 16
+        constexpr index_t M2 = MWarps;                      // 4
+        constexpr index_t M1 = KWarps;                      // 2
+        constexpr index_t M0 = MIterPerWarp / KWarps;       // 1
+        constexpr index_t N2 = get_warp_size() / WarpTileM; // 4
+        constexpr index_t N1 = WarpTileM / N2;              // 4
+        constexpr index_t N0 = NWarpTiles;                  // 8
+
+        constexpr auto desc_0 =
+            make_naive_tensor_descriptor_packed(number_tuple<M0, M1, M2, N0, N1, M3, N2>{});
+
+        constexpr auto desc_1 = transform_tensor_descriptor( //
+            desc_0,
+            make_tuple(make_pass_through_transform(number<M0>{}),
+                       warp_groups_transform<SwapWarpGroup::value>,
+                       make_pass_through_transform(number<M2>{}),
+                       make_pass_through_transform(number<N0>{}),
+                       make_pass_through_transform(number<N1>{}),
+                       make_pass_through_transform(number<M3>{}),
+                       make_pass_through_transform(number<N2>{})),
+            generate_tuple([](auto i) { return sequence<i>{}; }, number<7>{}),
+            generate_tuple([](auto i) { return sequence<i>{}; }, number<7>{}));
+
+        return transform_tensor_descriptor( //
+            desc_1,
+            make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2, M3>{}),
+                       make_merge_transform_v3_division_mod(number_tuple<N0, N1, N2>{})),
+            make_tuple(sequence<0, 1, 2, 5>{}, sequence<3, 4, 6>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
         constexpr index_t desc_size =
@@ -404,11 +451,19 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             MakeBQLdsBlockDescriptor(false_type{}).get_element_space_size();
         return sizeof(float) * integer_least_multiple(desc_size, warp_size);
     }
+    CK_TILE_DEVICE static constexpr index_t GetSmemSizeC()
+    {
+        constexpr index_t desc_size =
+            MakeCLdsBlockDescriptor(false_type{}).get_element_space_size();
+        return sizeof(float) * integer_least_multiple(desc_size, warp_size);
+    }
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
-        // CK_PRINT<GetSmemSizeA(), GetSmemSizeB(), GetSmemSizeAQ(), GetSmemSizeBQ()>();
-        return GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ();
+        // CK_PRINT<GetSmemSizeA(), GetSmemSizeB(), GetSmemSizeAQ(),
+        // GetSmemSizeBQ(),GetSmemSizeC()>();
+        return max(GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ(),
+                   GetSmemSizeC());
     }
 
     CK_TILE_DEVICE static constexpr auto GetVectorSizeA() { return K2; }
@@ -431,6 +486,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
     FORWARD_METHOD_(GetVectorSizeAQ);
     FORWARD_METHOD_(MakeAQDramTileDistribution);
+    FORWARD_METHOD_(MakeQAsyncLoadDramWindow);
     FORWARD_METHOD_(MakeAQLdsBlockDescriptor);
     FORWARD_METHOD_(GetVectorSizeBQ);
     FORWARD_METHOD_(MakeBQDramTileDistribution);
@@ -443,10 +499,13 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     FORWARD_METHOD_(MakeAsyncLoadDramWindow);
     FORWARD_METHOD_(MakeALdsBlockDescriptor);
     FORWARD_METHOD_(MakeBLdsBlockDescriptor);
+    FORWARD_METHOD_(MakeCHalfBlockDistribution);
+    FORWARD_METHOD_(MakeCLdsBlockDescriptor);
     FORWARD_METHOD_(GetSmemSizeA);
     FORWARD_METHOD_(GetSmemSizeB);
     FORWARD_METHOD_(GetSmemSizeAQ);
     FORWARD_METHOD_(GetSmemSizeBQ);
+    FORWARD_METHOD_(GetSmemSizeC);
     FORWARD_METHOD_(GetSmemSize);
     FORWARD_METHOD_(GetVectorSizeA);
     FORWARD_METHOD_(GetVectorSizeB);

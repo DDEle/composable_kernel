@@ -67,6 +67,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
     using CLayout  = remove_cvref_t<typename Problem::CLayout>;
 
     using BlockGemm = remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem>())>;
+    using WarpGemm  = typename BlockGemm::WarpGemm;
 
     static constexpr index_t warp_groups = 2; // ping-pong
     static constexpr index_t BlockSize   = Problem::kBlockSize;
@@ -79,6 +80,10 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
     static constexpr index_t MWarps      = BlockGemmShape::BlockWarps::at(I0);
     static constexpr index_t NWarps      = BlockGemmShape::BlockWarps::at(I1);
     static constexpr index_t KWarps      = BlockGemmShape::BlockWarps::at(I2);
+
+    static constexpr index_t MIterPerWarp = MPerBlock / (MWarps * WarpGemm::kM);
+    static constexpr index_t NIterPerWarp = NPerBlock / (NWarps * WarpGemm::kN);
+    static constexpr index_t KIterPerWarp = KPerBlock / (KWarps * WarpGemm::kK);
 
     static constexpr index_t GetVectorSizeA() { return Policy::template GetVectorSizeA<Problem>(); }
     static constexpr index_t GetVectorSizeB() { return Policy::template GetVectorSizeB<Problem>(); }
@@ -112,7 +117,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                       concat('x', MPerBlock, NPerBlock, KPerBlock),
                       Problem::kBlockSize,
                       concat('x', MWarps, NWarps),
-                      concat('x', BlockGemm::WarpGemm::kM, BlockGemm::WarpGemm::kN, BlockGemm::WarpGemm::kK),
+                      concat('x', WarpGemm::kM, WarpGemm::kN, WarpGemm::kK),
                       concat('x', kPadM, kPadN, kPadK), AQuantGroupSize::GetName(), BQuantGroupSize::GetName());
         // clang-format on
     }
@@ -134,11 +139,13 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             smem += size;
             return ptr;
         };
-        auto smem_a  = alloc_lds(Policy::template GetSmemSizeA<Problem>());
-        auto smem_b  = alloc_lds(Policy::template GetSmemSizeB<Problem>());
-        auto smem_aq = alloc_lds(Policy::template GetSmemSizeAQ<Problem>());
-        auto smem_bq = alloc_lds(Policy::template GetSmemSizeBQ<Problem>());
-        return Run__<HasHotLoop>(smem_a, smem_b, smem_aq, smem_bq, std::forward<Args>(args)...);
+        const auto smem_c  = smem;
+        const auto smem_a  = alloc_lds(Policy::template GetSmemSizeA<Problem>());
+        const auto smem_b  = alloc_lds(Policy::template GetSmemSizeB<Problem>());
+        const auto smem_aq = alloc_lds(Policy::template GetSmemSizeAQ<Problem>());
+        const auto smem_bq = alloc_lds(Policy::template GetSmemSizeBQ<Problem>());
+        return Run__<HasHotLoop>(
+            smem_a, smem_b, smem_aq, smem_bq, smem_c, std::forward<Args>(args)...);
 #else
         ignore = p_smem;
         (..., (ignore = args, 0));
@@ -155,6 +162,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                               void* __restrict__ smem_b,
                               void* __restrict__ smem_aq,
                               void* __restrict__ smem_bq,
+                              void* __restrict__ smem_c,
                               const ADramBlockWindowTmp& a_dram_window_tmp,
                               const BDramBlockWindowTmp& b_dram_window_tmp,
                               const AQDramBlockWindowTmp& aq_dram_window_tmp,
@@ -232,8 +240,10 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         auto a_lds_gemm_window = make_tile_window(lds_a_load, a_lds_size, {0, 0}, a_load_distr);
         auto b_lds_gemm_window = make_tile_window(lds_b_load, b_lds_size, {0, 0}, b_load_distr);
 
-        auto aq_copy_dram_window = make_tile_window(aq_dram_window_tmp, aq_copy_distr);
-        auto bq_copy_dram_window = make_tile_window(bq_dram_window_tmp, bq_copy_distr);
+        auto aq_copy_dram_window = make_tile_window(
+            Policy::template MakeQAsyncLoadDramWindow<Problem>(aq_dram_window_tmp), aq_copy_distr);
+        auto bq_copy_dram_window = make_tile_window(
+            Policy::template MakeQAsyncLoadDramWindow<Problem>(bq_dram_window_tmp), bq_copy_distr);
         auto aq_copy_lds_window = make_tile_window(lds_aq_copy, aq_lds_size, {0, 0}, aq_copy_distr);
         auto bq_copy_lds_window = make_tile_window(lds_bq_copy, bq_lds_size, {0, 0}, bq_copy_distr);
         auto aq_lds_gemm_window = make_tile_window(lds_aq_load, aq_lds_size, {0, 0}, aq_load_distr);
@@ -255,12 +265,14 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
         auto load_global = [&]() {
             async_load_tile(a_copy_lds_window, a_copy_dram_window);
-            move_tile_window(a_copy_dram_window, a_step);
             async_load_tile(b_copy_lds_window, b_copy_dram_window);
-            move_tile_window(b_copy_dram_window, b_step);
             async_load_tile(aq_copy_lds_window, aq_copy_dram_window);
-            move_tile_window(aq_copy_dram_window, aq_step);
             async_load_tile(bq_copy_lds_window, bq_copy_dram_window);
+        };
+        auto move_global = [&]() {
+            move_tile_window(a_copy_dram_window, a_step);
+            move_tile_window(b_copy_dram_window, b_step);
+            move_tile_window(aq_copy_dram_window, aq_step);
             move_tile_window(bq_copy_dram_window, bq_step);
         };
         auto load_local = [&]() {
@@ -295,44 +307,124 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
         s_waitcnt</*vmcnt*/ 0, /*lgkmcnt*/ 0>();
         __builtin_amdgcn_s_barrier();
-
-        if(is_pong)
-            calc_gemm();
-
-        __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
         auto main_body = [&]() {
+            __builtin_amdgcn_s_setprio(0);
+            s_nop(0xf);
+            s_nop(0xf);
+            s_nop(0xf);
+            s_nop(0xf);
+            s_nop(0xf);
+            s_nop(0xf);
+            s_nop(0xf);
+            s_nop(0xf);
+            calc_gemm();
+            move_global();
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+
+            __builtin_amdgcn_s_setprio(1);
             load_global();
             load_local();
+
             s_waitcnt</*vmcnt*/ 0, /*lgkmcnt*/ 0>();
-
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-
-            calc_gemm();
-
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
         };
-        if constexpr(HasHotLoop && 0)
+        if constexpr(HasHotLoop)
         {
-            do
-            {
-                main_body();
-            } while(0 < --num_loop);
+            --num_loop;
+            if(is_pong)
+                calc_gemm();
+            move_global();
+            __builtin_amdgcn_s_barrier();
+            load_global();
+            load_local();
+            s_waitcnt</*vmcnt*/ 0, /*lgkmcnt*/ 0>();
+            __builtin_amdgcn_s_barrier();
+
+            if(0 < --num_loop)
+                do
+                {
+                    main_body();
+                } while(0 < --num_loop);
         }
 
         // tail
+        calc_gemm();
+        __builtin_amdgcn_s_barrier();
         if(is_ping)
         {
             load_local();
+            __builtin_amdgcn_s_barrier();
             calc_gemm();
             __builtin_amdgcn_s_barrier();
         }
+
         // CK_PRINTF<>{}(c_block_tile);
 
-        return c_block_tile;
+        constexpr auto c_half_distr = Policy::template MakeCHalfBlockDistribution<Problem>();
+        using CHalfTile = decltype(make_static_distributed_tensor<CDataType>(c_half_distr));
+        CHalfTile c_half[2];
+#if 1
+        static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
+            constexpr auto y_lengths =
+                to_sequence(typename WarpGemm::CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            constexpr auto y_zeros    = transform_sequences([](auto) { return 0; }, y_lengths);
+            constexpr auto lengths    = merge_sequences(sequence<1, NIterPerWarp>{}, y_lengths);
+            constexpr auto c_idx      = merge_sequences(sequence<mIter, 0>{}, y_zeros);
+            constexpr auto c_half_idx = merge_sequences(sequence<mIter / 2, 0>{}, y_zeros);
+            c_half[mIter.value % 2].set_y_sliced_thread_data(
+                c_half_idx, lengths, c_block_tile.get_y_sliced_thread_data(c_idx, lengths));
+        });
+
+        const auto sptr_c = reinterpret_cast<CDataType*>(smem_c);
+        auto lds_c_write  = make_tensor_view<LDS>(
+            sptr_c, Policy::template MakeCLdsBlockDescriptor<Problem>(true_type{}));
+        auto lds_c_read = make_tensor_view<LDS>(
+            sptr_c, Policy::template MakeCLdsBlockDescriptor<Problem>(false_type{}));
+
+        auto c_write_lds_window = make_tile_window(
+            lds_c_write, number_tuple<MPerBlock, NPerBlock>{}, {0, 0}, c_half_distr);
+        auto c_read_lds_window = make_tile_window(
+            lds_c_read, number_tuple<MPerBlock, NPerBlock>{}, {0, 0}, c_half_distr);
+
+        if(is_ping)
+        {
+            store_tile(c_write_lds_window, c_half[1]);
+            // CK_PRINTF<>{}(c_half[1]);
+            // add 2 barriers to ensure wave0-3 store done before wave4-7 load
+            block_sync_lds();
+            __builtin_amdgcn_s_barrier();
+            load_tile(c_half[1], c_read_lds_window);
+            // CK_PRINTF<>{}(c_half[1]);
+        }
+        if(is_pong)
+        {
+            store_tile(c_write_lds_window, c_half[0]);
+            // add 2 barriers to ensure wave0-3 store done before wave4-7 load
+            block_sync_lds();
+            __builtin_amdgcn_s_barrier();
+            load_tile(c_half[0], c_read_lds_window);
+            // CK_PRINTF<>{}(c_half[0]);
+        }
+
+        if(is_pong)
+            __builtin_amdgcn_s_barrier();
+
+        constexpr auto c_half_spans = CHalfTile::get_distributed_spans();
+        sweep_tile_span(c_half_spans[number<0>{}], [&](auto idx0) {
+            sweep_tile_span(c_half_spans[number<1>{}], [&](auto idx1) {
+                constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                c_half[0](i_j_idx) += c_half[1](i_j_idx);
+            });
+        });
+#endif
+
+        // CK_PRINTF<>{}(c_half[0]);
+        return c_half[0];
     }
 
     template <typename ADramBlockWindowTmp,

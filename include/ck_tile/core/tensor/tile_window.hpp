@@ -803,8 +803,8 @@ struct tile_window_with_static_distribution
                 // const vector_t vec_value = vec.template get_as<vector_t>().template at<0>();
 
                 // write into bottom tensor
-                // print(bottom_tensor_thread_coord);
-                // printf("tid: %03d ys_offset: %ld\n", get_thread_id(), ys_offset);
+                // // print(bottom_tensor_thread_coord);
+                // // printf("tid: %03d ys_offset: %ld\n", get_thread_id(), ys_offset);
 
                 this->get_bottom_tensor_view().template set_vectorized_elements<vector_t>(
                     bottom_tensor_thread_coord,

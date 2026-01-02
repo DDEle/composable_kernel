@@ -232,7 +232,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                 CDEElementWise,
                 TilePartitioner::MPerBlock,
                 TilePartitioner::NPerBlock,
-                GemmConfig::M_Warp,
+                GemmConfig::M_Warp * GemmConfig::K_Warp,
                 GemmConfig::N_Warp,
                 GemmConfig::M_Warp_Tile,
                 GemmConfig::N_Warp_Tile,
@@ -684,16 +684,27 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
             ck_tile::FillConstant<BDataType>{static_cast<BDataType>(0x38)}(b_k_n);
             ck_tile::FillConstant<AQDataType>{static_cast<AQDataType>(1.f)}(*aq_tensor_ptr);
             ck_tile::FillConstant<BQDataType>{static_cast<BQDataType>(1.f)}(*bq_tensor_ptr);
+
+            // ck_tile::FillUniformDistribution<ADataType>{-2.0f, 2.0f, fill_seed(gen)}(a_m_k);
+            // ck_tile::FillUniformDistribution<BDataType>{-2.0f, 2.0f, fill_seed(gen)}(b_k_n);
             // ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
             //     *aq_tensor_ptr);
             // ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
             //     *bq_tensor_ptr);
-            // a_m_k.ForEach([&](auto& self, auto i) {
-            //     self(i) = ck_tile::type_convert<ADataType>(i[0] % 3 * 1.f);
-            // });
+
+            // ck_tile::FillUniformDistribution<AQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
+            //     *aq_tensor_ptr);
+            // ck_tile::FillUniformDistribution<BQDataType>{-2.0f, 2.0f, fill_seed(gen)}(
+            //     *bq_tensor_ptr);
+            a_m_k.ForEach([&](auto& self, auto i) {
+                self(i) = ck_tile::type_convert<ADataType>(i[1] / 128 + 1.f);
+            });
             // b_k_n.ForEach([&](auto& self, auto i) {
             //     self(i) = ck_tile::type_convert<BDataType>(i[0] % 3 * 1.f);
             // });
+            aq_tensor_ptr->ForEach([&](auto& self, auto i) {
+                self(i) = ck_tile::type_convert<AQDataType>(i[1] + 1.f);
+            });
         }
         else
         {
