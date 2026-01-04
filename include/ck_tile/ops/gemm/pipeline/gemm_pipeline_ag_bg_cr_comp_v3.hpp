@@ -24,30 +24,21 @@ struct BaseGemmPipelineAgBgCrCompV3
 
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {
-        return num_loop > PrefetchStages;
+        if constexpr(Problem::BlockGemmShape::BlockWarps::at(number<2>{}) == 2)
+            return num_loop > (PrefetchStages + 1);
+        else
+            return num_loop > PrefetchStages;
     }
 
     CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
     {
-        if constexpr(PrefetchStages == 1)
-        {
-            return TailNumber::One;
-        }
-        else if(BlockHasHotloop(num_loop))
-        {
+        if(BlockHasHotloop(num_loop) || num_loop == 3)
             return TailNumber::Odd;
-        }
+        else if(num_loop == 2)
+            return TailNumber::Even;
         else
-        {
-            if(num_loop == 1)
-            {
-                return TailNumber::Odd;
-            }
-            else
-            {
-                return TailNumber::Even;
-            }
-        }
+            return (Problem::BlockGemmShape::BlockWarps::at(number<2>{}) == 2) ? TailNumber::One
+                                                                               : TailNumber::Odd;
     }
 
     template <size_t I = 0, typename RunFunction>
@@ -55,17 +46,12 @@ struct BaseGemmPipelineAgBgCrCompV3
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
         constexpr auto scenarios = []() {
-            if constexpr(PrefetchStages == 1)
-                return std::array{
-                    std::make_pair(true, TailNumber::One),
-                    std::make_pair(false, TailNumber::One),
-                };
-            else
-                return std::array{
-                    std::make_pair(true, TailNumber::Odd),
-                    std::make_pair(false, TailNumber::Odd),
-                    std::make_pair(false, TailNumber::Even),
-                };
+            return std::array{
+                // std::make_pair(false, TailNumber::Odd),  // 1 loop
+                // std::make_pair(false, TailNumber::Even), // 2 loop
+                // std::make_pair(true, TailNumber::Odd),   // 3 / 5 / 7 / ... loops
+                std::make_pair(true, TailNumber::Odd), // 4 / 6 / 8 / ... loops
+            };
         }();
         if(has_hot_loop == scenarios[I].first && tail_number == scenarios[I].second)
             return run_func(bool_constant<scenarios[I].first>{}, constant<scenarios[I].second>{});

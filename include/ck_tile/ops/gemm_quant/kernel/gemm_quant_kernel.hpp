@@ -1222,6 +1222,7 @@ struct QuantGemmKernel
             }
         }();
 #if 1
+
         // Run Epilogue Pipeline
         auto& c_block_window = gemm_tile_windows.at(I4);
 

@@ -129,23 +129,16 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
     CK_TILE_HOST static std::string Print() { return "ABQuantGemmPipelineAgBgCrAsync\n"; }
 
-    template <bool HasHotLoop, typename... Args>
+    template <bool HasHotLoop, TailNumber TailNum, typename... Args>
     CK_TILE_DEVICE auto Run_(void* p_smem, Args&&... args) const
     {
 #ifdef __gfx950__
-        auto smem      = reinterpret_cast<uint8_t*>(p_smem);
-        auto alloc_lds = [&smem](index_t size) {
-            auto ptr = smem;
-            smem += size;
-            return ptr;
-        };
-        const auto smem_c  = smem;
-        const auto smem_a  = alloc_lds(Policy::template GetSmemSizeA<Problem>());
-        const auto smem_b  = alloc_lds(Policy::template GetSmemSizeB<Problem>());
-        const auto smem_aq = alloc_lds(Policy::template GetSmemSizeAQ<Problem>());
-        const auto smem_bq = alloc_lds(Policy::template GetSmemSizeBQ<Problem>());
-        return Run__<HasHotLoop>(
-            smem_a, smem_b, smem_aq, smem_bq, smem_c, std::forward<Args>(args)...);
+        auto smem  = reinterpret_cast<uint8_t*>(p_smem);
+        auto smem1 = smem + Policy::template GetSmemSizeA<Problem>() +
+                     Policy::template GetSmemSizeB<Problem>() +
+                     Policy::template GetSmemSizeAQ<Problem>() +
+                     Policy::template GetSmemSizeBQ<Problem>();
+        return Run__<HasHotLoop, TailNum>(smem, smem1, std::forward<Args>(args)...);
 #else
         ignore = p_smem;
         (..., (ignore = args, 0));
@@ -154,15 +147,13 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
     }
 
     template <bool HasHotLoop,
+              TailNumber TailNum,
               typename ADramBlockWindowTmp,
               typename BDramBlockWindowTmp,
               typename AQDramBlockWindowTmp,
               typename BQDramBlockWindowTmp>
-    CK_TILE_DEVICE auto Run__(void* __restrict__ smem_a,
-                              void* __restrict__ smem_b,
-                              void* __restrict__ smem_aq,
-                              void* __restrict__ smem_bq,
-                              void* __restrict__ smem_c,
+    CK_TILE_DEVICE auto Run__(uint8_t* __restrict__ smem0,
+                              uint8_t* __restrict__ smem1,
                               const ADramBlockWindowTmp& a_dram_window_tmp,
                               const BDramBlockWindowTmp& b_dram_window_tmp,
                               const AQDramBlockWindowTmp& aq_dram_window_tmp,
@@ -193,28 +184,46 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                        KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1]),
                       "Bq block window has incorrect lengths for defined BqLayout!");
 
-        const auto sptr_a  = reinterpret_cast<ADataType*>(smem_a);
-        const auto sptr_b  = reinterpret_cast<BDataType*>(smem_b);
-        const auto sptr_aq = reinterpret_cast<AQDataType*>(smem_aq);
-        const auto sptr_bq = reinterpret_cast<BQDataType*>(smem_bq);
+        auto smem      = make_tuple(smem0, smem1);
+        auto alloc_lds = [&](auto I, index_t size) {
+            auto ptr = smem[I];
+            smem[I] += size;
+            return ptr;
+        };
+        const auto smem_c = smem0;
+        // const auto smem_a0  = alloc_lds(2 * Policy::template GetSmemSizeA<Problem>());
+        // const auto smem_b0  = alloc_lds(2 * Policy::template GetSmemSizeB<Problem>());
+        // const auto smem_aq0 = alloc_lds(2 * Policy::template GetSmemSizeAQ<Problem>());
+        // const auto smem_bq0 = alloc_lds(2 * Policy::template GetSmemSizeBQ<Problem>());
+
+        const index_t warp_group_id = get_warp_id() / (MWarps * NWarps);
+        const bool is_ping          = warp_group_id == 0;
+        const bool is_pong          = warp_group_id != 0;
+
+        ADataType* const sptr_a[2] = {
+            reinterpret_cast<ADataType*>(alloc_lds(I0, Policy::template GetSmemSizeA<Problem>())),
+            reinterpret_cast<ADataType*>(alloc_lds(I1, Policy::template GetSmemSizeA<Problem>()))};
+        BDataType* const sptr_b[2] = {
+            reinterpret_cast<BDataType*>(alloc_lds(I0, Policy::template GetSmemSizeB<Problem>())),
+            reinterpret_cast<BDataType*>(alloc_lds(I1, Policy::template GetSmemSizeB<Problem>()))};
+        AQDataType* const sptr_aq[2] = {
+            reinterpret_cast<AQDataType*>(alloc_lds(I0, Policy::template GetSmemSizeAQ<Problem>())),
+            reinterpret_cast<AQDataType*>(
+                alloc_lds(I1, Policy::template GetSmemSizeAQ<Problem>()))};
+        BQDataType* const sptr_bq[2] = {
+            reinterpret_cast<BQDataType*>(alloc_lds(I0, Policy::template GetSmemSizeBQ<Problem>())),
+            reinterpret_cast<BQDataType*>(
+                alloc_lds(I1, Policy::template GetSmemSizeBQ<Problem>()))};
 
         constexpr auto LDS = address_space_enum::lds;
-        auto lds_a_copy    = make_tensor_view<LDS>(
-            sptr_a, Policy::template MakeALdsBlockDescriptor<Problem>(true_type{}));
-        auto lds_b_copy = make_tensor_view<LDS>(
-            sptr_b, Policy::template MakeBLdsBlockDescriptor<Problem>(true_type{}));
-        auto lds_aq_copy = make_tensor_view<LDS>(
-            sptr_aq, Policy::template MakeAQLdsBlockDescriptor<Problem>(true_type{}));
-        auto lds_bq_copy = make_tensor_view<LDS>(
-            sptr_bq, Policy::template MakeBQLdsBlockDescriptor<Problem>(true_type{}));
-        auto lds_a_load = make_tensor_view<LDS>(
-            sptr_a, Policy::template MakeALdsBlockDescriptor<Problem>(false_type{}));
-        auto lds_b_load = make_tensor_view<LDS>(
-            sptr_b, Policy::template MakeBLdsBlockDescriptor<Problem>(false_type{}));
-        auto lds_aq_load = make_tensor_view<LDS>(
-            sptr_aq, Policy::template MakeAQLdsBlockDescriptor<Problem>(false_type{}));
-        auto lds_bq_load = make_tensor_view<LDS>(
-            sptr_bq, Policy::template MakeBQLdsBlockDescriptor<Problem>(false_type{}));
+        auto lds_a =
+            make_tensor_view<LDS>(sptr_a[0], Policy::template MakeALdsBlockDescriptor<Problem>());
+        auto lds_b =
+            make_tensor_view<LDS>(sptr_b[0], Policy::template MakeBLdsBlockDescriptor<Problem>());
+        auto lds_aq =
+            make_tensor_view<LDS>(sptr_aq[0], Policy::template MakeAQLdsBlockDescriptor<Problem>());
+        auto lds_bq =
+            make_tensor_view<LDS>(sptr_bq[0], Policy::template MakeBQLdsBlockDescriptor<Problem>());
 
         constexpr auto a_load_distr =
             make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());
@@ -235,19 +244,19 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             Policy::template MakeAsyncLoadDramWindow<Problem>(a_dram_window_tmp), a_copy_distr);
         auto b_copy_dram_window = make_tile_window(
             Policy::template MakeAsyncLoadDramWindow<Problem>(b_dram_window_tmp), b_copy_distr);
-        auto a_copy_lds_window = make_tile_window(lds_a_copy, a_lds_size, {0, 0}, a_copy_distr);
-        auto b_copy_lds_window = make_tile_window(lds_b_copy, b_lds_size, {0, 0}, b_copy_distr);
-        auto a_lds_gemm_window = make_tile_window(lds_a_load, a_lds_size, {0, 0}, a_load_distr);
-        auto b_lds_gemm_window = make_tile_window(lds_b_load, b_lds_size, {0, 0}, b_load_distr);
+        auto a_copy_lds_window = make_tile_window(lds_a, a_lds_size, {0, 0}, a_copy_distr);
+        auto b_copy_lds_window = make_tile_window(lds_b, b_lds_size, {0, 0}, b_copy_distr);
+        auto a_lds_gemm_window = make_tile_window(lds_a, a_lds_size, {0, 0}, a_load_distr);
+        auto b_lds_gemm_window = make_tile_window(lds_b, b_lds_size, {0, 0}, b_load_distr);
 
         auto aq_copy_dram_window = make_tile_window(
             Policy::template MakeQAsyncLoadDramWindow<Problem>(aq_dram_window_tmp), aq_copy_distr);
         auto bq_copy_dram_window = make_tile_window(
             Policy::template MakeQAsyncLoadDramWindow<Problem>(bq_dram_window_tmp), bq_copy_distr);
-        auto aq_copy_lds_window = make_tile_window(lds_aq_copy, aq_lds_size, {0, 0}, aq_copy_distr);
-        auto bq_copy_lds_window = make_tile_window(lds_bq_copy, bq_lds_size, {0, 0}, bq_copy_distr);
-        auto aq_lds_gemm_window = make_tile_window(lds_aq_load, aq_lds_size, {0, 0}, aq_load_distr);
-        auto bq_lds_gemm_window = make_tile_window(lds_bq_load, bq_lds_size, {0, 0}, bq_load_distr);
+        auto aq_copy_lds_window = make_tile_window(lds_aq, aq_lds_size, {0, 0}, aq_copy_distr);
+        auto bq_copy_lds_window = make_tile_window(lds_bq, bq_lds_size, {0, 0}, bq_copy_distr);
+        auto aq_lds_gemm_window = make_tile_window(lds_aq, aq_lds_size, {0, 0}, aq_load_distr);
+        auto bq_lds_gemm_window = make_tile_window(lds_bq, bq_lds_size, {0, 0}, bq_load_distr);
 
         decltype(load_tile(aq_lds_gemm_window)) aq_block_tile;
         decltype(load_tile(bq_lds_gemm_window)) bq_block_tile;
@@ -255,115 +264,148 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         auto block_gemm   = BlockGemm();
         auto c_block_tile = block_gemm.MakeCBlockTile();
 
-        constexpr auto a_step  = make_array(0, KPerBlock);
-        constexpr auto b_step  = make_array(0, KPerBlock);
-        constexpr auto aq_step = make_array(0, KPerBlockAQ);
-        constexpr auto bq_step = make_array(0, KPerBlockBQ);
-
-        const bool is_ping = get_warp_id() < MWarps * NWarps;
-        const bool is_pong = !is_ping;
-
-        auto load_global = [&]() {
+        auto load_global = [&](index_t i) {
+            // if (get_thread_id() % 256 == 0) {
+            //     printf("tid %03d load_global i=%d\n", get_thread_id(), i);
+            // }
+            a_copy_lds_window.set_bottom_tensor_view_data_ptr(sptr_a[i]);
             async_load_tile(a_copy_lds_window, a_copy_dram_window);
+            b_copy_lds_window.set_bottom_tensor_view_data_ptr(sptr_b[i]);
             async_load_tile(b_copy_lds_window, b_copy_dram_window);
+            aq_copy_lds_window.set_bottom_tensor_view_data_ptr(sptr_aq[i]);
             async_load_tile(aq_copy_lds_window, aq_copy_dram_window);
+            bq_copy_lds_window.set_bottom_tensor_view_data_ptr(sptr_bq[i]);
             async_load_tile(bq_copy_lds_window, bq_copy_dram_window);
         };
-        auto move_global = [&]() {
-            move_tile_window(a_copy_dram_window, a_step);
-            move_tile_window(b_copy_dram_window, b_step);
-            move_tile_window(aq_copy_dram_window, aq_step);
-            move_tile_window(bq_copy_dram_window, bq_step);
+        constexpr index_t INST_GLOBAL = 4 + 4 + 1 + 1; // TODO: hardcode: 4 a + 4 b + 1 aq + 1 bq
+        auto move_global              = [&]() {
+            move_tile_window(a_copy_dram_window, make_array(0, KPerBlock));
+            move_tile_window(b_copy_dram_window, make_array(0, KPerBlock));
+            move_tile_window(aq_copy_dram_window, make_array(0, KPerBlockAQ));
+            move_tile_window(bq_copy_dram_window, make_array(0, KPerBlockBQ));
         };
-        auto load_local = [&]() {
+        auto load_local = [&](index_t i) {
+            // if (get_thread_id() % 256 == 0) {
+            //     printf("tid %03d load_local i=%d\n", get_thread_id(), i);
+            // }
             // printf("tid %03d sptr_aq: %f\n", get_thread_id(), float(sptr_aq[get_thread_id() %
             // 256]));
+            aq_lds_gemm_window.set_bottom_tensor_view_data_ptr(sptr_aq[i]);
             load_tile(aq_block_tile, aq_lds_gemm_window);
             // CK_PRINTF<>{}(aq_block_tile);
+            bq_lds_gemm_window.set_bottom_tensor_view_data_ptr(sptr_bq[i]);
             load_tile(bq_block_tile, bq_lds_gemm_window);
             // CK_PRINTF<>{}(bq_block_tile);
+            a_lds_gemm_window.set_bottom_tensor_view_data_ptr(sptr_a[i]);
+            b_lds_gemm_window.set_bottom_tensor_view_data_ptr(sptr_b[i]);
             block_gemm.LocalPrefetch(a_lds_gemm_window, b_lds_gemm_window);
         };
         auto calc_gemm = [&]() {
+            // if(get_thread_id() % 256 == 0)
+            //     printf("tid %03d calc_gemm\n", get_thread_id());
             block_gemm(
                 c_block_tile, aq_block_tile, bq_block_tile, a_lds_gemm_window, b_lds_gemm_window);
+
+            // CK_PRINTF<>{}(c_block_tile);
         };
 
         __builtin_amdgcn_sched_barrier(0);
-        asm volatile(";; is_pong __builtin_amdgcn_s_barrier");
-        __builtin_amdgcn_sched_barrier(0);
         if(is_pong)
+        {
+            asm volatile(";; is_pong only");
+            __builtin_amdgcn_sched_barrier(0);
+            load_global(1);
             __builtin_amdgcn_s_barrier();
-        __builtin_amdgcn_sched_barrier(0);
-        asm volatile(";; is_pong __builtin_amdgcn_s_barrier");
+            move_global();
+            __builtin_amdgcn_sched_barrier(0);
+            asm volatile(";; is_pong __builtin_amdgcn_s_barrier");
+            __builtin_amdgcn_sched_barrier(0);
+        }
         __builtin_amdgcn_sched_barrier(0);
 
-        load_global();
-        __builtin_amdgcn_sched_barrier(0);
-        if(is_pong)
-            load_local();
-        __builtin_amdgcn_sched_barrier(0);
         clear_tile(c_block_tile);
-
-        s_waitcnt</*vmcnt*/ 0, /*lgkmcnt*/ 0>();
+        s_waitcnt</*vmcnt*/ 0>();
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
+        load_global(0);
+        if(is_pong)
+            load_local(1);
+
+        __builtin_amdgcn_s_barrier();
+        __builtin_amdgcn_sched_barrier(0);
+
+        if constexpr(HasHotLoop)
+        {
+            if(is_pong)
+                calc_gemm();
+            move_global();
+            s_waitcnt</*vmcnt*/ 0>();
+            __builtin_amdgcn_s_barrier();
+
+            load_global(1);
+            load_local(0);
+            __builtin_amdgcn_s_barrier();
+        }
+
+        int tic = 0, toc = 1;
         auto main_body = [&]() {
             __builtin_amdgcn_s_setprio(0);
-            s_nop(0xf);
-            s_nop(0xf);
-            s_nop(0xf);
-            s_nop(0xf);
-            s_nop(0xf);
-            s_nop(0xf);
-            s_nop(0xf);
-            s_nop(0xf);
             calc_gemm();
             move_global();
+            s_waitcnt</*vmcnt*/ 0>();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
 
             __builtin_amdgcn_s_setprio(1);
-            load_global();
-            load_local();
+            // load_global(tic);
+            // load_local(toc);
 
-            s_waitcnt</*vmcnt*/ 0, /*lgkmcnt*/ 0>();
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
         };
         if constexpr(HasHotLoop)
         {
-            --num_loop;
-            if(is_pong)
-                calc_gemm();
-            move_global();
-            __builtin_amdgcn_s_barrier();
-            load_global();
-            load_local();
-            s_waitcnt</*vmcnt*/ 0, /*lgkmcnt*/ 0>();
-            __builtin_amdgcn_s_barrier();
-
-            if(0 < --num_loop)
-                do
-                {
-                    main_body();
-                } while(0 < --num_loop);
+            for(int k = 3; k < num_loop; ++k)
+            {
+                main_body();
+                tic ^= 1;
+                toc ^= 1;
+            }
         }
 
         // tail
-        calc_gemm();
-        __builtin_amdgcn_s_barrier();
-        if(is_ping)
         {
-            load_local();
-            __builtin_amdgcn_s_barrier();
             calc_gemm();
+            move_global();
+            s_waitcnt</*vmcnt*/ 0>();
             __builtin_amdgcn_s_barrier();
-        }
 
-        // CK_PRINTF<>{}(c_block_tile);
+            if(is_ping)
+                load_global(tic);
+            load_local(toc);
+            tic ^= 1;
+            toc ^= 1;
+
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+
+            calc_gemm();
+            s_waitcnt</*vmcnt*/ 0>();
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+
+            if(is_ping)
+            {
+                load_local(toc);
+                __builtin_amdgcn_s_barrier();
+                __builtin_amdgcn_sched_barrier(0);
+
+                calc_gemm();
+                __builtin_amdgcn_s_barrier();
+            }
+        }
 
         constexpr auto c_half_distr = Policy::template MakeCHalfBlockDistribution<Problem>();
         using CHalfTile = decltype(make_static_distributed_tensor<CDataType>(c_half_distr));
@@ -440,14 +482,12 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                                    index_t /*m*/ = 0,
                                    index_t /*n*/ = 0) const
     {
-        static_assert(Problem::TailNum == TailNumber::One,
-                      "Only TailNumber::One supported in this operator!");
-        return Run_<Problem::HasHotLoop>(p_smem,
-                                         a_dram_block_window_tmp,
-                                         b_dram_block_window_tmp,
-                                         aq_dram_block_window_tmp,
-                                         bq_dram_block_window_tmp,
-                                         num_loop);
+        return Run_<Problem::HasHotLoop, Problem::TailNum>(p_smem,
+                                                           a_dram_block_window_tmp,
+                                                           b_dram_block_window_tmp,
+                                                           aq_dram_block_window_tmp,
+                                                           bq_dram_block_window_tmp,
+                                                           num_loop);
     }
 
     /// @brief Runtime pipeline dispatch operator for grouped GEMM kernels.

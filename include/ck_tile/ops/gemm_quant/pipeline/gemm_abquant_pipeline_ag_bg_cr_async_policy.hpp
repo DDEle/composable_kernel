@@ -143,8 +143,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                                 window_tmp.get_window_lengths(),
                                 window_tmp.get_window_origin());
     }
-    template <typename SwapWarpGroup>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeAQLdsBlockDescriptor(SwapWarpGroup)
+    CK_TILE_HOST_DEVICE static constexpr auto MakeAQLdsBlockDescriptor()
     {
         constexpr index_t M2 = 4;
         constexpr index_t M1 = WarpTileM / M2;
@@ -157,7 +156,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         constexpr auto desc_1 = transform_tensor_descriptor( //
             desc_0,
             make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2>{}),
-                       warp_groups_transform<SwapWarpGroup::value>),
+                       make_pass_through_transform(number<KWarps>{})),
             make_tuple(sequence<2, 1, 3>{}, sequence<0>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
         return desc_1;
@@ -177,8 +176,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                 ck_tile::sequence<0>>{});
     }
 
-    template <typename SwapWarpGroup>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBQLdsBlockDescriptor(SwapWarpGroup)
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBQLdsBlockDescriptor()
     {
         constexpr auto desc_0 = make_naive_tensor_descriptor( //
             number_tuple<KWarps, NPerBlockBQ>{},
@@ -188,7 +186,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         constexpr auto desc_1 = transform_tensor_descriptor(
             desc_0,
             make_tuple(make_pass_through_transform(number<NPerBlockBQ>{}),
-                       warp_groups_transform<SwapWarpGroup::value>),
+                       make_pass_through_transform(number<KWarps>{})),
             make_tuple(sequence<1>{}, sequence<0>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
         return desc_1;
@@ -313,8 +311,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                                 window_tmp.get_window_origin());
     }
 
-    template <index_t MNPerBlock, typename SwapWarpGroup>
-    CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_(SwapWarpGroup)
+    template <index_t MNPerBlock>
+    CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_()
     {
         constexpr index_t M3 = warp_size / static_cast<index_t>(WGAccessDouble) / K1;
         constexpr index_t M2 = (warp_size / K1) / M3;
@@ -342,7 +340,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         constexpr auto desc_1 = transform_tensor_descriptor(
             desc_0,
             make_tuple(make_pass_through_transform(number<M1>{}),
-                       warp_groups_transform<SwapWarpGroup::value>,
+                       make_pass_through_transform(number<KWarps>{}),
                        make_pass_through_transform(number<K0>{}),
                        make_pass_through_transform(number<M0>{}),
                        make_pass_through_transform(number<M2>{}),
@@ -370,15 +368,13 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             make_tuple(sequence<0>{}, sequence<1>{}));
         return desc_2;
     }
-    template <typename SwapWarpGroup>
-    CK_TILE_DEVICE static constexpr auto MakeALdsBlockDescriptor(SwapWarpGroup)
+    CK_TILE_DEVICE static constexpr auto MakeALdsBlockDescriptor()
     {
-        return MakeABLdsBlockDescriptor_<MPerBlock>(SwapWarpGroup{});
+        return MakeABLdsBlockDescriptor_<MPerBlock>();
     }
-    template <typename SwapWarpGroup>
-    CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor(SwapWarpGroup)
+    CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
-        return MakeABLdsBlockDescriptor_<NPerBlock>(SwapWarpGroup{});
+        return MakeABLdsBlockDescriptor_<NPerBlock>();
     }
 
     CK_TILE_DEVICE static constexpr auto MakeCHalfBlockDistribution()
@@ -406,8 +402,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
         constexpr auto desc_0 =
             make_naive_tensor_descriptor_packed(number_tuple<M0, M1, M2, N0, N1, M3, N2>{});
-
-        constexpr auto desc_1 = transform_tensor_descriptor( //
+        constexpr auto desc_1 = transform_tensor_descriptor(
             desc_0,
             make_tuple(make_pass_through_transform(number<M0>{}),
                        warp_groups_transform<SwapWarpGroup::value>,
@@ -429,26 +424,22 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
-        constexpr index_t desc_size =
-            MakeALdsBlockDescriptor(false_type{}).get_element_space_size();
+        constexpr index_t desc_size = MakeALdsBlockDescriptor().get_element_space_size();
         return integer_least_multiple(sizeof(typename Problem::ADataType) * desc_size, 16);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
-        constexpr index_t desc_size =
-            MakeBLdsBlockDescriptor(false_type{}).get_element_space_size();
+        constexpr index_t desc_size = MakeBLdsBlockDescriptor().get_element_space_size();
         return integer_least_multiple(sizeof(typename Problem::BDataType) * desc_size, 16);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeAQ()
     {
-        constexpr index_t desc_size =
-            MakeAQLdsBlockDescriptor(false_type{}).get_element_space_size();
+        constexpr index_t desc_size = MakeAQLdsBlockDescriptor().get_element_space_size();
         return sizeof(float) * integer_least_multiple(desc_size, warp_size);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeBQ()
     {
-        constexpr index_t desc_size =
-            MakeBQLdsBlockDescriptor(false_type{}).get_element_space_size();
+        constexpr index_t desc_size = MakeBQLdsBlockDescriptor().get_element_space_size();
         return sizeof(float) * integer_least_multiple(desc_size, warp_size);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeC()
@@ -460,9 +451,12 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
-        // CK_PRINT<GetSmemSizeA(), GetSmemSizeB(), GetSmemSizeAQ(),
-        // GetSmemSizeBQ(),GetSmemSizeC()>();
-        return max(GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ(),
+        // CK_PRINT<GetSmemSizeA(),
+        //          GetSmemSizeB(),
+        //          GetSmemSizeAQ(),
+        //          GetSmemSizeBQ(),
+        //          GetSmemSizeC()>();
+        return max(2 * (GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ()),
                    GetSmemSizeC());
     }
 
