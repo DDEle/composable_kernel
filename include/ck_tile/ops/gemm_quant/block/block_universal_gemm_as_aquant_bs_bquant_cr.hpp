@@ -297,6 +297,9 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                   typename BQBlockTensor,
                   typename ASmemBlockWindow,
                   typename BSmemBlockWindow>
+        // #if defined(__HIP_DEVICE_COMPILE__)
+        //         __attribute__((target("no-packed-fp32-ops")))
+        // #endif
         CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                        AQBlockTensor& aq_block_tensor,
                                        BQBlockTensor& bq_block_tensor,

@@ -9,7 +9,7 @@ endif()
 list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS -Wno-global-constructors) # use global constructors to add kernel instances
 list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS --save-temps -Wno-gnu-line-marker)
 # list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS "SHELL: -mllvm -enable-noalias-to-md-conversion=0")
-list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS "SHELL: -mllvm -greedy-reverse-local-assignment=1")
+# list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS "SHELL: -mllvm -greedy-reverse-local-assignment=1")
 # list(APPEND EXAMPLE_GEMM_COMPILE_OPTIONS "-g")
 
 if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")

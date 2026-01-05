@@ -180,7 +180,8 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                      Policy::template GetSmemSizeB<Problem>() +
                      Policy::template GetSmemSizeAQ<Problem>() +
                      Policy::template GetSmemSizeBQ<Problem>();
-        uint8_t* const smem_arr[2] = {smem0, smem1};
+        // uint8_t* const smem[2] = {smem0, smem1};
+        const auto smem = make_array(smem0, smem1);
 
         const index_t warp_group_id = get_warp_id() / (MWarps * NWarps);
         const bool is_ping          = warp_group_id == 0;
@@ -195,6 +196,11 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                                             Policy::template MakeAQLdsBlockDescriptor<Problem>());
         auto lds_bq        = make_tensor_view<LDS>(static_cast<BQDataType*>(nullptr),
                                             Policy::template MakeBQLdsBlockDescriptor<Problem>());
+
+        constexpr auto lds_offset_a  = 0;
+        constexpr auto lds_offset_b  = lds_offset_a + Policy::template GetSmemSizeA<Problem>();
+        constexpr auto lds_offset_aq = lds_offset_b + Policy::template GetSmemSizeB<Problem>();
+        constexpr auto lds_offset_bq = lds_offset_aq + Policy::template GetSmemSizeAQ<Problem>();
 
         constexpr auto a_load_distr =
             make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());
@@ -235,26 +241,21 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         auto block_gemm   = BlockGemm();
         auto c_block_tile = block_gemm.MakeCBlockTile();
 
-        auto load_global = [&](uint8_t* __restrict__ smem_ptr) {
+        auto load_global = [&](index_t i) {
             constexpr auto NEG1 = number<-1>{};
             // if (get_thread_id() % 256 == 0)
             //     printf("tid %03d load_global i=%d\n", get_thread_id(), i);
             a_copy_lds_window.set_bottom_tensor_view_data_ptr(
-                reinterpret_cast<ADataType*>(smem_ptr));
+                reinterpret_cast<ADataType*>(smem[i] + lds_offset_a));
             async_load_tile(a_copy_lds_window, a_copy_dram_window, NEG1, false_type{}, true_type{});
-
             b_copy_lds_window.set_bottom_tensor_view_data_ptr(
-                reinterpret_cast<BDataType*>(smem_ptr + Policy::template GetSmemSizeA<Problem>()));
+                reinterpret_cast<BDataType*>(smem[i] + lds_offset_b));
             async_load_tile(b_copy_lds_window, b_copy_dram_window, NEG1, false_type{}, true_type{});
-
             aq_copy_lds_window.set_bottom_tensor_view_data_ptr(
-                reinterpret_cast<AQDataType*>(smem_ptr + Policy::template GetSmemSizeA<Problem>() +
-                                              Policy::template GetSmemSizeB<Problem>()));
+                reinterpret_cast<AQDataType*>(smem[i] + lds_offset_aq));
             async_load_tile(aq_copy_lds_window, aq_copy_dram_window);
             bq_copy_lds_window.set_bottom_tensor_view_data_ptr(
-                reinterpret_cast<BQDataType*>(smem_ptr + Policy::template GetSmemSizeA<Problem>() +
-                                              Policy::template GetSmemSizeB<Problem>() +
-                                              Policy::template GetSmemSizeAQ<Problem>()));
+                reinterpret_cast<BQDataType*>(smem[i] + lds_offset_bq));
             async_load_tile(bq_copy_lds_window, bq_copy_dram_window);
         };
         // constexpr index_t INST_GLOBAL = 4 + 4 + 1 + 1; // TODO: hardcode: 4 a + 4 b + 1 aq + 1 bq
@@ -264,25 +265,22 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             move_tile_window(aq_copy_dram_window, {0, KPerBlockAQ});
             move_tile_window(bq_copy_dram_window, {0, KPerBlockBQ});
         };
-        auto load_local = [&](uint8_t* __restrict__ smem_ptr) {
+        auto load_local = [&](index_t i) {
             // if (get_thread_id() % 256 == 0) {
             //     printf("tid %03d load_local i=%d\n", get_thread_id(), i);
             // }
             // printf("tid %03d sptr_aq: %f\n", get_thread_id(), float(sptr_aq[get_thread_id() %
             // 256]));
             a_lds_gemm_window.set_bottom_tensor_view_data_ptr(
-                reinterpret_cast<ADataType*>(smem_ptr));
-            b_lds_gemm_window.set_bottom_tensor_view_data_ptr(reinterpret_cast<OverrideBDataType*>(
-                smem_ptr + Policy::template GetSmemSizeA<Problem>()));
+                reinterpret_cast<ADataType*>(smem[i] + lds_offset_a));
+            b_lds_gemm_window.set_bottom_tensor_view_data_ptr(
+                reinterpret_cast<BDataType*>(smem[i] + lds_offset_b));
             block_gemm.LocalPrefetch(a_lds_gemm_window, b_lds_gemm_window);
             aq_lds_gemm_window.set_bottom_tensor_view_data_ptr(
-                reinterpret_cast<AQDataType*>(smem_ptr + Policy::template GetSmemSizeA<Problem>() +
-                                              Policy::template GetSmemSizeB<Problem>()));
+                reinterpret_cast<AQDataType*>(smem[i] + lds_offset_aq));
             load_tile(aq_block_tile, aq_lds_gemm_window);
             bq_lds_gemm_window.set_bottom_tensor_view_data_ptr(
-                reinterpret_cast<BQDataType*>(smem_ptr + Policy::template GetSmemSizeA<Problem>() +
-                                              Policy::template GetSmemSizeB<Problem>() +
-                                              Policy::template GetSmemSizeAQ<Problem>()));
+                reinterpret_cast<BQDataType*>(smem[i] + lds_offset_bq));
             load_tile(bq_block_tile, bq_lds_gemm_window);
         };
         auto calc_gemm = [&]() {
@@ -292,21 +290,63 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                 c_block_tile, aq_block_tile, bq_block_tile, a_lds_gemm_window, b_lds_gemm_window);
             // CK_PRINTF<>{}(c_block_tile);
         };
-        auto main_body = [&](uint8_t* __restrict__ smem_tic, uint8_t* __restrict__ smem_toc) {
+        auto main_body = [&](auto tic, auto toc) {
             __builtin_amdgcn_sched_barrier(0);
 
-            // __builtin_amdgcn_s_setprio(0);
+            __builtin_amdgcn_s_setprio(0);
             calc_gemm();
+            __builtin_amdgcn_sched_group_barrier(0x008, 3, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 2, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+            __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x002, 12, 0);
             move_global();
-            __builtin_amdgcn_sched_barrier(0);
+            // __builtin_amdgcn_sched_barrier(0x001);
             s_waitcnt</*vmcnt*/ 0>();
-            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_sched_group_barrier(0x001, 64, 0);
             __builtin_amdgcn_s_barrier();
 
-            // __builtin_amdgcn_s_setprio(1);
-            load_global(smem_tic);
-            load_local(smem_toc);
+            __builtin_amdgcn_s_setprio(1);
+            load_global(tic);
+            load_local(toc);
 
+            __builtin_amdgcn_sched_group_barrier(0x220, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0);
+            __builtin_amdgcn_sched_group_barrier(0x220, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0);
+            __builtin_amdgcn_sched_group_barrier(0x220, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0);
+            __builtin_amdgcn_sched_group_barrier(0x220, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0);
+            __builtin_amdgcn_sched_group_barrier(0x220, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 5, 0);
+
+            __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
         };
@@ -316,7 +356,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         {
             asm volatile(";; is_pong only");
             __builtin_amdgcn_sched_barrier(0);
-            load_global(smem_arr[1]);
+            load_global(1);
             __builtin_amdgcn_s_barrier();
             move_global();
             __builtin_amdgcn_sched_barrier(0);
@@ -331,9 +371,9 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         __builtin_amdgcn_sched_barrier(0);
 
         if constexpr(N_LOOP >= 2)
-            load_global(smem_arr[0]);
+            load_global(0);
         if(is_pong)
-            load_local(smem_arr[1]);
+            load_local(1);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
@@ -348,8 +388,8 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         {
             __builtin_amdgcn_s_barrier();
 
-            load_global(smem_arr[1]);
-            load_local(smem_arr[0]);
+            load_global(1);
+            load_local(0);
             __builtin_amdgcn_s_barrier();
         }
 
@@ -359,9 +399,14 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             index_t loop_count = num_loop - 3;
             do
             {
-                main_body(smem_arr[tic], smem_arr[toc]);
-                tic ^= 1;
-                toc ^= 1;
+                main_body(0, 1);
+                // tic ^= 1;
+                // toc ^= 1;
+                --loop_count;
+
+                main_body(1, 0);
+                // tic ^= 1;
+                // toc ^= 1;
                 --loop_count;
             } while(0 < loop_count);
         }
@@ -376,10 +421,10 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         }
 
         if(is_ping)
-            load_global(smem_arr[tic]);
+            load_global(tic);
         if constexpr(N_LOOP >= 2)
         {
-            load_local(smem_arr[toc]);
+            load_local(toc);
             toc ^= 1;
 
             __builtin_amdgcn_s_barrier();
@@ -393,7 +438,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
         if(is_ping)
         {
-            load_local(smem_arr[toc]);
+            load_local(toc);
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
 
