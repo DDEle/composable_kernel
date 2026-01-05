@@ -169,11 +169,11 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<warp_num / KWarps, warp_size / NPerBlockBQ>,
                 ck_tile::tuple<ck_tile::sequence<NPerBlockBQ>,
-                               ck_tile::sequence<KWarps, KWarpTiles>>,
+                               ck_tile::sequence<KWarps, KWarpTiles / KWarps>>,
                 ck_tile::tuple<ck_tile::sequence<2, 0>, ck_tile::sequence<1, 0>>,
-                ck_tile::tuple<ck_tile::sequence<1, 0>, ck_tile::sequence<0, 1>>,
+                ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<0, 1>>,
                 ck_tile::sequence<2>,
-                ck_tile::sequence<0>>{});
+                ck_tile::sequence<1>>{});
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeBQLdsBlockDescriptor()

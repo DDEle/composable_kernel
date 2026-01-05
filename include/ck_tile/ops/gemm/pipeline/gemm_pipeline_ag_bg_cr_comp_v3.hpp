@@ -25,7 +25,7 @@ struct BaseGemmPipelineAgBgCrCompV3
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {
         if constexpr(Problem::BlockGemmShape::BlockWarps::at(number<2>{}) == 2)
-            return num_loop > (PrefetchStages + 1);
+            return num_loop > 3;
         else
             return num_loop > PrefetchStages;
     }
@@ -46,12 +46,19 @@ struct BaseGemmPipelineAgBgCrCompV3
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
         constexpr auto scenarios = []() {
-            return std::array{
-                // std::make_pair(false, TailNumber::Odd),  // 1 loop
-                // std::make_pair(false, TailNumber::Even), // 2 loop
-                // std::make_pair(true, TailNumber::Odd),   // 3 / 5 / 7 / ... loops
-                std::make_pair(true, TailNumber::Odd), // 4 / 6 / 8 / ... loops
-            };
+            if constexpr(PrefetchStages == 1)
+                return std::array{
+                    // std::make_pair(false, TailNumber::One),  // 1 loop
+                    // std::make_pair(false, TailNumber::Even), // 2 loop
+                    // std::make_pair(false, TailNumber::Odd),  // 3
+                    std::make_pair(true, TailNumber::Odd), // 4 / 5 / 6 / ... loops
+                };
+            else
+                return std::array{
+                    std::make_pair(true, TailNumber::Odd),
+                    std::make_pair(false, TailNumber::Odd),
+                    std::make_pair(false, TailNumber::Even),
+                };
         }();
         if(has_hot_loop == scenarios[I].first && tail_number == scenarios[I].second)
             return run_func(bool_constant<scenarios[I].first>{}, constant<scenarios[I].second>{});
