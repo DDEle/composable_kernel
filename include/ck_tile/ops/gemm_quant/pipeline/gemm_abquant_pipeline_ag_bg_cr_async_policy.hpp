@@ -124,15 +124,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             make_tuple(stride_mn, KWarps * stride_qk, stride_qk),
             number<KWarps>{},
             number<1>{});
-        const auto desc_1 = transform_tensor_descriptor( //
-            desc_0,
-            make_tuple(make_pass_through_transform(mn),
-                       make_pass_through_transform(qk / KWarps),
-                       warp_groups_transform<true>),
-            make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
         const auto desc   = transform_tensor_descriptor( //
-            desc_1,
+            desc_0,
             make_tuple(
                 make_pass_through_transform(mn),
                 make_merge_transform_v3_division_mod(make_tuple(qk / KWarps, number<KWarps>{}))),
@@ -292,7 +285,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
             make_tuple(make_pass_through_transform(M0),
                        make_xor_transform(make_tuple(number<M1>{}, number<K1>{})),
                        make_pass_through_transform(k_tiles),
-                       warp_groups_transform<true>,
+                       make_pass_through_transform(number<KWarps>{}),
                        make_pass_through_transform(number<K2>{})),
             make_tuple(
                 sequence<0>{}, sequence<1, 4>{}, sequence<2>{}, sequence<3>{}, sequence<5>{}),

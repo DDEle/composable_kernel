@@ -264,9 +264,9 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     struct BlockGemmImpl<GemmPipelineScheduler::Intrawave, GemmTraits>
     {
         static constexpr auto ALdsTileDistr =
-            decltype(make_static_tile_distribution(MakeABlockDistributionEncode())){};
+            make_static_tile_distribution(MakeABlockDistributionEncode());
         static constexpr auto BLdsTileDistr =
-            decltype(make_static_tile_distribution(MakeBBlockDistributionEncode())){};
+            make_static_tile_distribution(MakeBBlockDistributionEncode());
 
         using ALdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(ALdsTileDistr));
         using BLdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(BLdsTileDistr));
@@ -283,13 +283,11 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                                           bool_constant<ALoadTranspose> = {},
                                           bool_constant<BLoadTranspose> = {})
         {
-            load_int4_tile<ADataType, ComputeDataType, UnaryOpSize_, ALoadTranspose>(
-                a_warp_tile_, a_block_window);
+            a_block_window.load(a_warp_tile_, number<-1>{}, true_type{}, true_type{});
 
             // CK_PRINTF<>{}(a_warp_tile_);
             // If B datatype were pkint4 it would be converted prior to storing in LDS
-            load_int4_tile<OverrideBDataType, ComputeDataType, UnaryOpSize_, BLoadTranspose>(
-                b_warp_tile_, b_block_window);
+            b_block_window.load(b_warp_tile_, number<-1>{}, true_type{}, true_type{});
             // CK_PRINTF<>{}(b_warp_tile_);
         }
 
