@@ -225,8 +225,8 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                                        tuple<sequence<NIterPerWarp, NWarp>, KIterSeq>,
                                        tuple<sequence<2, 0, 1>>,
                                        tuple<sequence<0, 0, 1>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 1>>{};
+                                       sequence</*1, 2*/>,
+                                       sequence</*0, 1*/>>{};
 
         constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             b_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
@@ -254,6 +254,15 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
             make_static_tile_distribution(MakeCBlockDistributionEncode()));
     }
 
+    using ALdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(
+        make_static_tile_distribution(MakeABlockDistributionEncode())));
+    using BLdsTile = statically_indexed_array<
+        statically_indexed_array<decltype(make_static_distributed_tensor<ComputeDataType>(
+                                     make_static_tile_distribution(
+                                         MakeBBlockDistributionEncode()))),
+                                 KIterPerWarp>,
+        NIterPerWarp>;
+
     private:
     template <GemmPipelineScheduler Scheduler, typename GemmTraits>
     struct BlockGemmImpl
@@ -263,48 +272,31 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     template <typename GemmTraits>
     struct BlockGemmImpl<GemmPipelineScheduler::Intrawave, GemmTraits>
     {
-        static constexpr auto ALdsTileDistr =
-            make_static_tile_distribution(MakeABlockDistributionEncode());
-        static constexpr auto BLdsTileDistr =
-            make_static_tile_distribution(MakeBBlockDistributionEncode());
-
-        using ALdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(ALdsTileDistr));
-        using BLdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(BLdsTileDistr));
-
-        ALdsTile a_warp_tile_;
-        BLdsTile b_warp_tile_;
+        // ALdsTile a_warp_tile_;
+        // BLdsTile b_warp_tile_[NIterPerWarp][KIterPerWarp];
 
         template <typename ASmemBlockWindow,
                   typename BSmemBlockWindow,
                   bool ALoadTranspose = false,
                   bool BLoadTranspose = false>
-        CK_TILE_DEVICE void LocalPrefetch(const ASmemBlockWindow& a_block_window,
-                                          const BSmemBlockWindow& b_block_window,
+        CK_TILE_DEVICE void LocalPrefetch(const ASmemBlockWindow& /*a_block_window*/,
+                                          const BSmemBlockWindow& /*b_block_window*/,
                                           bool_constant<ALoadTranspose> = {},
                                           bool_constant<BLoadTranspose> = {})
         {
-            a_block_window.load(a_warp_tile_, number<-1>{}, true_type{}, true_type{});
-
-            // CK_PRINTF<>{}(a_warp_tile_);
-            // If B datatype were pkint4 it would be converted prior to storing in LDS
-            b_block_window.load(b_warp_tile_, number<-1>{}, true_type{}, true_type{});
-            // CK_PRINTF<>{}(b_warp_tile_);
+            static_assert(false, "Not implemented yet!");
         }
 
         // C += A * B
-        template <typename CBlockTensor,
-                  typename AQBlockTensor,
-                  typename BQBlockTensor,
-                  typename ASmemBlockWindow,
-                  typename BSmemBlockWindow>
+        template <typename CBlockTensor, typename AQBlockTensor, typename BQBlockTensor>
         // #if defined(__HIP_DEVICE_COMPILE__)
         //         __attribute__((target("no-packed-fp32-ops")))
         // #endif
         CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
+                                       const ALdsTile& a_warp_tile_,
+                                       const BLdsTile& b_warp_tile_,
                                        AQBlockTensor& aq_block_tensor,
-                                       BQBlockTensor& bq_block_tensor,
-                                       [[maybe_unused]] ASmemBlockWindow& a_block_window,
-                                       [[maybe_unused]] BSmemBlockWindow& b_block_window)
+                                       BQBlockTensor& bq_block_tensor)
         {
             static_assert(std::is_same_v<CDataType, typename CBlockTensor::DataType>,
                           "The CDataType as defined in traits should be the same as corresponding "
@@ -327,23 +319,21 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
 
             // hot loop:
             static_for<0, Traits::QScalesPerBlockRow, 1>{}([&](auto kQScale) {
-                static_for_product<number<MIterPerWarp>, number<NIterPerWarp>>{}([&](auto mIter,
-                                                                                     auto nIter) {
+                static_for_product<number<NIterPerWarp>, number<MIterPerWarp>>{}([&](auto nIter,
+                                                                                     auto mIter) {
                     CWarpTensor c_warp_tensor;
                     static_for<0, Traits::KIterPerQScale, 1>{}([&](auto kIterInQScale) {
                         static_assert(Traits::KIterPerQScale == 1);
-                        constexpr auto kIter = kQScale * Traits::KIterPerQScale + kIterInQScale;
+                        constexpr auto kIter =
+                            number<kQScale * Traits::KIterPerQScale + kIterInQScale>{};
 
                         AWarpTensor a_warp_tensor;
                         a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
                             merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
-
                         BWarpTensor b_warp_tensor;
-                        b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
-                            merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
-
+                        b_warp_tensor.get_thread_buffer() =
+                            b_warp_tile_[nIter][kIter].get_thread_buffer();
                         if constexpr(kIterInQScale == 0)
                         {
                             c_warp_tensor = WarpGemm{}(a_warp_tensor, b_warp_tensor);
@@ -450,32 +440,17 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     };
 
     public:
-    template <typename ASmemBlockWindow,
-              typename BSmemBlockWindow,
-              bool ALoadTranspose = false,
-              bool BLoadTranspose = false>
-    CK_TILE_DEVICE void LocalPrefetch(const ASmemBlockWindow& a_block_window,
-                                      const BSmemBlockWindow& b_block_window,
-                                      bool_constant<ALoadTranspose> a_load_tr = {},
-                                      bool_constant<BLoadTranspose> b_load_tr = {})
+    template <typename... Args>
+    CK_TILE_DEVICE void LocalPrefetch(Args&&... args)
     {
-        block_gemm_impl_.LocalPrefetch(a_block_window, b_block_window, a_load_tr, b_load_tr);
+        block_gemm_impl_.LocalPrefetch(std::forward<Args>(args)...);
     }
 
     // C += A * B
-    template <typename CBlockTensor,
-              typename AQBlockTensor,
-              typename BQBlockTensor,
-              typename ASmemBlockWindow,
-              typename BSmemBlockWindow>
-    CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
-                                   AQBlockTensor& aq_block_tensor,
-                                   BQBlockTensor& bq_block_tensor,
-                                   const ASmemBlockWindow& a_block_window,
-                                   const BSmemBlockWindow& b_block_window)
+    template <typename CBlockTensor, typename... Rest>
+    CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor, Rest&&... rest)
     {
-        block_gemm_impl_(
-            c_block_tensor, aq_block_tensor, bq_block_tensor, a_block_window, b_block_window);
+        block_gemm_impl_(c_block_tensor, std::forward<Rest>(rest)...);
     }
 
     private:
