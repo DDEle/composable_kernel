@@ -185,6 +185,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         return desc_1;
     }
 
+#if 0
     CK_TILE_HOST_DEVICE static constexpr auto MakeAQBlockDistribution()
     {
         return make_static_tile_distribution(
@@ -208,6 +209,31 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                 sequence<1, 2>,
                 sequence<0, 1>>{});
     }
+#else
+    CK_TILE_HOST_DEVICE static constexpr auto MakeAQBlockDistribution()
+    {
+        return make_static_tile_distribution(
+            tile_distribution_encoding<                          //
+                sequence<NWarps, warp_size / WarpTileM>,         // ?, 4
+                tuple<sequence<MIterPerWarp, MWarps, WarpTileM>, // ?,?,16
+                      sequence<KWarps, KPerWarpAQ>>,             // 2, 1
+                tuple<sequence<2, 1, 0>, sequence<0, 1>>,
+                tuple<sequence<0, 1, 0>, sequence<1, 2>>,
+                sequence<1, 2>,
+                sequence<0, 1>>{});
+    }
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBQBlockDistribution()
+    {
+        return make_static_tile_distribution(
+            tile_distribution_encoding<                                      //
+                sequence<MWarps, NWarps, warp_size>,                         // ?,?,64
+                tuple<sequence<NPerBlockBQ>, sequence<KWarps, KPerWarpkBQ>>, // 1 2,1
+                tuple<sequence<2, 0, 0>, sequence<0>>,
+                tuple<sequence<0, 0, 1>, sequence<2>>,
+                sequence<1, 2>,
+                sequence<0, 1>>{});
+    }
+#endif
 
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
