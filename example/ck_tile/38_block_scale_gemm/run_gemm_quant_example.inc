@@ -1000,7 +1000,7 @@ int run_gemm_example_prec_type(const ck_tile::ArgParser& arg_parser)
                                                  AQuantGroupSize,
                                                  BQuantGroupSize,
                                                  QuantMode>(
-                arg_parser, Row{}, Row{}, Col{}, Col{}, Row{});
+                arg_parser, Row{}, Col{}, Col{}, Col{}, Row{});
         }
 
 #if 0

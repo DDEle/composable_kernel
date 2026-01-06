@@ -153,7 +153,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
         static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>, "Wrong!");
         static_assert(std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>, "Wrong!");
-        static_assert(std::is_same_v<AQLayout, tensor_layout::gemm::RowMajor>, "Wrong!");
+        // static_assert(std::is_same_v<AQLayout, tensor_layout::gemm::RowMajor>, "Wrong!");
         static_assert(std::is_same_v<BQLayout, tensor_layout::gemm::ColumnMajor>, "Wrong!");
 
         static_assert((MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -291,7 +291,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
             b_lds_gemm_window.set_bottom_tensor_view_data_ptr(
                 reinterpret_cast<BDataType*>(smem[i] + lds_offset_b));
-            static_for_product<number<NIterPerWarp / 4>, number<KIterPerWarp>>{}(
+            static_for_product<number<NIterPerWarp>, number<KIterPerWarp>>{}(
                 [&](auto nIter, auto kIter) {
                     b_lds_gemm_window.load_with_offset(
                         number_tuple<WarpGemm::kN * nIter, WarpGemm::kK * kIter>{},
@@ -304,16 +304,6 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         auto calc_gemm = [&](index_t i) {
             // if(get_thread_id() % 256 == 0)
             //     printf("tid %03d calc_gemm\n", get_thread_id());
-
-            static_for_product<sequence<NIterPerWarp / 4, NIterPerWarp, 1>, number<KIterPerWarp>>{}(
-                [&](auto nIter, auto kIter) {
-                    b_lds_gemm_window.load_with_offset(
-                        number_tuple<WarpGemm::kN * nIter, WarpGemm::kK * kIter>{},
-                        b_block_tile[nIter][kIter],
-                        number<-1>{},
-                        true_type{},
-                        true_type{});
-                });
             block_gemm(
                 c_block_tile, a_block_tile, b_block_tile, aq_block_tile[i], bq_block_tile[i]);
             // CK_PRINTF<>{}(c_block_tile);
@@ -324,65 +314,56 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             // s_nop(7);
             // s_nop(7);
 
-            __builtin_amdgcn_s_setprio(0);
-            __builtin_amdgcn_sched_barrier(0);
-            b_copy_lds_window.set_bottom_tensor_view_data_ptr(
-                reinterpret_cast<BDataType*>(smem[toc] + lds_offset_b));
-            static_for_product<sequence<NIterPerWarp / 4, NIterPerWarp, 1>, number<KIterPerWarp>>{}(
-                [&](auto nIter, auto kIter) {
-                    b_lds_gemm_window.load_with_offset(
-                        number_tuple<WarpGemm::kN * nIter, WarpGemm::kK * kIter>{},
-                        b_block_tile[nIter][kIter],
-                        number<-1>{},
-                        true_type{},
-                        true_type{});
-                });
+            __builtin_amdgcn_s_setprio(1);
+            s_waitcnt_lgkm<4>();
             block_gemm(
                 c_block_tile, a_block_tile, b_block_tile, aq_block_tile[tic], bq_block_tile[tic]);
             {
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
-                __builtin_amdgcn_sched_group_barrier(0x002, 2, 0);
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                __builtin_amdgcn_sched_group_barrier(0x002, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                __builtin_amdgcn_sched_group_barrier(0x002, 1, 0);
+
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x004, 1, 0); // lgkmcnt
+
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+                // __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+
+                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
+                // __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
-
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
-                __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
-
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
-                __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
-
-                __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
-                __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
-                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
+                // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0); // ds read
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
@@ -393,7 +374,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
                 __builtin_amdgcn_sched_group_barrier(0x002, 4, 0);
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
-                __builtin_amdgcn_sched_group_barrier(0x002, 12, 0);
+                __builtin_amdgcn_sched_group_barrier(0x002, 24, 0);
             }
             move_global();
 
@@ -405,18 +386,20 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
             __builtin_amdgcn_sched_barrier(0);
 
-            __builtin_amdgcn_s_setprio(1);
+            __builtin_amdgcn_s_setprio(0);
+            s_nop(3);
+            __builtin_amdgcn_s_setprio(2);
 
             // load_global(tic);
             // load_local(toc);
             constexpr auto NEG1 = number<-1>{};
 
-            aq_block_tile[tic] = load_tile(aq_copy_dram_window);
-            bq_block_tile[tic] = load_tile(bq_copy_dram_window);
-
             a_lds_gemm_window.set_bottom_tensor_view_data_ptr(
                 reinterpret_cast<ADataType*>(smem[toc] + lds_offset_a));
             a_lds_gemm_window.load(a_block_tile, number<-1>{}, true_type{}, true_type{});
+
+            aq_block_tile[tic] = load_tile(aq_copy_dram_window);
+            bq_block_tile[tic] = load_tile(bq_copy_dram_window);
 
             a_copy_lds_window.set_bottom_tensor_view_data_ptr(
                 reinterpret_cast<ADataType*>(smem[tic] + lds_offset_a));
@@ -424,7 +407,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
 
             b_lds_gemm_window.set_bottom_tensor_view_data_ptr(
                 reinterpret_cast<BDataType*>(smem[toc] + lds_offset_b));
-            static_for_product<sequence<0, NIterPerWarp, 1>, number<KIterPerWarp>>{}(
+            static_for_product<number<NIterPerWarp / 2>, number<KIterPerWarp>>{}(
                 [&](auto nIter, auto kIter) {
                     b_lds_gemm_window.load_with_offset(
                         number_tuple<WarpGemm::kN * nIter, WarpGemm::kK * kIter>{},
@@ -438,16 +421,27 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                 reinterpret_cast<BDataType*>(smem[tic] + lds_offset_b));
             async_load_tile(b_copy_lds_window, b_copy_dram_window, NEG1, false_type{}, true_type{});
 
-            // __builtin_amdgcn_sched_group_barrier(0x001, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x001, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x001, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x001, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x001, 1, 0);
-            // __builtin_amdgcn_sched_group_barrier(0x100, 2, 0);
+            static_for_product<number<NIterPerWarp / 2>, number<KIterPerWarp>>{}(
+                [&](auto nIter, auto kIter) {
+                    b_lds_gemm_window.load_with_offset(
+                        number_tuple<WarpGemm::kN * number<nIter + NIterPerWarp / 2>{},
+                                     WarpGemm::kK * kIter>{},
+                        b_block_tile[number<nIter + NIterPerWarp / 2>{}][kIter],
+                        number<-1>{},
+                        true_type{},
+                        true_type{});
+                });
+
+            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
