@@ -612,11 +612,11 @@ struct tile_window_with_static_distribution
                                          to_array<index_t, idx_off_ys.size()>(idx_off_ys)));
                     return adapter_ys_offset.get_bottom_index();
                 }();
-                const auto lds_ys_offset = [&]() {
+                constexpr auto lds_ys_offset = [&]() {
                     if constexpr(static_move_ys)
                     {
                         const auto coord_ys_offset =
-                            make_tensor_coordinate(tensor_descriptor, idx_ys_offset);
+                            make_tensor_coordinate(decltype(tensor_descriptor){}, idx_ys_offset);
                         return coord_ys_offset.get_offset();
                     }
                     else
@@ -629,10 +629,16 @@ struct tile_window_with_static_distribution
                 const auto lds_coord =
                     make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
+                constexpr auto IMM_RANGE =
+                    (1 << 12) / sizeof(typename Base::DataType) * Traits::PackedSize;
+                constexpr auto imm_total    = lds_ys_offset;
+                constexpr auto imm_valid    = imm_total % IMM_RANGE;
+                constexpr auto imm_overflow = imm_total - imm_valid;
+
                 // Calculate SMEM address using base pointer
                 CK_TILE_LDS_ADDR LdsDataType* smem = lds_base_ptr +
                                                      lds_coord.get_offset() / Traits::PackedSize +
-                                                     lds_ys_offset / Traits::PackedSize;
+                                                     imm_overflow / Traits::PackedSize;
                 // print(lds_coord);
                 // printf("tid %03d: smem off %d \n", get_thread_id(), lds_coord.get_offset() +
                 // lds_ys_offset);
@@ -651,8 +657,9 @@ struct tile_window_with_static_distribution
                 // print(bottom_tensor_thread_coord);
                 this->get_bottom_tensor_view().template async_get_vectorized_elements<vector_t>(
                     smem,
-                    bottom_tensor_thread_coord,
-                    offset + dram_ys_offset,
+                    bottom_tensor_thread_coord.get_offset() + offset,
+                    dram_ys_offset - imm_valid,
+                    number<imm_valid>{},
                     bool_constant<oob_conditional_check>{});
 
                 // Move thread coordinate if not last access

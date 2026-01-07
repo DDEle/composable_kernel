@@ -333,22 +333,24 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     template <index_t MNPerBlock>
     CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_()
     {
-        constexpr index_t M3 = warp_size / static_cast<index_t>(WGAccessDouble) / K1;
-        constexpr index_t M2 = (warp_size / K1) / M3;
-        constexpr index_t M1 = static_cast<index_t>(WGAccessDouble);
-        constexpr index_t M0 = MPerBlock / M1 / M2 / M3;
+        constexpr index_t M4 = warp_size / static_cast<index_t>(WGAccessDouble) / K1;
+        constexpr index_t M3 = (warp_size / K1) / M4;
+        constexpr index_t M2 = static_cast<index_t>(WGAccessDouble);
+        constexpr index_t M1 = MWarps / M2;
+        constexpr index_t M0 = MPerBlock / M1 / M2 / M3 / M4;
 
-        static_assert(M0 * M1 * M2 * M3 == MPerBlock, "wrong!");
+        static_assert(M1 * M0 * M2 * M3 * M4 == MPerBlock, "wrong!");
 
         constexpr index_t PadSize = 16;
 
         constexpr auto desc_0 = make_naive_tensor_descriptor( //
-            number_tuple<M1, KWarps, K0, M0, M2, M3, K1, K2>{},
-            number_tuple<KWarps * K0 * M0 * M2 * M3 * K1 * K2 + PadSize,
-                         K0 * M0 * M2 * M3 * K1 * K2,
-                         M0 * M2 * M3 * K1 * K2,
-                         M2 * M3 * K1 * K2,
-                         M3 * K1 * K2,
+            number_tuple<M2, KWarps, M1, M0, K0, M3, M4, K1, K2>{},
+            number_tuple<KWarps * M1 * M0 * K0 * M3 * M4 * K1 * K2 + PadSize,
+                         M1 * M0 * K0 * M3 * M4 * K1 * K2,
+                         M0 * K0 * M3 * M4 * K1 * K2,
+                         K0 * M3 * M4 * K1 * K2,
+                         M3 * M4 * K1 * K2,
+                         M4 * K1 * K2,
                          K1 * K2,
                          K2,
                          1>{},
@@ -358,32 +360,25 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
         constexpr auto desc_1 = transform_tensor_descriptor(
             desc_0,
-            make_tuple(make_pass_through_transform(number<M1>{}),
+            make_tuple(make_pass_through_transform(number<M2>{}),
                        make_pass_through_transform(number<KWarps>{}),
-                       make_pass_through_transform(number<K0>{}),
+                       make_pass_through_transform(number<M1>{}),
                        make_pass_through_transform(number<M0>{}),
-                       make_pass_through_transform(number<M2>{}),
-                       make_xor_transform(make_tuple(number<M3>{}, number<K1>{})),
+                       make_pass_through_transform(number<K0>{}),
+                       make_pass_through_transform(number<M3>{}),
+                       make_xor_transform(make_tuple(number<M4>{}, number<K1>{})),
                        make_pass_through_transform(number<K2>{})),
-            make_tuple(sequence<0>{},
-                       sequence<1>{},
-                       sequence<2>{},
-                       sequence<3>{},
-                       sequence<4>{},
-                       sequence<5, 6>{},
-                       sequence<7>{}),
-            make_tuple(sequence<0>{},
-                       sequence<1>{},
-                       sequence<2>{},
-                       sequence<3>{},
-                       sequence<4>{},
-                       sequence<5, 6>{},
-                       sequence<7>{}));
+            container_concat(generate_tuple([](auto i) { return sequence<i>{}; }, number<6>{}),
+                             make_tuple(sequence<6, 7>{}),
+                             make_tuple(sequence<8>{})),
+            container_concat(generate_tuple([](auto i) { return sequence<i>{}; }, number<6>{}),
+                             make_tuple(sequence<6, 7>{}),
+                             make_tuple(sequence<8>{})));
         constexpr auto desc_2 = transform_tensor_descriptor( //
             desc_1,
-            make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2, M3>{}),
+            make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2, M3, M4>{}),
                        make_merge_transform_v3_division_mod(number_tuple<KWarps, K0, K1, K2>{})),
-            make_tuple(sequence<3, 0, 4, 5>{}, sequence<1, 2, 6, 7>{}),
+            make_tuple(sequence<3, 2, 0, 5, 6>{}, sequence<1, 4, 7, 8>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
         return desc_2;
     }
