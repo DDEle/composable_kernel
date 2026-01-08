@@ -783,7 +783,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     tuple<number<mIter * WG::kM>,
                           number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{});
             });
-            HotLoopScheduler();
+            // HotLoopScheduler();
 
             ////////////////////////////// Next K //////////////////////////////
 
@@ -872,7 +872,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                     tuple<number<mIter * WG::kM>,
                           number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{});
             });
-            HotLoopScheduler();
+            // HotLoopScheduler();
         };
 
         if constexpr(HasHotLoop)
@@ -960,7 +960,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                           number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{});
             });
 
-            Last2ndHotLoopScheduler();
+            // Last2ndHotLoopScheduler();
 
             // GEMM loopK
             static_for_product<number<KPackIterPerWarp>,
@@ -995,7 +995,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                                   number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
                     }
                 });
-            LastHotLoopScheduler();
+            // LastHotLoopScheduler();
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
@@ -1032,7 +1032,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                                   number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
                     }
                 });
-            LastHotLoopScheduler();
+            // LastHotLoopScheduler();
         }
         else
         {

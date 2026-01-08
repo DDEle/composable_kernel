@@ -20,6 +20,15 @@
 
 namespace ck_tile {
 
+template <auto... val>
+[[deprecated("Help function to print value")]] inline constexpr void CK_PRINTT()
+{
+}
+template <typename... type>
+[[deprecated("Help function to print value")]] inline constexpr void CK_PRINTT()
+{
+}
+
 /**
  * @brief This class provides tile (windowed) view and access to the device memory.
  *
@@ -327,6 +336,7 @@ struct tile_window_with_static_distribution
             else
                 return get_load_offset(offset_t{});
         }();
+        // CK_PRINTT<Traits::ScalarPerVector,Traits::PackedSize>();
         // loop over thread tensor space [y0, y1, ...]
         static_for<0, NumCoord, 1>{}([&](auto iCoord) {
             /// TODO: use structure binding (to be captured later) if compiled in C++20
