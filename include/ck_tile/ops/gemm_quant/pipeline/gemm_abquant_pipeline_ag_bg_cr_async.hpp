@@ -318,6 +318,7 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
             s_waitcnt_lgkm<4>();
             block_gemm(
                 c_block_tile, a_block_tile, b_block_tile, aq_block_tile[tic], bq_block_tile[tic]);
+            if constexpr(0)
             {
 
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0);
@@ -431,17 +432,19 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
                         true_type{},
                         true_type{});
                 });
-
-            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
-            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0);
+            if constexpr(0)
+            {
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x100, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x020, 1, 0);
+                __builtin_amdgcn_sched_group_barrier(0x100, 2, 0);
+            }
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -551,14 +554,14 @@ struct ABQuantGemmPipelineAgBgCrAsync : public BaseGemmPipelineAgBgCrCompV3<Prob
         using CHalfTile = decltype(make_static_distributed_tensor<CDataType>(c_half_distr));
         CHalfTile c_half[2];
 #if 1
-        static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
+        static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
             constexpr auto y_lengths =
                 to_sequence(typename WarpGemm::CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
             constexpr auto y_zeros    = transform_sequences([](auto) { return 0; }, y_lengths);
-            constexpr auto lengths    = merge_sequences(sequence<1, NIterPerWarp>{}, y_lengths);
-            constexpr auto c_idx      = merge_sequences(sequence<mIter, 0>{}, y_zeros);
-            constexpr auto c_half_idx = merge_sequences(sequence<mIter / 2, 0>{}, y_zeros);
-            c_half[mIter.value % 2].set_y_sliced_thread_data(
+            constexpr auto lengths    = merge_sequences(sequence<MIterPerWarp, 1>{}, y_lengths);
+            constexpr auto c_idx      = merge_sequences(sequence<0, nIter>{}, y_zeros);
+            constexpr auto c_half_idx = merge_sequences(sequence<0, nIter / 2>{}, y_zeros);
+            c_half[nIter.value % 2].set_y_sliced_thread_data(
                 c_half_idx, lengths, c_block_tile.get_y_sliced_thread_data(c_idx, lengths));
         });
 

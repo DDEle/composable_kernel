@@ -395,9 +395,9 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     {
         constexpr auto outer_encoding = tile_distribution_encoding<
             sequence<>,
-            tuple<sequence<MIterPerWarp / KWarps, KWarps, MWarps>, sequence<NIterPerWarp, NWarps>>,
+            tuple<sequence<MIterPerWarp, MWarps>, sequence<NIterPerWarp / KWarps, KWarps, NWarps>>,
+            tuple<sequence<2, 1, 2>>,
             tuple<sequence<1, 1, 2>>,
-            tuple<sequence<1, 2, 1>>,
             sequence<1, 2>,
             sequence<0, 0>>{};
         return make_static_tile_distribution(detail::make_embed_tile_distribution_encoding(
@@ -406,33 +406,33 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     template <typename SwapWarpGroup>
     CK_TILE_DEVICE static constexpr auto MakeCLdsBlockDescriptor(SwapWarpGroup)
     {
-        constexpr index_t M3 = WarpTileM;                   // 16
-        constexpr index_t M2 = MWarps;                      // 4
-        constexpr index_t M1 = KWarps;                      // 2
-        constexpr index_t M0 = MIterPerWarp / KWarps;       // 1
-        constexpr index_t N2 = get_warp_size() / WarpTileM; // 4
-        constexpr index_t N1 = WarpTileM / N2;              // 4
-        constexpr index_t N0 = NWarpTiles;                  // 8
+        constexpr index_t M2 = WarpTileM;                   // 16
+        constexpr index_t M1 = MWarps;                      // 4
+        constexpr index_t M0 = MIterPerWarp;                // 2
+        constexpr index_t N3 = get_warp_size() / WarpTileM; // 4
+        constexpr index_t N2 = WarpTileN / N3;              // 4
+        constexpr index_t N1 = KWarps;                      // 2
+        constexpr index_t N0 = NWarpTiles / KWarps;         // 4
 
         constexpr auto desc_0 =
-            make_naive_tensor_descriptor_packed(number_tuple<M0, M1, M2, N0, N1, M3, N2>{});
+            make_naive_tensor_descriptor_packed(number_tuple<N1, M0, M1, N0, N2, M2, N3>{});
         constexpr auto desc_1 = transform_tensor_descriptor(
             desc_0,
-            make_tuple(make_pass_through_transform(number<M0>{}),
-                       warp_groups_transform<SwapWarpGroup::value>,
-                       make_pass_through_transform(number<M2>{}),
+            make_tuple(warp_groups_transform<SwapWarpGroup::value>,
+                       make_pass_through_transform(number<M0>{}),
+                       make_pass_through_transform(number<M1>{}),
                        make_pass_through_transform(number<N0>{}),
-                       make_pass_through_transform(number<N1>{}),
-                       make_pass_through_transform(number<M3>{}),
-                       make_pass_through_transform(number<N2>{})),
+                       make_pass_through_transform(number<N2>{}),
+                       make_pass_through_transform(number<M2>{}),
+                       make_pass_through_transform(number<N3>{})),
             generate_tuple([](auto i) { return sequence<i>{}; }, number<7>{}),
             generate_tuple([](auto i) { return sequence<i>{}; }, number<7>{}));
 
         return transform_tensor_descriptor( //
             desc_1,
-            make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2, M3>{}),
-                       make_merge_transform_v3_division_mod(number_tuple<N0, N1, N2>{})),
-            make_tuple(sequence<0, 1, 2, 5>{}, sequence<3, 4, 6>{}),
+            make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2>{}),
+                       make_merge_transform_v3_division_mod(number_tuple<N0, N1, N2, N3>{})),
+            make_tuple(sequence<1, 2, 5>{}, sequence<3, 0, 4, 6>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
     }
 
@@ -465,11 +465,12 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
-        // CK_PRINT<GetSmemSizeA(),
-        //          GetSmemSizeB(),
-        //          GetSmemSizeAQ(),
-        //          GetSmemSizeBQ(),
-        //          GetSmemSizeC()>();
+        CK_PRINT<GetSmemSizeA(),
+                 GetSmemSizeB(),
+                 GetSmemSizeAQ(),
+                 GetSmemSizeBQ(),
+                 GetSmemSizeC()>();
+
         return max(2 * (GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ()),
                    GetSmemSizeC());
     }

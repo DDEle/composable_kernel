@@ -272,8 +272,8 @@ struct CShuffleEpilogue
         max(BlockedXDLN_PerWarp, std::get<1>(shuffle_tile_tuple));
 
     static constexpr auto MNPerIterationShuffle = [] {
-        constexpr index_t m_val = MPerXdl * MWave * NumMXdlPerWavePerShuffle;
-        constexpr index_t n_val = NPerXdl * NWave * NumNXdlPerWavePerShuffle;
+        constexpr index_t m_val = MPerXdl * MWave * NumMXdlPerWavePerShuffle; // 64
+        constexpr index_t n_val = NPerXdl * NWave * NumNXdlPerWavePerShuffle; // 32
         if constexpr(kMPerBlock % m_val != 0 || kNPerBlock % n_val != 0)
             return std::make_tuple(MPerXdl * MWave, NPerXdl * NWave);
         else
@@ -328,7 +328,7 @@ struct CShuffleEpilogue
                 return tile_distribution_encoding<sequence<>,
                                                   tuple<sequence<NumMXdlPerWavePerShuffle, MWave>,
                                                         sequence<NumNXdlPerWavePerShuffle, NWave>>,
-                                                  tuple<sequence<1, 2>>,
+                                                  tuple<sequence<2, 1>>,
                                                   tuple<sequence<1, 1>>,
                                                   sequence<1, 2>,
                                                   sequence<0, 0>>{};
@@ -410,6 +410,9 @@ struct CShuffleEpilogue
         constexpr auto c_warp_y_lengths =
             to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        // CK_PRINT<decltype(lds_tile),decltype(o_acc_tile)>();
+        // using aaa =
 
         lds_tile.get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
             merge_sequences(
