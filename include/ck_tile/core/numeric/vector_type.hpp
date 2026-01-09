@@ -48,7 +48,10 @@ struct ext_vector<T_, N_, std::enable_if_t<!std::is_class_v<typename native_t<T_
 
 struct int32x3_t
 {
-    int data[3];
+    // int data[3];
+    int32_t x;
+    int32_t y;
+    int32_t z;
 };
 
 template <>

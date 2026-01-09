@@ -884,6 +884,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                 iCounter--;
             } while(iCounter > 0);
         }
+#if 0
         // TAIL
         if constexpr(TailNum == TailNumber::Even)
         {
@@ -895,7 +896,6 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
                         b_flat_dram_offsets(nIter) + kIter * KFlatBytesPerBlockPerIter);
                 });
             });
-
             // prefetch Scale A and Scale B (2i+1)
             static_for<0, MPackIterPerWarp, 1>{}([&](auto impack) {
                 static_for<0, KPackIterPerWarp, 1>{}([&](auto ikpack) {
@@ -1038,6 +1038,7 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         {
             static_assert(false, "Wrong TailNum");
         }
+#endif
         return c_warp_tensors;
     }
 };

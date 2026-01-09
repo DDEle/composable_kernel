@@ -838,9 +838,13 @@ struct buffer_view<address_space_enum::lds,
             // return bit_cast<X>(rtn);
             if constexpr(load_elts == 12 && sizeof(typename X::value_type) == 1)
             {
-                // auto a = p_data_ + i + linear_offset;
-                thread_buffer<uint8_t, 12> a;
-                return a;
+                int32x3_t rtn =
+                    *c_style_pointer_cast<const int32x3_t*>(&p_data_[i + linear_offset]);
+                struct
+                {
+                    int32_t x, y, z;
+                } tmp = {rtn.x, rtn.y, rtn.z};
+                return bit_cast<X>(tmp);
                 // return *c_style_pointer_cast<X*>(a);
             }
             else

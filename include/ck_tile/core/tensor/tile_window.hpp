@@ -368,6 +368,7 @@ struct tile_window_with_static_distribution
                         tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys) /
                         Traits::PackedSize;
 
+                    // CK_PRINTT<int(j), int(d)>();
                     dst_tensor.get_thread_buffer().template at<d>() =
                         vec_value
                             .template get_as<typename Base::DataType>()[j / Traits::PackedSize];

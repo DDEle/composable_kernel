@@ -407,7 +407,8 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                                                       smem_ptr_ping,
                                                       smem_ptr_pong);
 
-        // Run Epilogue Pipeline with split_k dispatch
+// Run Epilogue Pipeline with split_k dispatch
+#if 1
         if constexpr(DoEpiScale)
         {
             if(kargs.k_batch == 1)
@@ -448,6 +449,7 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
                 EpiloguePipeline{}(e_block_window, c_block_tile, ds_block_window, smem_ptr_ping);
             }
         }
+#endif
     }
 
     template <class ScaleM, class ScaleN>
