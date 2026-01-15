@@ -59,7 +59,7 @@ struct CShuffleEpilogueProblem
     static constexpr memory_operation_enum MemoryOperation = MemoryOperation_;
     static constexpr bool FixedVectorSize                  = FixedVectorSize_;
     static constexpr index_t VectorSizeC                   = VectorSizeC_;
-    static constexpr index_t BlockedXDLN_PerWarp           = BlockedXDLN_PerWarp_;
+    static constexpr index_t BlockedXDLN_PerWarp           = kNPerBlock / NWave / NPerXdl;
     static constexpr bool DoubleSmemBuffer                 = DoubleSmemBuffer_;
     static constexpr bool TiledMMAPermuteN                 = TiledMMAPermuteN_;
     static constexpr index_t kNumWaveGroups                = kNumWaveGroups_;
@@ -341,7 +341,7 @@ struct CShuffleEpilogue
                     sequence<>,
                     tuple<sequence<NumMXdlPerWavePerShuffle, MWave>,
                           sequence<RakedXDLN_PerWarp, NWave, BlockedXDLN_PerWarp>>,
-                    tuple<sequence<1, 2>>,
+                    tuple<sequence<2, 1>>,
                     tuple<sequence<1, 1>>,
                     sequence<1, 2, 2>,
                     sequence<0, 0, 2>>{};

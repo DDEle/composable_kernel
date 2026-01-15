@@ -196,10 +196,10 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                                             sequence<KWarp, KIterPerWarp>>;
 
         constexpr auto a_block_outer_dstr_encoding =
-            tile_distribution_encoding<sequence<NWarp>,
+            tile_distribution_encoding<sequence<2, NWarp / 2>,
                                        tuple<sequence<MIterPerWarp, MWarp>, KIterSeq>,
-                                       tuple<sequence<2, 1, 0>>,
-                                       tuple<sequence<0, 1, 0>>,
+                                       tuple<sequence<0, 2, 1, 0>>,
+                                       tuple<sequence<0, 0, 1, 1>>,
                                        sequence<1, 2>,
                                        sequence<0, 1>>{};
         constexpr auto a_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
@@ -222,9 +222,9 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
 
         constexpr auto b_block_outer_dstr_encoding =
             tile_distribution_encoding<sequence<MWarp>,
-                                       tuple<sequence<NIterPerWarp, NWarp>, KIterSeq>,
-                                       tuple<sequence<2, 0, 1>>,
-                                       tuple<sequence<0, 0, 1>>,
+                                       tuple<sequence<2, NIterPerWarp, NWarp / 2>, KIterSeq>,
+                                       tuple<sequence<2, 1, 0, 1>>,
+                                       tuple<sequence<0, 0, 0, 2>>,
                                        sequence</*1, 2*/>,
                                        sequence</*0, 1*/>>{};
 
@@ -238,11 +238,11 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     {
         constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
             sequence<KWarp>,
-            tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
-            tuple<sequence<0, 1, 2>>,
-            tuple<sequence<0, 1, 1>>,
+            tuple<sequence<MIterPerWarp, MWarp>, sequence<2, NIterPerWarp, NWarp / 2>>,
+            tuple<sequence<2, 0, 1, 2>>,
+            tuple<sequence<0, 0, 1, 2>>,
             sequence<1, 2>,
-            sequence<0, 0>>{};
+            sequence<0, 1>>{};
         constexpr auto c_block_dstr_encoding = detail::make_embed_tile_distribution_encoding(
             c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
         return c_block_dstr_encoding;

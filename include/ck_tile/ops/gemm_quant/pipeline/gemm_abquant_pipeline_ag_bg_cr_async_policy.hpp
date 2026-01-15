@@ -49,11 +49,12 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static constexpr index_t MIterPerWarp = MWarpTiles / MWarps;
     static constexpr index_t NIterPerWarp = NWarpTiles / NWarps;
     static constexpr index_t KPerWarp     = KPerBlock / KWarps;
-    static_assert(KWarps == 2, "KWarps == 2 for ping-pong!");
+    static constexpr index_t NPerWarp     = NPerBlock / NWarps;
+    static_assert(NWarps == 2, "KWarps == 2 for ping-pong!");
     static_assert(KWarpTiles == KWarps, "Wrong!");
 
     static constexpr index_t KPerWarpAQ  = KPerWarp / Problem::AQuantGroupSize::kK;
-    static constexpr index_t NPerBlockBQ = NPerBlock / Problem::BQuantGroupSize::kN;
+    static constexpr index_t NPerWarpBQ  = NPerWarp / Problem::BQuantGroupSize::kN;
     static constexpr index_t KPerWarpkBQ = KPerWarp / Problem::BQuantGroupSize::kK;
     static_assert(Problem::AQuantGroupSize::kM == 1 && Problem::AQuantGroupSize::kK == WarpTileK);
 
@@ -88,152 +89,30 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     }();
 
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeAQ() { return 1; }
-    CK_TILE_HOST_DEVICE static constexpr auto MakeAQDramTileDistribution()
-    {
-        constexpr index_t M3 = 4;
-        constexpr index_t M0 = MWarpTiles;
-        constexpr index_t M2 = warp_size / M3 / M0;
-        constexpr index_t M1 = MPerBlock / M0 / M3 / M2;
-
-        static_assert(M0 * M1 * M2 * M3 == MPerBlock, "wrong!");
-
-        constexpr index_t R = BlockSize / KWarps / warp_size / M1;
-        static_assert(BlockSize == KWarps * warp_size * M1 * R, "wrong!");
-
-        return make_static_tile_distribution(
-            ck_tile::tile_distribution_encoding<
-                ck_tile::sequence<R>,
-                ck_tile::tuple<ck_tile::sequence<M0, M1, M2, M3>,
-                               ck_tile::sequence<KWarps, KWarpTiles / KWarps>>,
-                ck_tile::tuple<ck_tile::sequence<2, 0, 1>, ck_tile::sequence<1, 1, 1>>,
-                ck_tile::tuple<ck_tile::sequence<0, 0, 1>, ck_tile::sequence<2, 0, 3>>,
-                ck_tile::sequence<2>,
-                ck_tile::sequence<1>>{});
-    }
-    template <typename WindowTmp>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeQAsyncLoadDramWindow(const WindowTmp& window_tmp)
-    {
-        constexpr auto ndims = std::decay_t<decltype(window_tmp)>::get_num_of_dimension();
-        static_assert(ndims == 2, "only support 2D tensor");
-        auto&& tensor_view_tmp = window_tmp.get_bottom_tensor_view();
-        const auto [mn, qk]    = tensor_view_tmp.get_tensor_descriptor().get_lengths();
-        const auto [stride_mn, stride_qk] =
-            tensor_view_tmp.get_tensor_descriptor().get_transforms()[I0].coefficients_;
-        const auto desc_0 = make_naive_tensor_descriptor( //
-            make_tuple(mn, qk / KWarps, number<KWarps>{}),
-            make_tuple(stride_mn, KWarps * stride_qk, stride_qk),
-            number<KWarps>{},
-            number<1>{});
-        const auto desc   = transform_tensor_descriptor( //
-            desc_0,
-            make_tuple(
-                make_pass_through_transform(mn),
-                make_merge_transform_v3_division_mod(make_tuple(qk / KWarps, number<KWarps>{}))),
-            make_tuple(sequence<0>{}, sequence<1, 2>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-        return make_tile_window(make_tensor_view<address_space_enum::global>(
-                                    &tensor_view_tmp.get_buffer_view()(0), desc),
-                                window_tmp.get_window_lengths(),
-                                window_tmp.get_window_origin());
-    }
-    CK_TILE_HOST_DEVICE static constexpr auto MakeAQLdsBlockDescriptor()
-    {
-        constexpr index_t M2 = 4;
-        constexpr index_t M1 = WarpTileM / M2;
-        constexpr index_t M0 = MWarpTiles;
-        static_assert(M0 * M1 * M2 == MPerBlock, "wrong!");
-
-        constexpr auto desc_0 =
-            make_naive_tensor_descriptor_packed(number_tuple<KWarps, M1, M0, M2>{});
-
-        constexpr auto desc_1 = transform_tensor_descriptor( //
-            desc_0,
-            make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2>{}),
-                       make_pass_through_transform(number<KWarps>{})),
-            make_tuple(sequence<2, 1, 3>{}, sequence<0>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-        return desc_1;
-    }
-
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeBQ() { return 1; }
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBQDramTileDistribution()
-    {
-        return make_static_tile_distribution(
-            ck_tile::tile_distribution_encoding<
-                ck_tile::sequence<warp_num / KWarps, warp_size / NPerBlockBQ>,
-                ck_tile::tuple<ck_tile::sequence<NPerBlockBQ>,
-                               ck_tile::sequence<KWarps, KWarpTiles / KWarps>>,
-                ck_tile::tuple<ck_tile::sequence<2, 0>, ck_tile::sequence<1, 0>>,
-                ck_tile::tuple<ck_tile::sequence<0, 0>, ck_tile::sequence<0, 1>>,
-                ck_tile::sequence<2>,
-                ck_tile::sequence<1>>{});
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBQLdsBlockDescriptor()
-    {
-        constexpr auto desc_0 = make_naive_tensor_descriptor( //
-            number_tuple<KWarps, NPerBlockBQ>{},
-            number_tuple<max(warp_size, NPerBlockBQ), 1>{},
-            number<NPerBlockBQ>{},
-            number<1>{});
-        constexpr auto desc_1 = transform_tensor_descriptor(
-            desc_0,
-            make_tuple(make_pass_through_transform(number<NPerBlockBQ>{}),
-                       make_pass_through_transform(number<KWarps>{})),
-            make_tuple(sequence<1>{}, sequence<0>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-        return desc_1;
-    }
-
-#if 0
     CK_TILE_HOST_DEVICE static constexpr auto MakeAQBlockDistribution()
     {
         return make_static_tile_distribution(
             tile_distribution_encoding<                          //
                 sequence<NWarps, warp_size / WarpTileM>,         // ?, 4
                 tuple<sequence<MIterPerWarp, MWarps, WarpTileM>, // ?,?,16
-                      sequence<KWarps, KPerWarpAQ>>,             // 2, 1
-                tuple<sequence<2, 1, 0>, sequence<0, 1>>,
-                tuple<sequence<0, 1, 0>, sequence<1, 2>>,
+                      sequence<KWarps, KPerWarpAQ>>,             // 1, 1
+                tuple<sequence<2, 0, 1>, sequence<0, 1>>,
+                tuple<sequence<0, 0, 1>, sequence<1, 2>>,
                 sequence<1, 2>,
                 sequence<0, 1>>{});
     }
     CK_TILE_HOST_DEVICE static constexpr auto MakeBQBlockDistribution()
     {
         return make_static_tile_distribution(
-            tile_distribution_encoding<                                      //
-                sequence<MWarps, NWarps, warp_size>,                         // ?,?,64
-                tuple<sequence<NPerBlockBQ>, sequence<KWarps, KPerWarpkBQ>>, // 1 2,1
-                tuple<sequence<2, 0, 0>, sequence<0>>,
-                tuple<sequence<0, 0, 1>, sequence<2>>,
+            tile_distribution_encoding<                                             //
+                sequence<MWarps, warp_size>,                                        // 4,64
+                tuple<sequence<NWarps, NPerWarpBQ>, sequence<KWarps, KPerWarpkBQ>>, // 2,1 1,1
+                tuple<sequence<2, 1, 0>, sequence<0>>,
+                tuple<sequence<0, 0, 0>, sequence<1>>,
                 sequence<1, 2>,
                 sequence<0, 1>>{});
     }
-#else
-    CK_TILE_HOST_DEVICE static constexpr auto MakeAQBlockDistribution()
-    {
-        return make_static_tile_distribution(
-            tile_distribution_encoding<                          //
-                sequence<NWarps, warp_size / WarpTileM>,         // ?, 4
-                tuple<sequence<MIterPerWarp, MWarps, WarpTileM>, // ?,?,16
-                      sequence<KWarps, KPerWarpAQ>>,             // 2, 1
-                tuple<sequence<2, 1, 0>, sequence<0, 1>>,
-                tuple<sequence<0, 1, 0>, sequence<1, 2>>,
-                sequence<1, 2>,
-                sequence<0, 1>>{});
-    }
-    CK_TILE_HOST_DEVICE static constexpr auto MakeBQBlockDistribution()
-    {
-        return make_static_tile_distribution(
-            tile_distribution_encoding<                                      //
-                sequence<MWarps, NWarps, warp_size>,                         // ?,?,64
-                tuple<sequence<NPerBlockBQ>, sequence<KWarps, KPerWarpkBQ>>, // 1 2,1
-                tuple<sequence<2, 0, 0>, sequence<0>>,
-                tuple<sequence<0, 0, 1>, sequence<2>>,
-                sequence<1, 2>,
-                sequence<0, 1>>{});
-    }
-#endif
 
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
@@ -260,31 +139,39 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         return ABQuantBlockUniversalGemmAsBsCr<Problem, BlockGemmPolicy>{};
     }
 
-    template <index_t MNPerBlock>
-    CK_TILE_DEVICE static constexpr auto MakeABDramTileDistribution_()
+    CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
     {
-        constexpr index_t M2 = warp_size / K1;
-        constexpr index_t M1 = BlockSize / warp_size / KWarps;
-        constexpr index_t M0 = MNPerBlock / M1 / M2;
-        static_assert(M0 * M1 * M2 == MNPerBlock, "wrong!");
+        constexpr index_t M2 = warp_size / K1; // 8
+        constexpr index_t M1 = warp_num;       // 8
+        constexpr index_t M0 = MPerBlock / M1 / M2;
+        static_assert(M0 * M1 * M2 == MPerBlock, "wrong!");
 
         return make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<>,
-                ck_tile::tuple<ck_tile::sequence<M0, M1, M2>,
-                               ck_tile::sequence<KWarps, K0, K1, K2>>,
-                ck_tile::tuple<ck_tile::sequence<2, 1>, ck_tile::sequence<1, 2>>, // KWarps,M1 M2,K1
-                ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<2, 2>>,
+                ck_tile::tuple<ck_tile::sequence<M0, M1, M2>,                  // [123] 8 8
+                               ck_tile::sequence<K0, K1, K2>>,                 // 1 8 16
+                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>, // M0 M2,K1
+                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 1>>,
                 ck_tile::sequence<1, 2, 2>, // M0,K0,K2
-                ck_tile::sequence<0, 1, 3>>{});
-    }
-    CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
-    {
-        return MakeABDramTileDistribution_<MPerBlock>();
+                ck_tile::sequence<0, 0, 2>>{});
     }
     CK_TILE_DEVICE static constexpr auto MakeBDramTileDistribution()
     {
-        return MakeABDramTileDistribution_<NPerBlock>();
+        constexpr index_t N2 = warp_size / K1;               // 8
+        constexpr index_t N1 = warp_num / NWarps;            // 4
+        constexpr index_t N0 = NPerBlock / N1 / N2 / NWarps; // 4
+        static_assert(NWarps * N0 * N1 * N2 == NPerBlock, "wrong!");
+
+        return make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<NWarps, N0, N1, N2>,             // 2 [4] 4 8
+                               ck_tile::sequence<K0, K1, K2>>,                    // 1 8 16
+                ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<1, 2>>, // KWarps,N1 N2,K1
+                ck_tile::tuple<ck_tile::sequence<0, 2>, ck_tile::sequence<3, 1>>,
+                ck_tile::sequence<1, 2, 2>, // N0,K0,K2
+                ck_tile::sequence<1, 0, 2>>{});
     }
 
     template <typename WindowTmp>
@@ -298,7 +185,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         const index_t k_tiles = cols / (KWarps * K1 * K2);
         const auto col_lens   = make_tuple(k_tiles, number<KWarps>{}, number<K1>{}, number<K2>{});
 
-        constexpr index_t M1 = warp_size / static_cast<index_t>(WGAccessDouble) / K1;
+        constexpr index_t M1 = warp_size / static_cast<index_t>(WGAccessDouble) / K1; // 4
         const index_t M0     = integer_divide_ceil(rows, M1);
         const auto row_lens  = make_tuple(M0, number<M1>{});
 
@@ -333,13 +220,13 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     template <index_t MNPerBlock>
     CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_()
     {
-        constexpr index_t M4 = warp_size / static_cast<index_t>(WGAccessDouble) / K1;
-        constexpr index_t M3 = (warp_size / K1) / M4;
-        constexpr index_t M2 = static_cast<index_t>(WGAccessDouble);
-        constexpr index_t M1 = MWarps / M2;
-        constexpr index_t M0 = MPerBlock / M1 / M2 / M3 / M4;
+        constexpr index_t M4 = warp_size / static_cast<index_t>(WGAccessDouble) / K1; // 4
+        constexpr index_t M3 = static_cast<index_t>(WGAccessDouble);                  // 2
+        constexpr index_t M2 = WarpTileM / M4 / M3;                                   // 2
+        constexpr index_t M1 = (warp_num / NWarps) / M2;
+        constexpr index_t M0 = MNPerBlock / M1 / M2 / M3 / M4;
 
-        static_assert(M1 * M0 * M2 * M3 * M4 == MPerBlock, "wrong!");
+        static_assert(M1 * M0 * M2 * M3 * M4 == MNPerBlock, "wrong!");
 
         constexpr index_t PadSize = 16;
 
@@ -391,51 +278,6 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         return MakeABLdsBlockDescriptor_<NPerBlock>();
     }
 
-    CK_TILE_DEVICE static constexpr auto MakeCHalfBlockDistribution()
-    {
-        constexpr auto outer_encoding = tile_distribution_encoding<
-            sequence<>,
-            tuple<sequence<MIterPerWarp, MWarps>, sequence<NIterPerWarp / KWarps, KWarps, NWarps>>,
-            tuple<sequence<2, 1, 2>>,
-            tuple<sequence<1, 1, 2>>,
-            sequence<1, 2>,
-            sequence<0, 0>>{};
-        return make_static_tile_distribution(detail::make_embed_tile_distribution_encoding(
-            outer_encoding, typename decltype(GetBlockGemm())::WarpGemm::CWarpDstrEncoding{}));
-    }
-    template <typename SwapWarpGroup>
-    CK_TILE_DEVICE static constexpr auto MakeCLdsBlockDescriptor(SwapWarpGroup)
-    {
-        constexpr index_t M2 = WarpTileM;                   // 16
-        constexpr index_t M1 = MWarps;                      // 4
-        constexpr index_t M0 = MIterPerWarp;                // 2
-        constexpr index_t N3 = get_warp_size() / WarpTileM; // 4
-        constexpr index_t N2 = WarpTileN / N3;              // 4
-        constexpr index_t N1 = KWarps;                      // 2
-        constexpr index_t N0 = NWarpTiles / KWarps;         // 4
-
-        constexpr auto desc_0 =
-            make_naive_tensor_descriptor_packed(number_tuple<N1, M0, M1, N0, N2, M2, N3>{});
-        constexpr auto desc_1 = transform_tensor_descriptor(
-            desc_0,
-            make_tuple(warp_groups_transform<SwapWarpGroup::value>,
-                       make_pass_through_transform(number<M0>{}),
-                       make_pass_through_transform(number<M1>{}),
-                       make_pass_through_transform(number<N0>{}),
-                       make_pass_through_transform(number<N2>{}),
-                       make_pass_through_transform(number<M2>{}),
-                       make_pass_through_transform(number<N3>{})),
-            generate_tuple([](auto i) { return sequence<i>{}; }, number<7>{}),
-            generate_tuple([](auto i) { return sequence<i>{}; }, number<7>{}));
-
-        return transform_tensor_descriptor( //
-            desc_1,
-            make_tuple(make_merge_transform_v3_division_mod(number_tuple<M0, M1, M2>{}),
-                       make_merge_transform_v3_division_mod(number_tuple<N0, N1, N2, N3>{})),
-            make_tuple(sequence<1, 2, 5>{}, sequence<3, 0, 4, 6>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-    }
-
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
         constexpr index_t desc_size = MakeALdsBlockDescriptor().get_element_space_size();
@@ -446,33 +288,15 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
         constexpr index_t desc_size = MakeBLdsBlockDescriptor().get_element_space_size();
         return integer_least_multiple(sizeof(typename Problem::BDataType) * desc_size, 16);
     }
-    CK_TILE_DEVICE static constexpr index_t GetSmemSizeAQ()
-    {
-        constexpr index_t desc_size = MakeAQLdsBlockDescriptor().get_element_space_size();
-        return sizeof(float) * integer_least_multiple(desc_size, warp_size);
-    }
-    CK_TILE_DEVICE static constexpr index_t GetSmemSizeBQ()
-    {
-        constexpr index_t desc_size = MakeBQLdsBlockDescriptor().get_element_space_size();
-        return sizeof(float) * integer_least_multiple(desc_size, warp_size);
-    }
-    CK_TILE_DEVICE static constexpr index_t GetSmemSizeC()
-    {
-        constexpr index_t desc_size =
-            MakeCLdsBlockDescriptor(false_type{}).get_element_space_size();
-        return sizeof(float) * integer_least_multiple(desc_size, warp_size);
-    }
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
-        CK_PRINT<GetSmemSizeA(),
-                 GetSmemSizeB(),
-                 GetSmemSizeAQ(),
-                 GetSmemSizeBQ(),
-                 GetSmemSizeC()>();
+        // CK_PRINT<GetSmemSizeA(),
+        //          GetSmemSizeB(),
+        //          GetSmemSizeAQ(),
+        //          GetSmemSizeBQ()>();
 
-        return max(2 * (GetSmemSizeA() + GetSmemSizeB() + GetSmemSizeAQ() + GetSmemSizeBQ()),
-                   GetSmemSizeC());
+        return max(2 * (GetSmemSizeA() + GetSmemSizeB()));
     }
 
     CK_TILE_DEVICE static constexpr auto GetVectorSizeA() { return K2; }
@@ -494,12 +318,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     }
 
     FORWARD_METHOD_(GetVectorSizeAQ);
-    FORWARD_METHOD_(MakeAQDramTileDistribution);
-    FORWARD_METHOD_(MakeQAsyncLoadDramWindow);
-    FORWARD_METHOD_(MakeAQLdsBlockDescriptor);
     FORWARD_METHOD_(GetVectorSizeBQ);
-    FORWARD_METHOD_(MakeBQDramTileDistribution);
-    FORWARD_METHOD_(MakeBQLdsBlockDescriptor);
     FORWARD_METHOD_(MakeAQBlockDistribution);
     FORWARD_METHOD_(MakeBQBlockDistribution);
     FORWARD_METHOD_(GetBlockGemm);
@@ -508,13 +327,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     FORWARD_METHOD_(MakeAsyncLoadDramWindow);
     FORWARD_METHOD_(MakeALdsBlockDescriptor);
     FORWARD_METHOD_(MakeBLdsBlockDescriptor);
-    FORWARD_METHOD_(MakeCHalfBlockDistribution);
-    FORWARD_METHOD_(MakeCLdsBlockDescriptor);
     FORWARD_METHOD_(GetSmemSizeA);
     FORWARD_METHOD_(GetSmemSizeB);
-    FORWARD_METHOD_(GetSmemSizeAQ);
-    FORWARD_METHOD_(GetSmemSizeBQ);
-    FORWARD_METHOD_(GetSmemSizeC);
     FORWARD_METHOD_(GetSmemSize);
     FORWARD_METHOD_(GetVectorSizeA);
     FORWARD_METHOD_(GetVectorSizeB);

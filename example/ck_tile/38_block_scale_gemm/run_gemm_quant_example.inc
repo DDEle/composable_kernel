@@ -700,7 +700,7 @@ int run_gemm_example_with_layouts(const ck_tile::ArgParser& arg_parser,
             //     self(i) = ck_tile::type_convert<ADataType>(i[1] / 256 + 1.f);
             // });
             b_k_n.ForEach([&](auto& self, auto i) {
-                self(i) = ck_tile::type_convert<BDataType>(i[1] / 64 + 1.f);
+                self(i) = ck_tile::type_convert<BDataType>(i[1] / 128 + 1.f);
             });
             // aq_tensor_ptr->ForEach([&](auto& self, auto i) {
             //     self(i) = ck_tile::type_convert<AQDataType>(i[1] / 2 + 1.f);

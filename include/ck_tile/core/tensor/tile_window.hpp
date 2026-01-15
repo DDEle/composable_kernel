@@ -640,6 +640,7 @@ struct tile_window_with_static_distribution
                                                      lds_coord.get_offset() / Traits::PackedSize +
                                                      imm_overflow / Traits::PackedSize;
                 // print(lds_coord);
+                // static_assert(lds_ys_offset == 0);
                 // printf("tid %03d: smem off %d \n", get_thread_id(), lds_coord.get_offset() +
                 // lds_ys_offset);
 
