@@ -217,13 +217,13 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                                 window_tmp.get_window_origin());
     }
 
-    template <index_t MNPerBlock>
+    template <index_t MNPerBlock, index_t warp_groups_>
     CK_TILE_DEVICE static constexpr auto MakeABLdsBlockDescriptor_()
     {
         constexpr index_t M4 = warp_size / static_cast<index_t>(WGAccessDouble) / K1; // 4
         constexpr index_t M3 = static_cast<index_t>(WGAccessDouble);                  // 2
         constexpr index_t M2 = WarpTileM / M4 / M3;                                   // 2
-        constexpr index_t M1 = (warp_num / NWarps) / M2;
+        constexpr index_t M1 = (warp_num / warp_groups_) / M2;
         constexpr index_t M0 = MNPerBlock / M1 / M2 / M3 / M4;
 
         static_assert(M1 * M0 * M2 * M3 * M4 == MNPerBlock, "wrong!");
@@ -271,11 +271,11 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     }
     CK_TILE_DEVICE static constexpr auto MakeALdsBlockDescriptor()
     {
-        return MakeABLdsBlockDescriptor_<MPerBlock>();
+        return MakeABLdsBlockDescriptor_<MPerBlock, 1>();
     }
     CK_TILE_DEVICE static constexpr auto MakeBLdsBlockDescriptor()
     {
-        return MakeABLdsBlockDescriptor_<NPerBlock>();
+        return MakeABLdsBlockDescriptor_<NPerBlock, 2>();
     }
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()

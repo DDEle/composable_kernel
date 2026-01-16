@@ -33,7 +33,10 @@ struct BaseGemmPipelineAgBgCrCompV3
     CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
     {
         if(BlockHasHotloop(num_loop) || num_loop == 3)
-            return TailNumber::Odd;
+            if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+                return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
+            else
+                return TailNumber::Odd;
         else if(num_loop == 2)
             return TailNumber::Even;
         else
@@ -44,14 +47,15 @@ struct BaseGemmPipelineAgBgCrCompV3
     CK_TILE_HOST_DEVICE static auto
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
-        printf("has_hot_loop: %d, tail_number: %d\n", has_hot_loop, int(tail_number));
+        // printf("has_hot_loop: %d, tail_number: %d\n", has_hot_loop, int(tail_number));
         constexpr auto scenarios = []() {
             if constexpr(Problem::BlockGemmShape::NumWarps == 8)
                 return std::array{
-                    std::make_pair(false, TailNumber::One), // 1 loop
+                    // std::make_pair(false, TailNumber::One),  // 1 loop
                     // std::make_pair(false, TailNumber::Even), // 2 loop
                     // std::make_pair(false, TailNumber::Odd),  // 3
-                    // std::make_pair(true, TailNumber::Odd), // 4 / 5 / 6 / ... loops
+                    std::make_pair(true, TailNumber::Even), // 4 / 6 / 8 / ... loops
+                    // std::make_pair(true, TailNumber::Odd),   // 5 / 7 / 9 / ... loops
                 };
             else
                 return std::array{

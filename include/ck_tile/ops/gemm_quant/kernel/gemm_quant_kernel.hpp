@@ -1221,11 +1221,13 @@ struct QuantGemmKernel
                     a_block_window, b_block_window, num_loop, smem_ptr_0);
             }
         }();
-#if 1
 
         // Run Epilogue Pipeline
         auto& c_block_window = gemm_tile_windows.at(I4);
 
+#if 0
+        store_tile(c_block_window, c_block_tile);
+#else
         if constexpr(kQuantType == QuantType::ABQuantGrouped ||
                      kQuantType == QuantType::AQuantGrouped ||
                      kQuantType == QuantType::BQuantGrouped)

@@ -304,7 +304,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
             constexpr auto warp_size = get_warp_size();
 
             auto q_block_tensor = aq_block_tensor;
-            if constexpr(Traits::NQPerBlock == 1)
+            if constexpr(Traits::NQPerBlock / NWarp == 1)
             {
                 constexpr auto aq_spans = AQBlockTensor::get_distributed_spans();
                 // CK_PRINT<decltype(aq_spans)>();
@@ -344,7 +344,7 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                         }
                     });
 
-                    if constexpr(Traits::NQPerBlock == 1)
+                    if constexpr(Traits::NQPerBlock / NWarp == 1)
                     {
                         constexpr auto cw_spans = CWarpTensor::get_distributed_spans();
                         static_assert(cw_spans[I0{}].impl_.size() == 0);
