@@ -12,7 +12,8 @@ using GemmConfig = GemmConfigABQuantPrefill<T>;
 #endif
 
 static auto _ = []() {
-    auto& lut                               = get_kernel_lut();
+    auto& lut = get_kernel_lut();
+#if 0
     lut[hash_multiple_strings({"fp8",
                                "abquant",
                                "non-preshuffleb",
@@ -88,6 +89,7 @@ static auto _ = []() {
                                           BQuantGroupSize,
                                           ck_tile::QuantType::ABQuantGrouped>(arg_parser);
     };
+#endif
     lut[hash_multiple_strings({"fp8",
                                "abquant",
                                "preshuffleb",
@@ -103,6 +105,7 @@ static auto _ = []() {
                                           BQuantGroupSize,
                                           ck_tile::QuantType::ABQuantGrouped>(arg_parser);
     };
+#if 0
     lut[hash_multiple_strings({"bf8",
                                "abquant",
                                "preshuffleb",
@@ -133,5 +136,6 @@ static auto _ = []() {
                                           BQuantGroupSize,
                                           ck_tile::QuantType::ABQuantGrouped>(arg_parser);
     };
+#endif
     return 0;
 }();
