@@ -48,15 +48,15 @@ struct BaseGemmPipelineAgBgCrCompV3
     {
         constexpr auto scenarios = []() {
             if constexpr(Problem::BlockGemmShape::NumWarps == 8)
-                return std::array<std::pair<bool, ck_tile::TailNumber>, 5>{
-                    std::make_pair(false, TailNumber::One),  // 1 loop
-                    std::make_pair(false, TailNumber::Even), // 2 loop
-                    std::make_pair(false, TailNumber::Odd),  // 3
-                    std::make_pair(true, TailNumber::Even),  // 4 / 6 / 8 / ... loops
-                    std::make_pair(true, TailNumber::Odd),   // 5 / 7 / 9 / ... loops
+                return std::array{
+                    // std::make_pair(false, TailNumber::One),  // 1 loop
+                    // std::make_pair(false, TailNumber::Even), // 2 loop
+                    // std::make_pair(false, TailNumber::Odd),  // 3
+                    std::make_pair(true, TailNumber::Even), // 4 / 6 / 8 / ... loops
+                    // std::make_pair(true, TailNumber::Odd),   // 5 / 7 / 9 / ... loops
                 };
             else
-                return std::array<std::pair<bool, ck_tile::TailNumber>, 3>{
+                return std::array{
                     std::make_pair(true, TailNumber::Odd),
                     std::make_pair(false, TailNumber::Odd),
                     std::make_pair(false, TailNumber::Even),

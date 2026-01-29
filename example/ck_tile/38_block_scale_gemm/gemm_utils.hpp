@@ -286,6 +286,13 @@ struct GemmConfigEightWarps : public GemmConfigABQuantPrefill<PrecType>
 };
 
 template <typename PrecType>
+struct GemmConfigPreshuffleBEightWarps : public GemmConfigEightWarps<PrecType>
+{
+    static constexpr bool PreshuffleB      = true;
+    static constexpr bool DoubleSmemBuffer = true;
+};
+
+template <typename PrecType>
 struct GemmConfigPreshuffleBQuantPrefill : public GemmConfigQuantPrefill<PrecType>
 {
     static constexpr bool PreshuffleQuant = true;

@@ -51,35 +51,11 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
     std::string a_layout  = arg_parser.get_str("a_layout");
     std::string b_layout  = arg_parser.get_str("b_layout");
 
-    if(data_type == "fp16")
-    {
-        return run_gemm_example_prec_type<GemmConfig<ck_tile::half_t>, ck_tile::half_t>(
-            a_layout, b_layout, arg_parser);
-    }
-    else if(data_type == "bf16")
-    {
-        return run_gemm_example_prec_type<GemmConfig<ck_tile::half_t>, ck_tile::bf16_t>(
-            a_layout, b_layout, arg_parser);
-    }
-    else if(data_type == "fp8")
+    if(data_type == "fp8")
     {
         return run_gemm_example_prec_type<GemmConfig<ck_tile::fp8_t>,
                                           ck_tile::fp8_t,
                                           ck_tile::fp8_t,
-                                          ck_tile::half_t>(a_layout, b_layout, arg_parser);
-    }
-    else if(data_type == "bf8")
-    {
-        return run_gemm_example_prec_type<GemmConfig<ck_tile::bf8_t>,
-                                          ck_tile::bf8_t,
-                                          ck_tile::bf8_t,
-                                          ck_tile::half_t>(a_layout, b_layout, arg_parser);
-    }
-    else if(data_type == "int4")
-    {
-        return run_gemm_example_prec_type<GemmConfig<ck_tile::fp8_t>,
-                                          ck_tile::fp8_t,
-                                          ck_tile::pk_int4_t,
                                           ck_tile::half_t>(a_layout, b_layout, arg_parser);
     }
     else
