@@ -220,12 +220,18 @@ CK_TILE_HOST void reference_gemm_abquant(const HostTensor<ADataType>& a_m_k,
             const std::size_t k_end = std::min<std::size_t>(k_begin + kGroupK, K);
 
             AccDataType v_block_acc = 0;
+            if(m < 2 && n < 2)
+                printf("k_begin %zu k_end %zu \n", k_begin, k_end);
 
             // unscaled accumulation within this K-group
             for(std::size_t k = k_begin; k < k_end; ++k)
             {
                 const AccDataType v_a = load_a(k);
                 const AccDataType v_b = load_b(k);
+
+                if(m < 2 && n < 2 && k < 4)
+                    printf("k %zu v_a %f v_b %f \n", k, v_a, v_b);
+
                 v_block_acc += v_a * v_b;
             }
 
@@ -234,6 +240,12 @@ CK_TILE_HOST void reference_gemm_abquant(const HostTensor<ADataType>& a_m_k,
             const float scale_b            = load_scale_b(k_group);
 
             v_acc += v_block_acc * scale_a * scale_b;
+            if(m < 2 && n < 2)
+                printf("v_acc %f v_block_acc %f scale_a %f scale_b %f \n",
+                       v_acc,
+                       v_block_acc,
+                       scale_a,
+                       scale_b);
         }
 
         c_m_n(m, n) = ck_tile::type_convert<CDataType>(acc_element_op(v_acc));

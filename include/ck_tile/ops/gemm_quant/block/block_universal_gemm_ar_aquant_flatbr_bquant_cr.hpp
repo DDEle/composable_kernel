@@ -259,6 +259,7 @@ struct BlockGemmWeightPreshuffleABQuantARegBRegCReg
                     }
                 });
             });
+            CK_PRINTF<>{}(c_acc(I0)(I0));
             static_for_product<number<MIterPerWarp>, number<NIterPerWarp>>{}([&](auto mIter,
                                                                                  auto nIter) {
                 if constexpr(SimpleDequant)
@@ -282,6 +283,7 @@ struct BlockGemmWeightPreshuffleABQuantARegBRegCReg
                 {
                     AQPickerCommon<AQBlockTensor, Traits, mIter, kQScale> aq_picker(
                         aq_block_tensor);
+                    // TODO
                     constexpr auto tbuf_offset =
                         number<typename CBlockTensor::ThreadTensorDesc{}.calculate_offset(
                                    merge_sequences(sequence<mIter, nIter>{},
